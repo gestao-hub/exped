@@ -64,29 +64,31 @@ export default async function UsuariosPage() {
           <p className="p-6 text-sm text-destructive">{error.message}</p>
         ) : (
           <div className="flex-1 overflow-y-auto min-h-0">
-          <Table>
+          <Table className="table-fixed w-full">
             <TableHeader className="sticky top-0 z-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="pl-5">Nome</TableHead>
-                <TableHead>E-mail</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead className="pr-5">Criado em</TableHead>
+                <TableHead className="w-[32%] min-w-0 pl-5">Nome</TableHead>
+                <TableHead className="w-[34%] min-w-0">E-mail</TableHead>
+                <TableHead className="w-40">Role</TableHead>
+                <TableHead className="w-36 pr-5">Criado em</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {list.map((p) => (
                 <TableRow key={p.id} className="hover:bg-franzoni-orange/5">
-                  <TableCell className="pl-5">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-8 w-8 bg-franzoni-orange/15 ring-1 ring-franzoni-orange/25">
+                  <TableCell className="pl-5 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Avatar className="h-8 w-8 bg-franzoni-orange/15 ring-1 ring-franzoni-orange/25 shrink-0">
                         <AvatarFallback className="bg-transparent text-xs font-semibold text-franzoni-orange-700">
                           {initials(p.full_name || p.email)}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="font-medium">{p.full_name || '—'}</span>
+                      <span className="font-medium truncate" title={p.full_name || ''}>
+                        {p.full_name || '—'}
+                      </span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs">
+                  <TableCell className="text-muted-foreground font-mono text-xs truncate" title={p.email}>
                     {p.email}
                   </TableCell>
                   <TableCell>

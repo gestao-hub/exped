@@ -176,19 +176,19 @@ export function PedidosList({
         <div
           className={cn(bounded ? 'flex-1 overflow-y-auto min-h-0' : '')}
         >
-        <Table>
+        <Table className="table-fixed w-full">
           <TableHeader
             className={cn(
               bounded && 'sticky top-0 z-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md',
             )}
           >
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-24 pl-5">Mapa</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Bairro</TableHead>
-              <TableHead>Entrega</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right pr-5">Valor</TableHead>
+              <TableHead className="w-20 pl-5">Mapa</TableHead>
+              <TableHead className="w-[28%] min-w-0">Cliente</TableHead>
+              <TableHead className="w-[18%] min-w-0">Bairro</TableHead>
+              <TableHead className="w-28">Entrega</TableHead>
+              <TableHead className="w-32">Status</TableHead>
+              <TableHead className="w-32 text-right pr-5">Valor</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -228,10 +228,15 @@ export function PedidosList({
                     <TableCell className="font-mono text-xs text-muted-foreground pl-5">
                       #{p.numero_mapa}
                     </TableCell>
-                    <TableCell className="font-medium text-foreground">{p.cliente_nome}</TableCell>
-                    <TableCell>
+                    <TableCell className="font-medium text-foreground truncate" title={p.cliente_nome}>
+                      {p.cliente_nome}
+                    </TableCell>
+                    <TableCell className="min-w-0">
                       {p.cliente_bairro ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-franzoni-navy/8 text-franzoni-navy dark:text-franzoni-navy-100 text-xs font-medium">
+                        <span
+                          className="inline-block max-w-full truncate align-middle px-2 py-0.5 rounded-md bg-franzoni-navy/8 text-franzoni-navy dark:text-franzoni-navy-100 text-xs font-medium"
+                          title={p.cliente_bairro}
+                        >
                           {p.cliente_bairro}
                         </span>
                       ) : (
