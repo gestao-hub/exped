@@ -46,11 +46,14 @@ export function PedidosList({
   initialStatus,
   hideStatusFilter,
   showNewButton = true,
+  bounded = false,
 }: {
   mode?: Mode;
   initialStatus?: PedidoStatus | 'todos';
   hideStatusFilter?: boolean;
   showNewButton?: boolean;
+  /** Quando true, o container ocupa h-full e a tabela tem scroll interno com header sticky. */
+  bounded?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -119,9 +122,9 @@ export function PedidosList({
   }, [supabase, mode]);
 
   return (
-    <div className="space-y-4">
+    <div className={cn('space-y-3', bounded && 'flex flex-col flex-1 min-h-0')}>
       {/* Filtros */}
-      <ContentCard className="p-4!" variant="padded">
+      <ContentCard className="p-3!" variant="padded">
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -161,9 +164,19 @@ export function PedidosList({
       </ContentCard>
 
       {/* Tabela */}
-      <ContentCard variant="flush">
+      <ContentCard
+        variant="flush"
+        className={cn(bounded && 'flex flex-col flex-1 min-h-0')}
+      >
+        <div
+          className={cn(bounded ? 'flex-1 overflow-y-auto min-h-0' : '')}
+        >
         <Table>
-          <TableHeader>
+          <TableHeader
+            className={cn(
+              bounded && 'sticky top-0 z-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md',
+            )}
+          >
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-24 pl-5">Mapa</TableHead>
               <TableHead>Cliente</TableHead>
@@ -240,6 +253,7 @@ export function PedidosList({
             )}
           </TableBody>
         </Table>
+        </div>
       </ContentCard>
     </div>
   );

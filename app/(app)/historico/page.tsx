@@ -29,29 +29,29 @@ export default async function HistoricoPage() {
   ).size;
 
   return (
-    <>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader title="Histórico" description="Pedidos finalizados e indicadores acumulados." />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-3 shrink-0">
         <Kpi
-          icon={<CheckCircle2 className="h-5 w-5 text-status-finalizado" />}
+          icon={<CheckCircle2 className="h-4 w-4 text-status-finalizado" />}
           label="Pedidos finalizados"
           value={total ?? 0}
         />
         <Kpi
-          icon={<DollarSign className="h-5 w-5 text-franzoni-orange" />}
+          icon={<DollarSign className="h-4 w-4 text-franzoni-orange" />}
           label="Valor faturado"
           value={valorTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         />
         <Kpi
-          icon={<UsersRound className="h-5 w-5 text-franzoni-navy" />}
+          icon={<UsersRound className="h-4 w-4 text-franzoni-navy" />}
           label="Clientes únicos"
           value={clientesUnicos}
         />
       </div>
 
-      <PedidosList mode="historico" initialStatus="finalizado" showNewButton={false} />
-    </>
+      <PedidosList mode="historico" initialStatus="finalizado" showNewButton={false} bounded />
+    </div>
   );
 }
 
@@ -65,16 +65,16 @@ function Kpi({
   value: string | number;
 }) {
   return (
-    <ContentCard className="p-5!">
-      <div className="flex items-start gap-3">
-        <div className="h-10 w-10 rounded-lg bg-franzoni-orange/10 flex items-center justify-center shrink-0">
+    <ContentCard className="p-3!">
+      <div className="flex items-center gap-2.5">
+        <div className="h-8 w-8 rounded-md bg-franzoni-orange/10 flex items-center justify-center shrink-0">
           {icon}
         </div>
         <div className="min-w-0">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium leading-tight">
             {label}
           </p>
-          <p className="text-2xl font-heading font-bold text-franzoni-navy dark:text-white mt-0.5">
+          <p className="text-lg font-heading font-bold text-franzoni-navy dark:text-white leading-tight mt-0.5 truncate">
             {value}
           </p>
         </div>
