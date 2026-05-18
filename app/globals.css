@@ -4,6 +4,31 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ------------------------------------------------------------
+ * Identidade Franzoni Casa & Construção
+ * ------------------------------------------------------------ */
+@theme {
+  --color-franzoni-orange-50:  #FEF3EC;
+  --color-franzoni-orange-100: #FCE1CC;
+  --color-franzoni-orange-500: #F37021;
+  --color-franzoni-orange-600: #D85A0F;
+  --color-franzoni-orange-700: #B14709;
+  --color-franzoni-orange:     #F37021;
+
+  --color-franzoni-navy-50:    #E8EAF2;
+  --color-franzoni-navy-100:   #C5CADE;
+  --color-franzoni-navy-500:   #1E2761;
+  --color-franzoni-navy-600:   #181F4E;
+  --color-franzoni-navy-700:   #11163A;
+  --color-franzoni-navy:       #1E2761;
+
+  --color-status-rascunho:     #6B7280;
+  --color-status-pendente:     #F59E0B;
+  --color-status-separacao:    #3B82F6;
+  --color-status-finalizado:   #10B981;
+  --color-status-cancelado:    #EF4444;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -128,3 +153,28 @@
     @apply font-sans;
   }
 }
+
+/* ------------------------------------------------------------
+ * Impressão (mapa de carregamento)
+ * ------------------------------------------------------------ */
+@media print {
+  @page { size: A4; margin: 1cm; }
+
+  html, body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+  }
+
+  .no-print { display: none !important; }
+  .print-only { display: revert !important; }
+
+  /* Quebra de página entre múltiplos pontos de retirada */
+  .print-break-before { break-before: page; }
+  .print-avoid-break  { break-inside: avoid; }
+
+  /* Remove sombras/efeitos */
+  * { box-shadow: none !important; text-shadow: none !important; }
+}
+
+.print-only { display: none; }
