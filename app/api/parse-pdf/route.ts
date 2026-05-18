@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { parseFranzoniErp } from '@/lib/parser/franzoni-erp';
 
-export const runtime = 'nodejs'; // pdf-parse precisa de Node, não Edge
+export const runtime = 'nodejs'; // unpdf precisa de Node (não Edge)
 export const maxDuration = 30;
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -39,14 +39,15 @@ export async function POST(req: NextRequest) {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  // 3) Extrai texto + parseia (pdf-parse v2: classe PDFParse)
+  // 3) Extrai texto + parseia
+  // unpdf é um wrapper de pdfjs feito pra rodar em serverless Node sem
+  // depender de globals do browser (DOMMatrix, etc.) — diferente do pdf-parse v2.
   let text = '';
   try {
-    const { PDFParse } = await import('pdf-parse');
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    const result = await parser.getText();
-    text = result.text ?? '';
-    await parser.destroy();
+    const { extractText, getDocumentProxy } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text: pages } = await extractText(pdf, { mergePages: true });
+    text = Array.isArray(pages) ? pages.join('\n') : (pages ?? '');
   } catch (err) {
     return NextResponse.json(
       { error: 'Falha ao ler PDF', detail: (err as Error).message },
