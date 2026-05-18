@@ -248,11 +248,21 @@ function normalizeBreaks(text: string): string {
 export function parseFranzoniErp(text: string): PedidoParsed {
   const normalized = normalizeBreaks(text.replace(/ /g, ' '));
 
-  // empresa emissora: primeira linha não-vazia
-  const empresa_emissora = normalized
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
+  // empresa emissora: primeira linha não-vazia, cortando ao chegar em
+  // termos típicos de endereço (AVENIDA/RUA/AV./R./TRAVESSA), CNPJ, FONE
+  // ou caracteres separadores. Cap em 100 chars como segurança final.
+  const empresa_emissora = (() => {
+    const firstLine = normalized
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? '';
+    // Termina antes de palavras-chave de endereço/identificação ou separadores
+    const m = firstLine.match(
+      /^(.+?)(?=\s+(?:AVENIDA|AV\.?|RUA|R\.?|TRAVESSA|TV\.?|RODOVIA|ROD\.?|ALAMEDA|AL\.?|ESTRADA|EST\.?|CNPJ|CPF|FONE|TEL|DOCUMENTO|PEDIDO)\b|[,;]|\s+-\s+|$)/i,
+    );
+    const name = (m?.[1] ?? firstLine).trim();
+    return name.length > 100 ? name.slice(0, 100).trim() : name;
+  })();
 
   const documento_erp =
     firstMatch(normalized, RX.documento)?.[1] ??

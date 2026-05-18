@@ -17,6 +17,28 @@ import { criarPedidoAction } from '@/app/(app)/vendas/actions';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 import { DatePicker } from '@/components/ui/date-picker';
 
+type ErrorLeaf = { path: string; message: string };
+function collectErrorLeaves(node: unknown, prefix = ''): ErrorLeaf[] {
+  if (!node || typeof node !== 'object') return [];
+  const obj = node as Record<string, unknown>;
+  // Detecta uma folha: tem .message (string) e .type
+  if (typeof obj.message === 'string' && typeof obj.type === 'string') {
+    return [{ path: prefix || 'campo', message: obj.message }];
+  }
+  const out: ErrorLeaf[] = [];
+  for (const [key, val] of Object.entries(obj)) {
+    if (val == null) continue;
+    if (Array.isArray(val)) {
+      val.forEach((item, i) => {
+        out.push(...collectErrorLeaves(item, prefix ? `${prefix}.${key}[${i}]` : `${key}[${i}]`));
+      });
+    } else if (typeof val === 'object') {
+      out.push(...collectErrorLeaves(val, prefix ? `${prefix}.${key}` : key));
+    }
+  }
+  return out;
+}
+
 export function PedidoForm({ defaultValues }: { defaultValues: PedidoFormInput }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -56,8 +78,19 @@ export function PedidoForm({ defaultValues }: { defaultValues: PedidoFormInput }
         });
       },
       (errs) => {
-        const first = Object.values(errs).flat()[0] as { message?: string } | undefined;
-        toast.error(first?.message ?? 'Verifique os campos destacados');
+        // Traversa profundo procurando todos os erros com .message e path
+        const leaves = collectErrorLeaves(errs);
+        if (leaves.length === 0) {
+          toast.error('Verifique os campos do formulário');
+          return;
+        }
+        const first = leaves[0];
+        const extras = leaves.length > 1 ? ` (+${leaves.length - 1} outro${leaves.length === 2 ? '' : 's'})` : '';
+        toast.error(`${first.path}: ${first.message}${extras}`, { duration: 6000 });
+        // Log no console pra inspeção rápida do dev
+        if (typeof window !== 'undefined') {
+          console.warn('[PedidoForm] erros de validação:', leaves);
+        }
       },
     )();
   }
