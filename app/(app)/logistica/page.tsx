@@ -44,6 +44,7 @@ export default async function LogisticaPage({
         }
       >
         <PedidosList
+          key={status}
           mode="logistica"
           initialStatus={status}
           hideStatusFilter
