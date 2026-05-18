@@ -1,14 +1,15 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PedidosList } from '@/components/pedidos-list';
 
-export default function VendasPlaceholder() {
+export default function VendasPage() {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Meus Pedidos</CardTitle>
-      </CardHeader>
-      <CardContent className="text-sm text-muted-foreground">
-        Listagem de pedidos do vendedor — implementada no Prompt 6.
-      </CardContent>
-    </Card>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-semibold">Meus Pedidos</h2>
+        <p className="text-sm text-muted-foreground">
+          Pedidos que você criou. Atualizações de status chegam em tempo real.
+        </p>
+      </div>
+      <PedidosList mode="vendas" />
+    </div>
   );
 }
