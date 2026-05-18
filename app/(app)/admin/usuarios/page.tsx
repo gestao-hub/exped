@@ -53,18 +53,19 @@ export default async function UsuariosPage() {
   const list = (profiles ?? []) as Profile[];
 
   return (
-    <>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader
         title="Usuários"
         description={`${list.length} usuário${list.length === 1 ? '' : 's'} ativos. Para criar novos, rode scripts/seed-users.ts ou crie via Supabase Dashboard.`}
       />
 
-      <ContentCard variant="flush">
+      <ContentCard variant="flush" className="flex flex-col flex-1 min-h-0">
         {error ? (
           <p className="p-6 text-sm text-destructive">{error.message}</p>
         ) : (
+          <div className="flex-1 overflow-y-auto min-h-0">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 z-10 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-5">Nome</TableHead>
                 <TableHead>E-mail</TableHead>
@@ -104,8 +105,9 @@ export default async function UsuariosPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
       </ContentCard>
-    </>
+    </div>
   );
 }
