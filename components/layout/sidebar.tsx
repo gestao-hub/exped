@@ -63,7 +63,7 @@ export function Sidebar() {
     <aside className="hidden md:flex w-64 shrink-0 flex-col bg-franzoni-navy text-white">
       <div className="px-6 py-6 border-b border-white/10">
         <Link href="/" className="block">
-          <FranzoniLogo />
+          <FranzoniLogo size={56} />
         </Link>
       </div>
 

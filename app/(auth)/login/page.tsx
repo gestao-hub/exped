@@ -8,7 +8,7 @@ export default function LoginPage() {
     <Card className="w-full max-w-md shadow-xl border-franzoni-navy/10">
       <CardHeader className="text-center space-y-4 pt-8">
         <div className="flex justify-center">
-          <FranzoniLogo variant="dark" className="text-2xl" />
+          <FranzoniLogo variant="dark" size={88} />
         </div>
         <p className="text-sm text-muted-foreground">Mapa de Carregamento</p>
       </CardHeader>

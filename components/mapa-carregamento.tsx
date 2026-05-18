@@ -52,7 +52,7 @@ export function MapaCarregamento({
     >
       {/* Header */}
       <header className="border-b border-black/20 px-6 py-4 flex items-center justify-between gap-6">
-        <FranzoniLogo variant="dark" className="text-2xl" />
+        <FranzoniLogo variant="dark" size={56} />
         <div className="text-right">
           <h1 className="text-lg font-bold tracking-tight">Mapa de Carregamento</h1>
           <p className="text-xs text-muted-foreground">
