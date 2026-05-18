@@ -62,6 +62,7 @@ export function PedidosList({
   // initial fetch + refetch on filter change
   useEffect(() => {
     let cancel = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
 
     let query = supabase

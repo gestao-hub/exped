@@ -1,36 +1,173 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Franzoni — Mapa de Carregamento
 
-## Getting Started
+Sistema interno da **Franzoni Casa & Construção** para gerar e gerenciar o Mapa
+de Carregamento a partir do PDF de pedido emitido pelo ERP. Substitui o fluxo
+manual em papel/planilha entre Vendas e Logística.
 
-First, run the development server:
+## Fluxo
+
+1. **Vendedor** faz upload do PDF do pedido → o sistema extrai os dados
+   automaticamente → o vendedor revisa e envia para a logística.
+2. **Logística** vê o pedido na fila (ordenada por bairro + data de entrega) →
+   preenche dados de logística (motorista, veículo, kms, pesos, conferente) →
+   marca como em separação → imprime o mapa → finaliza.
+3. **Histórico** consulta pedidos finalizados, com filtros e KPIs.
+
+## Stack
+
+- **Next.js 16** (App Router, React 19, Turbopack)
+- **Tailwind CSS v4** + **shadcn/ui** (preset base-nova)
+- **Supabase** (Postgres + Auth + Storage + Realtime + RLS)
+- **TypeScript** estrito
+- **react-hook-form** + **zod** nos forms
+- **vitest** para testes do parser
+- **pdf-parse v2** para extrair texto do PDF do ERP
+- **Vercel** (deploy)
+
+## Rodando local
+
+### Pré-requisitos
+- Node.js ≥ 20 (testado em 24)
+- Projeto Supabase criado em https://supabase.com
+
+### Setup
+
+```bash
+git clone git@github.com:gestao-hub/franzoni.git
+cd franzoni
+npm install
+cp .env.example .env.local
+# edite .env.local com as chaves do seu projeto Supabase
+```
+
+### Aplicar o schema (uma vez)
+
+Abra **Supabase Dashboard → SQL Editor → New query**, cole o conteúdo de
+[supabase/01-SCHEMA.sql](supabase/01-SCHEMA.sql) e clique **Run**.
+
+Esse arquivo é a concatenação das 6 migrations em
+[supabase/migrations/](supabase/migrations/) — fique livre para aplicá-las uma
+a uma se preferir (via `supabase db push` com o CLI).
+
+### Gerar os tipos TypeScript do banco
+
+Depois que o schema estiver aplicado, substitua o stub `lib/types/database.ts`
+pelos tipos auto-gerados:
+
+```bash
+npx supabase login
+npx supabase link --project-ref <SEU_PROJECT_REF>
+npx supabase gen types typescript --linked > lib/types/database.ts
+```
+
+### Criar usuários iniciais
+
+```bash
+npx tsx scripts/seed-users.ts
+# Senha padrão para todos: Franzoni@2026
+# Sobrescreva com SEED_PASSWORD=… npx tsx scripts/seed-users.ts
+```
+
+Cria:
+- `admin@franzoni.local` (admin)
+- `vendas1..4@franzoni.local` (vendedor)
+- `logistica@franzoni.local` (logistica)
+
+### Subir o dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Script | O que faz |
+|---|---|
+| `npm run dev` | Dev server (Turbopack) |
+| `npm run build` | Build de produção |
+| `npm start` | Serve o build |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Roda vitest uma vez |
+| `npm run test:watch` | Vitest em watch |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Estrutura
 
-## Learn More
+```
+app/
+  (auth)/login/        → tela de login
+  (app)/
+    layout.tsx         → sidebar + topbar + UserProvider
+    vendas/            → meus pedidos, novo, detalhe
+    logistica/         → fila, detalhe + baixa
+    historico/         → pedidos finalizados
+    admin/             → (stub)
+  (print)/imprimir/[id]/  → view de impressão (sem sidebar)
+  api/parse-pdf/       → POST: extrai dados do PDF
+  auth/{signout,callback}/
 
-To learn more about Next.js, take a look at the following resources:
+components/
+  ui/                  → shadcn primitives
+  layout/              → Sidebar, Topbar
+  providers/           → ThemeProvider, UserProvider
+  mapa-carregamento.tsx → layout do mapa físico (reutilizável)
+  pedido-form.tsx      → form de revisão (vendedor)
+  pedidos-list.tsx     → listagem com filtros + realtime
+  upload-pdf.tsx       → dropzone + POST /api/parse-pdf
+  status-badge.tsx
+  franzoni-logo.tsx
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+lib/
+  supabase/{client,server,middleware}.ts
+  parser/franzoni-erp.ts  → regex que parseia o PDF do ERP
+  parser/to-form-input.ts → adaptador parser → defaults do form
+  validators/             → zod schemas
+  types/                  → tipos do banco (auto-gerados)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+supabase/
+  01-SCHEMA.sql           → schema completo (cole no SQL Editor)
+  migrations/             → 6 arquivos temáticos para o supabase CLI
 
-## Deploy on Vercel
+tests/fixtures/
+  pedido-L4077.txt        → texto cru do PDF de exemplo
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+proxy.ts                  → middleware do Next 16 (refresh JWT, redirects)
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploy (Vercel)
+
+```bash
+npx vercel link
+npx vercel env add NEXT_PUBLIC_SUPABASE_URL production
+npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production
+npx vercel env add SUPABASE_SERVICE_ROLE_KEY production
+npx vercel deploy --prod
+```
+
+Depois, no **Supabase Dashboard → Authentication → URL Configuration**:
+adicionar a URL de produção em **Site URL** e **Redirect URLs**.
+
+## Decisões de design
+
+- **Multi-tenant não é objetivo** — uma instalação por empresa.
+- **PDF do ERP é a entrada autoritativa**; o usuário só revisa, não digita do zero
+  (existe um fallback "preencher manualmente" mas é exceção).
+- **RLS é a única camada de autorização**. Vendedor só vê os próprios pedidos
+  (`vendedor_id = auth.uid()`). Logística vê todos. Admin vê tudo.
+- **Realtime** escuta `pedidos` (insert/update) para que a fila de logística e
+  a listagem do vendedor atualizem sem refresh.
+- **Storage** privado: `pedidos-pdfs/{user_id}/{ts}-{nome}.pdf`. RLS no objeto
+  garante que só o dono (e admin/logística) lê.
+- **Impressão**: rota separada (`/imprimir/[id]`) sem sidebar, com `window.print()`
+  automático. CSS `@media print` cuida do A4 + quebra de página entre múltiplos
+  pontos de retirada.
+
+## Roadmap conhecido
+
+- Auto-save no form da logística (debounce 1s)
+- Export PDF da listagem do histórico
+- Suporte real a múltiplos pontos de retirada (LOJA + DEPÓSITO) — hoje sempre
+  retorna 1 ponto; precisa de PDFs de exemplo com 2 blocos para calibrar o parser
+- Notificações por email/Slack quando o pedido troca de status
+- Painel admin (atualmente é só um stub)

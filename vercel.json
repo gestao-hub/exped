@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["gru1"],
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "functions": {
+    "app/api/parse-pdf/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  }
+}

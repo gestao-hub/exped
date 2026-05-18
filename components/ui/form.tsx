@@ -45,7 +45,8 @@ function useFormField() {
   const formState = useFormState({ name: fieldCtx?.name as string });
   if (!fieldCtx) throw new Error('useFormField deve ser usado dentro de <FormField>');
   const fieldState = getFieldState(fieldCtx.name, formState);
-  const id = itemCtx?.id ?? React.useId();
+  const fallbackId = React.useId();
+  const id = itemCtx?.id ?? fallbackId;
   return {
     id,
     name: fieldCtx.name,
