@@ -13,7 +13,7 @@ import {
   endOfMonth,
 } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Search, Plus, Inbox, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, Plus, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ContentCard } from '@/components/layout/content-card';
+import { SortableHead, type SortDir } from '@/components/ui/sortable-head';
 import { StatusBadge } from '@/components/status-badge';
 import { createClient } from '@/lib/supabase/client';
 import type { Pedido, PedidoStatus } from '@/lib/types';
@@ -46,7 +47,6 @@ type SortKey =
   | 'data_entrega'
   | 'valor_total'
   | 'created_at';
-type SortDir = 'asc' | 'desc';
 type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes';
 
 const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
@@ -251,20 +251,20 @@ export function PedidosList({
               )}
             >
               <TableRow className="hover:bg-transparent">
-                <SortableHead width="w-20 pl-5" sortKey="numero_mapa" current={sortBy} dir={sortDir} onClick={toggleSort}>
+                <SortableHead width="w-20 pl-5" sortKey="numero_mapa" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Mapa
                 </SortableHead>
-                <SortableHead width="w-[28%] min-w-0" sortKey="cliente_nome" current={sortBy} dir={sortDir} onClick={toggleSort}>
+                <SortableHead width="w-[28%] min-w-0" sortKey="cliente_nome" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Cliente
                 </SortableHead>
-                <SortableHead width="w-[18%] min-w-0" sortKey="cliente_bairro" current={sortBy} dir={sortDir} onClick={toggleSort}>
+                <SortableHead width="w-[18%] min-w-0" sortKey="cliente_bairro" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Bairro
                 </SortableHead>
-                <SortableHead width="w-28" sortKey="data_entrega" current={sortBy} dir={sortDir} onClick={toggleSort}>
+                <SortableHead width="w-28" sortKey="data_entrega" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Entrega
                 </SortableHead>
                 <TableHead className="w-32">Status</TableHead>
-                <SortableHead width="w-32 text-right pr-5" sortKey="valor_total" current={sortBy} dir={sortDir} onClick={toggleSort} align="right">
+                <SortableHead width="w-32 text-right pr-5" sortKey="valor_total" current={sortBy} dir={sortDir} onClickAction={toggleSort} align="right">
                   Valor
                 </SortableHead>
               </TableRow>
@@ -347,43 +347,4 @@ export function PedidosList({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Cabeçalho de tabela com ordenação clicável
-// ---------------------------------------------------------------------------
-function SortableHead({
-  children,
-  sortKey,
-  current,
-  dir,
-  onClick,
-  width,
-  align = 'left',
-}: {
-  children: React.ReactNode;
-  sortKey: SortKey;
-  current: SortKey;
-  dir: SortDir;
-  onClick: (k: SortKey) => void;
-  width?: string;
-  align?: 'left' | 'right';
-}) {
-  const active = current === sortKey;
-  const Icon = !active ? ArrowUpDown : dir === 'asc' ? ArrowUp : ArrowDown;
-  return (
-    <TableHead className={cn(width, align === 'right' && 'text-right')}>
-      <button
-        type="button"
-        onClick={() => onClick(sortKey)}
-        className={cn(
-          'inline-flex items-center gap-1.5 select-none',
-          'hover:text-foreground transition-colors',
-          active ? 'text-foreground font-semibold' : 'text-muted-foreground',
-          align === 'right' && 'flex-row-reverse',
-        )}
-      >
-        <span>{children}</span>
-        <Icon className={cn('h-3.5 w-3.5', active ? 'opacity-100' : 'opacity-40')} />
-      </button>
-    </TableHead>
-  );
-}
+// SortableHead foi extraído pra @/components/ui/sortable-head (reuso em /admin/usuarios)
