@@ -40,6 +40,13 @@ export function PedidoForm({ defaultValues }: { defaultValues: PedidoFormInput }
             toast.error(r.error);
             return;
           }
+          if ('duplicate' in r) {
+            toast.warning(
+              `Já existe um pedido com este documento (#${r.existing_numero}). Abrindo o existente.`,
+            );
+            router.push(`/vendas/${r.existing_id}`);
+            return;
+          }
           toast.success(
             status === 'pendente'
               ? `Pedido enviado para logística`

@@ -5,11 +5,15 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 
-export type SavePedidoResult = { error: string } | { id: string };
+export type SavePedidoResult =
+  | { error: string }
+  | { id: string; numero: number }
+  | { duplicate: true; existing_id: string; existing_numero: number };
 
 /**
  * Cria um novo pedido (cabeçalho + pontos + itens) com status `rascunho` ou `pendente`.
  * `vendedor_id` é setado para auth.uid() (RLS exige).
+ * Se já existe um pedido ativo com o mesmo documento_erp, retorna { duplicate }.
  */
 export async function criarPedidoAction(
   raw: PedidoFormInput,
@@ -26,6 +30,23 @@ export async function criarPedidoAction(
     return { error: parsed.error.issues[0]?.message ?? 'Dados inválidos' };
   }
   const d = parsed.data;
+
+  // Dedup explícito (UX > confiar só no unique index) — só quando o ERP forneceu doc.
+  if (d.documento_erp) {
+    const { data: existing } = await supabase
+      .from('pedidos')
+      .select('id, numero_mapa')
+      .eq('documento_erp', d.documento_erp)
+      .neq('status', 'cancelado')
+      .maybeSingle();
+    if (existing) {
+      return {
+        duplicate: true,
+        existing_id: existing.id as string,
+        existing_numero: existing.numero_mapa as number,
+      };
+    }
+  }
 
   const { data: pedido, error: insErr } = await supabase
     .from('pedidos')
@@ -50,7 +71,7 @@ export async function criarPedidoAction(
       storage_pdf_path: d.storage_pdf_path ?? null,
       vendedor_id:      user.id,
     })
-    .select('id')
+    .select('id, numero_mapa')
     .single();
 
   if (insErr || !pedido) {
@@ -96,7 +117,7 @@ export async function criarPedidoAction(
 
   revalidatePath('/vendas');
   revalidatePath('/logistica');
-  return { id: pedido.id };
+  return { id: pedido.id as string, numero: pedido.numero_mapa as number };
 }
 
 /**
