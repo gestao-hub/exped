@@ -44,8 +44,8 @@ const NAV: Record<UserRole, NavSection[]> = {
     {
       title: 'Operação',
       items: [
-        { label: 'Fila',         href: '/logistica',                       icon: TruckIcon },
-        { label: 'Em Separação', href: '/logistica?status=em_separacao',  icon: ScanLine },
+        { label: 'Fila',         href: '/logistica',                      icon: TruckIcon },
+        { label: 'Em Separação', href: '/logistica?status=em_separacao', icon: ScanLine },
       ],
     },
     {
@@ -96,53 +96,54 @@ export function Sidebar() {
 
   return (
     <aside className="hidden md:flex w-64 shrink-0 flex-col sidebar-surface text-white">
-      {/* Logo */}
-      <div className="px-4 pt-8 pb-6 flex items-center justify-center border-b border-white/8">
+      {/* Logo — compacto, sem ar extra */}
+      <div className="px-3 pt-3 pb-3 flex items-center justify-center border-b border-white/6">
         <Link href="/" className="block transition-opacity hover:opacity-90">
-          <FranzoniLogo size={112} variant="light" />
+          <FranzoniLogo size={80} variant="light" />
         </Link>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-3 space-y-1 overflow-y-auto">
-        {sections.map((section) => (
-          <div key={section.title} className="pb-2">
+      {/* Nav — itens em card-glass com seções */}
+      <nav className="flex-1 py-2 overflow-y-auto">
+        {sections.map((section, sIdx) => (
+          <div key={section.title} className={cn('px-2', sIdx > 0 && 'mt-1.5')}>
             <p className="nav-section-label">{section.title}</p>
-            {section.items.map((item) => {
-              const targetPath = item.href.split('?')[0];
-              const active =
-                pathname === targetPath ||
-                (targetPath !== '/' && pathname.startsWith(targetPath + '/'));
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="nav-item"
-                  data-active={active}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                </Link>
-              );
-            })}
+            <ul className="space-y-1">
+              {section.items.map((item) => {
+                const targetPath = item.href.split('?')[0];
+                const active =
+                  pathname === targetPath ||
+                  (targetPath !== '/' && pathname.startsWith(targetPath + '/'));
+                const Icon = item.icon;
+                return (
+                  <li key={item.href}>
+                    <Link href={item.href} className="nav-card-glass" data-active={active}>
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         ))}
       </nav>
 
       {/* Footer: user + theme + logout */}
-      <div className="border-t border-white/8 px-3 py-3 space-y-2">
-        <div className="flex items-center gap-3 px-2 py-1.5">
-          <Avatar className="h-9 w-9 bg-franzoni-orange/20 ring-1 ring-franzoni-orange/30">
-            <AvatarFallback className="bg-transparent text-sm font-semibold text-franzoni-orange-100">
+      <div className="border-t border-white/6 px-3 py-3 space-y-2">
+        <div className="flex items-center gap-3 px-1">
+          <Avatar className="h-8 w-8 bg-franzoni-orange/20 ring-1 ring-franzoni-orange/35">
+            <AvatarFallback className="bg-transparent text-xs font-semibold text-franzoni-orange-100">
               {initials(profile.full_name || profile.email || '?')}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium truncate text-white/95">
+            <p className="text-sm font-medium truncate text-white/95 leading-tight">
               {profile.full_name || profile.email}
             </p>
-            <p className="text-xs text-white/50 capitalize">{profile.role}</p>
+            <p className="text-[11px] text-white/50 capitalize leading-tight mt-0.5">
+              {profile.role}
+            </p>
           </div>
         </div>
 
@@ -165,9 +166,7 @@ export function Sidebar() {
               type="submit"
               variant="ghost"
               size="sm"
-              className={cn(
-                'w-full justify-start text-white/70 hover:text-white hover:bg-white/8',
-              )}
+              className="w-full justify-start text-white/75 hover:text-white hover:bg-white/8"
             >
               <LogOut className="h-4 w-4 mr-2" /> Sair
             </Button>

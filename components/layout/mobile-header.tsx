@@ -97,7 +97,7 @@ export function MobileHeader() {
                     key={item.href}
                     href={item.href}
                     onClick={() => setOpen(false)}
-                    className="nav-item"
+                    className="nav-card-glass"
                     data-active={active}
                   >
                     <Icon className="h-4 w-4 shrink-0" />
