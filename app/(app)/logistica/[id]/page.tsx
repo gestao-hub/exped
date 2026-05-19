@@ -121,7 +121,12 @@ export default async function LogisticaDetailPage({
         vendedor={vendedor}
       />
 
-      <BaixaForm pedidoId={id} status={pedido.status} defaultValues={defaults} />
+      <BaixaForm
+        pedidoId={id}
+        status={pedido.status}
+        defaultValues={defaults}
+        itens={pontos.flatMap((p) => p.itens)}
+      />
 
       {user && (
         <PedidoComentarios

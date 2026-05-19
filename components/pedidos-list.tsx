@@ -42,6 +42,8 @@ import type { Pedido, PedidoStatus } from '@/lib/types';
 import {
   iniciarSeparacaoLoteAction,
   finalizarLoteAction,
+  iniciarSeparacaoAction,
+  finalizarPedidoAction,
 } from '@/app/(app)/vendas/actions';
 
 type Mode = 'vendas' | 'logistica' | 'historico';
@@ -57,9 +59,10 @@ type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes' | 'custom';
 const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
   { value: 'todos',        label: 'Todos' },
   { value: 'rascunho',     label: 'Rascunho' },
-  { value: 'pendente',     label: 'Pendente' },
-  { value: 'em_separacao', label: 'Em separação' },
-  { value: 'finalizado',   label: 'Finalizado' },
+  { value: 'pendente',               label: 'Pendente' },
+  { value: 'em_separacao',           label: 'Em separação' },
+  { value: 'parcialmente_entregue',  label: 'Parcialmente entregue' },
+  { value: 'finalizado',             label: 'Finalizado' },
   { value: 'cancelado',    label: 'Cancelado' },
 ];
 
@@ -392,7 +395,12 @@ export function PedidosList({
                           #{p.numero_mapa}
                         </span>
                       </div>
-                      <StatusBadge status={p.status} />
+                      <div className="flex items-center gap-1.5">
+                        <StatusBadge status={p.status} />
+                        {mode === 'logistica' && (
+                          <InlineStatusActions pedidoId={p.id} status={p.status} />
+                        )}
+                      </div>
                     </div>
                     <p className="font-semibold text-sm text-foreground truncate">
                       {p.cliente_nome}
@@ -551,7 +559,12 @@ export function PedidosList({
                           : '—'}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={p.status} />
+                        <div className="flex items-center gap-1.5">
+                          <StatusBadge status={p.status} />
+                          {mode === 'logistica' && (
+                            <InlineStatusActions pedidoId={p.id} status={p.status} />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right font-mono pr-5">
                         {Number(p.valor_total).toLocaleString('pt-BR', {
@@ -577,6 +590,74 @@ export function PedidosList({
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Botões inline de mudança de status na linha da tabela (logística)
+// ---------------------------------------------------------------------------
+function InlineStatusActions({
+  pedidoId,
+  status,
+}: {
+  pedidoId: string;
+  status: PedidoStatus;
+}) {
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  function iniciar(e: React.MouseEvent) {
+    stop(e);
+    start(async () => {
+      const r = await iniciarSeparacaoAction(pedidoId);
+      if ('error' in r) toast.error(r.error);
+      else {
+        toast.success('Separação iniciada');
+        router.refresh();
+      }
+    });
+  }
+
+  function finalizar(e: React.MouseEvent) {
+    stop(e);
+    if (!window.confirm('Marcar como entregue total? Use o detalhe pra registrar entrega parcial.')) return;
+    start(async () => {
+      const r = await finalizarPedidoAction(pedidoId);
+      if ('error' in r) toast.error(r.error);
+      else {
+        toast.success('Pedido finalizado');
+        router.refresh();
+      }
+    });
+  }
+
+  if (status === 'pendente') {
+    return (
+      <button
+        type="button"
+        onClick={iniciar}
+        disabled={pending}
+        className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-status-separacao/15 text-status-separacao hover:bg-status-separacao/25 transition-colors"
+        title="Iniciar separação"
+      >
+        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3 fill-current" />}
+      </button>
+    );
+  }
+  if (status === 'em_separacao' || status === 'parcialmente_entregue') {
+    return (
+      <button
+        type="button"
+        onClick={finalizar}
+        disabled={pending}
+        className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-status-finalizado/15 text-status-finalizado hover:bg-status-finalizado/25 transition-colors"
+        title="Marcar como entregue total"
+      >
+        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+      </button>
+    );
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -650,7 +731,7 @@ function BulkActionBar({
             Iniciar separação
           </Button>
         )}
-        {status === 'em_separacao' && (
+        {(status === 'em_separacao' || status === 'parcialmente_entregue') && (
           <Button
             size="sm"
             onClick={finalizar}

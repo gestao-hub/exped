@@ -161,6 +161,7 @@ export type Database = {
           ponto_retirada_id: string
           preco_unitario: number
           quantidade: number
+          quantidade_entregue: number
           referencia: string | null
           total: number
           unidade: string
@@ -179,6 +180,7 @@ export type Database = {
           ponto_retirada_id: string
           preco_unitario?: number
           quantidade?: number
+          quantidade_entregue?: number
           referencia?: string | null
           total?: number
           unidade?: string
@@ -197,6 +199,7 @@ export type Database = {
           ponto_retirada_id?: string
           preco_unitario?: number
           quantidade?: number
+          quantidade_entregue?: number
           referencia?: string | null
           total?: number
           unidade?: string
@@ -458,6 +461,7 @@ export type Database = {
         | "em_separacao"
         | "finalizado"
         | "cancelado"
+        | "parcialmente_entregue"
       ponto_retirada_tipo: "loja" | "deposito"
       user_role: "admin" | "vendedor" | "logistica"
     }
@@ -593,6 +597,7 @@ export const Constants = {
         "em_separacao",
         "finalizado",
         "cancelado",
+        "parcialmente_entregue",
       ],
       ponto_retirada_tipo: ["loja", "deposito"],
       user_role: ["admin", "vendedor", "logistica"],

@@ -5,7 +5,7 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, Check } from 'lucide-react';
+import { Loader2, Check, PackageCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { RegistrarEntregaDialog } from '@/components/registrar-entrega-dialog';
+import type { PedidoItem } from '@/lib/types';
 import {
   logisticaFormSchema,
   type LogisticaFormInput,
@@ -28,10 +30,12 @@ export function BaixaForm({
   pedidoId,
   status,
   defaultValues,
+  itens = [],
 }: {
   pedidoId: string;
   status: PedidoStatus;
   defaultValues: LogisticaFormInput;
+  itens?: PedidoItem[];
 }) {
   const router = useRouter();
   const [savePending, startSave] = useTransition();
@@ -79,19 +83,41 @@ export function BaixaForm({
               Iniciar Separação
             </Button>
           )}
-          {status === 'em_separacao' && (
-            <Button
-              onClick={() => changeStatus('finalizar')}
-              disabled={statusPending}
-              className="bg-status-finalizado hover:bg-status-finalizado/90 text-white"
-            >
-              {statusPending ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-              ) : (
-                <Check className="h-4 w-4 mr-1" />
-              )}
-              Marcar como Finalizado
-            </Button>
+          {(status === 'em_separacao' || status === 'parcialmente_entregue') && (
+            <>
+              <RegistrarEntregaDialog
+                pedidoId={pedidoId}
+                itens={
+                  itens.map((i) => ({
+                    id: i.id as string,
+                    codigo: i.codigo as string,
+                    descricao: i.descricao as string,
+                    quantidade: Number(i.quantidade),
+                    quantidade_entregue: Number(
+                      (i as PedidoItem & { quantidade_entregue?: number }).quantidade_entregue ?? 0,
+                    ),
+                    unidade: i.unidade as string,
+                  }))
+                }
+                trigger={
+                  <Button variant="outline" disabled={statusPending}>
+                    <PackageCheck className="h-4 w-4 mr-1" /> Registrar Entrega
+                  </Button>
+                }
+              />
+              <Button
+                onClick={() => changeStatus('finalizar')}
+                disabled={statusPending}
+                className="bg-status-finalizado hover:bg-status-finalizado/90 text-white"
+              >
+                {statusPending ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4 mr-1" />
+                )}
+                Marcar como Finalizado
+              </Button>
+            </>
           )}
         </div>
       </CardHeader>

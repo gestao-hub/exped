@@ -20,6 +20,7 @@ export default async function AdminDashboard() {
     pedidosCount,
     pendentesCount,
     separacaoCount,
+    parciaisCount,
     finalizadosCount,
     usuariosCount,
     clientesCount,
@@ -36,6 +37,10 @@ export default async function AdminDashboard() {
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'em_separacao'),
+    supabase
+      .from('pedidos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'parcialmente_entregue'),
     supabase
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
@@ -132,6 +137,7 @@ export default async function AdminDashboard() {
     { label: 'Total de pedidos', value: pedidosCount.count ?? 0,    accent: 'text-foreground' },
     { label: 'Pendentes',        value: pendentesCount.count ?? 0,  accent: 'text-status-pendente' },
     { label: 'Em separação',     value: separacaoCount.count ?? 0,  accent: 'text-status-separacao' },
+    { label: 'Parcialmente',     value: parciaisCount.count ?? 0,   accent: 'text-amber-600 dark:text-amber-400' },
     { label: 'Finalizados',      value: finalizadosCount.count ?? 0, accent: 'text-status-finalizado' },
   ];
 

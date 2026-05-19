@@ -120,15 +120,14 @@ export function MapaCarregamento({
           ) : (
             <table className="w-full text-xs border-collapse table-fixed">
               <colgroup>
-                <col style={{ width: '70px' }} />
+                <col style={{ width: '60px' }} />
                 <col />
-                <col style={{ width: '52px' }} />
-                <col style={{ width: '40px' }} />
-                <col style={{ width: '90px' }} />
-                <col style={{ width: '52px' }} />
-                <col style={{ width: '52px' }} />
+                <col style={{ width: '46px' }} />
+                <col style={{ width: '38px' }} />
+                <col style={{ width: '58px' }} />
+                <col style={{ width: '58px' }} />
                 <col style={{ width: '80px' }} />
-                <col style={{ width: '80px' }} />
+                <col style={{ width: '70px' }} />
               </colgroup>
               <thead>
                 <tr className="bg-muted/40 text-left">
@@ -136,26 +135,28 @@ export function MapaCarregamento({
                   <th className="px-2 py-1 border">Descrição</th>
                   <th className="px-2 py-1 border text-right">Qtd</th>
                   <th className="px-2 py-1 border">Un</th>
-                  <th className="px-2 py-1 border">Lote/Ref</th>
-                  <th className="px-2 py-1 border text-right">PB</th>
-                  <th className="px-2 py-1 border text-right">PL</th>
+                  <th className="px-2 py-1 border text-right">Entreg.</th>
+                  <th className="px-2 py-1 border text-right">Restante</th>
                   <th className="px-2 py-1 border text-right">Unitário</th>
                   <th className="px-2 py-1 border text-right">Total</th>
                 </tr>
               </thead>
               <tbody>
-                {ponto.itens.map((it: PedidoItem) => (
+                {ponto.itens.map((it: PedidoItem) => {
+                  const qt = Number(it.quantidade);
+                  const qe = Number(
+                    (it as PedidoItem & { quantidade_entregue?: number }).quantidade_entregue ?? 0,
+                  );
+                  const restante = Math.max(0, qt - qe);
+                  return (
                   <tr key={it.id} className="even:bg-muted/10 align-top">
                     <td className="px-2 py-1 border font-mono truncate" title={it.codigo}>{it.codigo}</td>
                     <td className="px-2 py-1 border wrap-break-word">{it.descricao}</td>
-                    <td className="px-2 py-1 border text-right font-mono">{Number(it.quantidade)}</td>
+                    <td className="px-2 py-1 border text-right font-mono">{qt}</td>
                     <td className="px-2 py-1 border">{it.unidade}</td>
-                    <td className="px-2 py-1 border">{it.referencia || it.lote || '—'}</td>
-                    <td className="px-2 py-1 border text-right font-mono">
-                      {it.peso_bruto != null ? Number(it.peso_bruto).toFixed(2) : '—'}
-                    </td>
-                    <td className="px-2 py-1 border text-right font-mono">
-                      {it.peso_liquido != null ? Number(it.peso_liquido).toFixed(2) : '—'}
+                    <td className="px-2 py-1 border text-right font-mono">{qe > 0 ? qe : '—'}</td>
+                    <td className={`px-2 py-1 border text-right font-mono ${restante > 0 && qe > 0 ? 'font-bold text-amber-700' : ''}`}>
+                      {restante}
                     </td>
                     <td className="px-2 py-1 border text-right font-mono">
                       {fmtMoney(Number(it.preco_unitario))}
@@ -164,7 +165,8 @@ export function MapaCarregamento({
                       {fmtMoney(Number(it.total))}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

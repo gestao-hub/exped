@@ -190,6 +190,104 @@ export async function finalizarPedidoAction(id: string) {
 }
 
 /**
+ * Logística: registra entrega (parcial ou total) — recebe ids dos itens
+ * com a quantidade entregue NESTA viagem. Soma na coluna acumulada.
+ * Decide novo status:
+ *   - Tudo entregue (q_entregue == q em todos os itens) → finalizado
+ *   - Algum > 0 mas < total → parcialmente_entregue
+ *   - Nada entregue ainda → mantém status atual (em_separacao ou outro)
+ */
+export async function registrarEntregaAction(input: {
+  pedido_id: string;
+  itens: { id: string; entregue_agora: number }[];
+}) {
+  if (!input.pedido_id) return { error: 'pedido_id obrigatório' };
+  if (!Array.isArray(input.itens) || input.itens.length === 0) {
+    return { error: 'Informe ao menos 1 item' };
+  }
+
+  const supabase = await createClient();
+
+  // Role check (defesa em profundidade — RLS é a barreira primária)
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Não autenticado' };
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+  if (!prof || (prof.role !== 'admin' && prof.role !== 'logistica')) {
+    return { error: 'Apenas logística/admin pode registrar entrega' };
+  }
+
+  // Busca quantidades atuais (precisa pra somar e checar limite)
+  const ids = input.itens.map((i) => i.id);
+  const { data: atuais, error: e0 } = await supabase
+    .from('pedido_itens')
+    .select('id, quantidade, quantidade_entregue, ponto_retirada_id')
+    .in('id', ids);
+  if (e0) return { error: e0.message };
+
+  // Verifica que TODOS itens pertencem ao mesmo pedido
+  const pontoIds = Array.from(new Set((atuais ?? []).map((a) => a.ponto_retirada_id)));
+  const { data: pontosDoPedido } = await supabase
+    .from('pedido_pontos_retirada')
+    .select('id, pedido_id')
+    .in('id', pontoIds);
+  const pedidoIdsEnvolvidos = new Set((pontosDoPedido ?? []).map((p) => p.pedido_id));
+  if (pedidoIdsEnvolvidos.size !== 1 || !pedidoIdsEnvolvidos.has(input.pedido_id)) {
+    return { error: 'Itens não pertencem ao pedido informado' };
+  }
+
+  // Update um por um (não dá pra fazer batch com valores diferentes via PostgREST)
+  for (const item of input.itens) {
+    const atual = atuais?.find((a) => a.id === item.id);
+    if (!atual) continue;
+    const novaEntregue = Math.max(
+      0,
+      Math.min(Number(atual.quantidade), Number(atual.quantidade_entregue) + Number(item.entregue_agora)),
+    );
+    const { error } = await supabase
+      .from('pedido_itens')
+      .update({ quantidade_entregue: novaEntregue })
+      .eq('id', item.id);
+    if (error) return { error: `Item ${item.id}: ${error.message}` };
+  }
+
+  // Recalcula status baseado em TODOS os itens do pedido (não só os updated)
+  const { data: pontosTodos } = await supabase
+    .from('pedido_pontos_retirada')
+    .select('id')
+    .eq('pedido_id', input.pedido_id);
+  const pontoIdsTodos = (pontosTodos ?? []).map((p) => p.id);
+  const { data: itensTodos } = await supabase
+    .from('pedido_itens')
+    .select('quantidade, quantidade_entregue')
+    .in('ponto_retirada_id', pontoIdsTodos);
+
+  let novoStatus: 'em_separacao' | 'parcialmente_entregue' | 'finalizado' = 'em_separacao';
+  if (itensTodos && itensTodos.length > 0) {
+    const total = itensTodos.reduce((s, i) => s + Number(i.quantidade), 0);
+    const entregue = itensTodos.reduce((s, i) => s + Number(i.quantidade_entregue), 0);
+    if (total > 0 && entregue >= total) novoStatus = 'finalizado';
+    else if (entregue > 0) novoStatus = 'parcialmente_entregue';
+  }
+
+  const { error: eStatus } = await supabase
+    .from('pedidos')
+    .update({ status: novoStatus })
+    .eq('id', input.pedido_id);
+  if (eStatus) return { error: eStatus.message };
+
+  revalidatePath(`/logistica/${input.pedido_id}`);
+  revalidatePath(`/vendas/${input.pedido_id}`);
+  revalidatePath('/logistica');
+  revalidatePath('/vendas');
+  if (novoStatus === 'finalizado') revalidatePath('/historico');
+  return { ok: true as const, status: novoStatus };
+}
+
+/**
  * Logística — lote: marca vários como em_separacao (só os que estão pendentes).
  * Retorna { updated } com a quantidade efetivamente atualizada.
  */
@@ -222,7 +320,7 @@ export async function finalizarLoteAction(ids: string[]) {
     .from('pedidos')
     .update({ status: 'finalizado' })
     .in('id', ids)
-    .eq('status', 'em_separacao')
+    .in('status', ['em_separacao', 'parcialmente_entregue'])
     .select('id');
   if (error) return { error: error.message };
 

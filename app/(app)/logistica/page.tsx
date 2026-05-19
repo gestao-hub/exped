@@ -5,7 +5,7 @@ import { PedidosList } from '@/components/pedidos-list';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { PedidoStatus } from '@/lib/types';
 
-const VALID: PedidoStatus[] = ['pendente', 'em_separacao', 'finalizado'];
+const VALID: PedidoStatus[] = ['pendente', 'em_separacao', 'parcialmente_entregue', 'finalizado'];
 
 export default async function LogisticaPage({
   searchParams,
@@ -26,13 +26,16 @@ export default async function LogisticaPage({
 
       <Tabs value={status} className="w-full shrink-0">
         <TabsList>
-          <TabsTrigger value="pendente"     render={<Link href="/logistica?status=pendente" />}>
+          <TabsTrigger value="pendente"              render={<Link href="/logistica?status=pendente" />}>
             Pendentes
           </TabsTrigger>
-          <TabsTrigger value="em_separacao" render={<Link href="/logistica?status=em_separacao" />}>
+          <TabsTrigger value="em_separacao"          render={<Link href="/logistica?status=em_separacao" />}>
             Em separação
           </TabsTrigger>
-          <TabsTrigger value="finalizado"   render={<Link href="/logistica?status=finalizado" />}>
+          <TabsTrigger value="parcialmente_entregue" render={<Link href="/logistica?status=parcialmente_entregue" />}>
+            Parcialmente
+          </TabsTrigger>
+          <TabsTrigger value="finalizado"            render={<Link href="/logistica?status=finalizado" />}>
             Finalizados
           </TabsTrigger>
         </TabsList>
@@ -50,7 +53,11 @@ export default async function LogisticaPage({
           hideStatusFilter
           showNewButton={false}
           bounded
-          selectable={status === 'pendente' || status === 'em_separacao'}
+          selectable={
+            status === 'pendente' ||
+            status === 'em_separacao' ||
+            status === 'parcialmente_entregue'
+          }
         />
       </Suspense>
     </div>

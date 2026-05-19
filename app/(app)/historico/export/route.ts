@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import type { PedidoStatus } from '@/lib/types';
 
-const VALID_STATUS: PedidoStatus[] = ['rascunho', 'pendente', 'em_separacao', 'finalizado', 'cancelado'];
+const VALID_STATUS: PedidoStatus[] = ['rascunho', 'pendente', 'em_separacao', 'parcialmente_entregue', 'finalizado', 'cancelado'];
 
 export const runtime = 'nodejs';
 

@@ -10,6 +10,7 @@ import {
   Truck,
   Printer,
   CheckCircle2,
+  PackageCheck,
   LayoutDashboard,
   Users,
   History,
@@ -115,10 +116,17 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       tip: 'Pra economizar tinta, configure o Chrome em "Mais configurações → Cor → Preto e branco" antes de imprimir.',
     },
     {
-      icon: CheckCircle2,
-      title: 'Finalize ao entregar',
+      icon: PackageCheck,
+      title: 'Entrega parcial — quando faltou produto',
       body:
-        'Quando o pedido foi entregue, clique em "Marcar como Finalizado". Ele sai da fila ativa, vai pra aba "Finalizados" e entra nos KPIs do histórico (valor faturado, clientes únicos).',
+        'Se entregou só uma parte (ex.: 7t de 10t de areia), abra o pedido e clique em "Registrar Entrega". Preencha quanto saiu de cada item — o restante fica pendente. O pedido vai pra aba "Parcialmente" e o vendedor já enxerga no detalhe quanto ainda falta. Quando o restante for entregue, faça outro "Registrar Entrega" ou "Marcar como Finalizado".',
+      tip: 'Cada "Registrar Entrega" SOMA na quantidade já entregue — não substitui. Use "Preencher tudo" pra completar o restante de uma vez.',
+    },
+    {
+      icon: CheckCircle2,
+      title: 'Finalize ao entregar tudo',
+      body:
+        'Quando entregou 100% dos itens, clique em "Marcar como Finalizado". Ele sai da fila ativa, vai pra aba "Finalizados" e entra nos KPIs do histórico (valor faturado, clientes únicos). Na fila, dá pra finalizar direto pelo ícone ✓ na linha — sem precisar abrir o pedido.',
       cta: { label: 'Ver histórico', href: '/historico' },
     },
   ],
@@ -383,6 +391,16 @@ const GLOSSARY: GlossaryEntry[] = [
       <>
         Logística começou a separar fisicamente os produtos. Vendedor não pode mais editar o
         pedido, só ver status e cancelar via admin.
+      </>
+    ),
+  },
+  {
+    term: 'Parcialmente entregue',
+    def: (
+      <>
+        Logística entregou parte dos itens, mas restou quantidade. Aparece em aba própria
+        em <strong>/logistica</strong>; no detalhe do pedido todos veem por item quanto foi
+        entregue e quanto falta. Continua aberto até "Marcar como Finalizado".
       </>
     ),
   },
