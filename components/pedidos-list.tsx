@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/table';
 import { ContentCard } from '@/components/layout/content-card';
 import { SortableHead, type SortDir } from '@/components/ui/sortable-head';
+import { DatePicker } from '@/components/ui/date-picker';
 import { StatusBadge } from '@/components/status-badge';
 import { createClient } from '@/lib/supabase/client';
 import type { Pedido, PedidoStatus } from '@/lib/types';
@@ -47,7 +48,7 @@ type SortKey =
   | 'data_entrega'
   | 'valor_total'
   | 'created_at';
-type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes';
+type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes' | 'custom';
 
 const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
   { value: 'todos',        label: 'Todos' },
@@ -58,19 +59,29 @@ const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
   { value: 'cancelado',    label: 'Cancelado' },
 ];
 
-const DATE_RANGES: { value: DateRangeKey; label: string }[] = [
+const DATE_RANGES: { value: Exclude<DateRangeKey, 'custom'>; label: string }[] = [
   { value: 'todos',  label: 'Todos' },
   { value: 'hoje',   label: 'Hoje' },
   { value: 'semana', label: 'Semana' },
   { value: 'mes',    label: 'Mês' },
 ];
 
-function computeRange(key: DateRangeKey): { from: Date; to: Date } | null {
+function computeRange(
+  key: DateRangeKey,
+  customFrom?: string | null,
+  customTo?: string | null,
+): { from: Date; to: Date } | null {
   const now = new Date();
   switch (key) {
     case 'hoje':   return { from: startOfDay(now),                       to: endOfDay(now)   };
     case 'semana': return { from: startOfWeek(now, { weekStartsOn: 1 }), to: endOfWeek(now, { weekStartsOn: 1 }) };
     case 'mes':    return { from: startOfMonth(now),                     to: endOfMonth(now) };
+    case 'custom': {
+      if (!customFrom && !customTo) return null;
+      const from = customFrom ? startOfDay(new Date(`${customFrom}T12:00:00`)) : new Date('1970-01-01');
+      const to   = customTo   ? endOfDay(new Date(`${customTo}T12:00:00`))     : new Date('2999-12-31');
+      return { from, to };
+    }
     default:       return null;
   }
 }
@@ -95,6 +106,8 @@ export function PedidosList({
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<PedidoStatus | 'todos'>(initialStatus ?? 'todos');
   const [dateRange, setDateRange] = useState<DateRangeKey>('todos');
+  const [customFrom, setCustomFrom] = useState<string | null>(null);
+  const [customTo, setCustomTo] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>(
     mode === 'logistica' ? 'data_entrega' : 'created_at',
   );
@@ -129,7 +142,7 @@ export function PedidosList({
         `cliente_nome.ilike.${q},documento_erp.ilike.${q},cliente_bairro.ilike.${q}`,
       );
     }
-    const range = computeRange(dateRange);
+    const range = computeRange(dateRange, customFrom, customTo);
     if (range) {
       query = query
         .gte('data_entrega', format(range.from, 'yyyy-MM-dd'))
@@ -144,7 +157,7 @@ export function PedidosList({
     });
 
     return () => { cancel = true; };
-  }, [supabase, status, search, sortBy, sortDir, dateRange]);
+  }, [supabase, status, search, sortBy, sortDir, dateRange, customFrom, customTo]);
 
   useEffect(() => {
     // Defer a subscription pra depois do primeiro paint — assim networkidle
@@ -244,7 +257,7 @@ export function PedidosList({
           </div>
 
           {/* Atalhos de período (por data de entrega) */}
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-muted-foreground mr-1">Entrega:</span>
             {DATE_RANGES.map((r) => (
               <Button
@@ -257,12 +270,69 @@ export function PedidosList({
                   dateRange === r.value &&
                     'bg-franzoni-orange hover:bg-franzoni-orange-600 text-white',
                 )}
-                onClick={() => setDateRange(r.value)}
+                onClick={() => {
+                  setDateRange(r.value);
+                  setCustomFrom(null);
+                  setCustomTo(null);
+                }}
               >
                 {r.label}
               </Button>
             ))}
+            <Button
+              type="button"
+              size="sm"
+              variant={dateRange === 'custom' ? 'default' : 'outline'}
+              className={cn(
+                'h-7 px-3 text-xs',
+                dateRange === 'custom' &&
+                  'bg-franzoni-orange hover:bg-franzoni-orange-600 text-white',
+              )}
+              onClick={() => setDateRange('custom')}
+            >
+              Personalizado
+            </Button>
           </div>
+
+          {/* Inputs do range custom — só aparecem quando o pill 'Personalizado' está ativo */}
+          {dateRange === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2 text-xs pt-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">De</span>
+                <div className="w-44">
+                  <DatePicker
+                    value={customFrom}
+                    onChangeAction={setCustomFrom}
+                    placeholder="Data inicial"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">até</span>
+                <div className="w-44">
+                  <DatePicker
+                    value={customTo}
+                    onChangeAction={setCustomTo}
+                    placeholder="Data final"
+                  />
+                </div>
+              </div>
+              {(customFrom || customTo) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setCustomFrom(null);
+                    setCustomTo(null);
+                  }}
+                >
+                  Limpar
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </ContentCard>
 
