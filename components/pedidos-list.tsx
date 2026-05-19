@@ -47,6 +47,14 @@ import {
 } from '@/app/(app)/vendas/actions';
 
 type Mode = 'vendas' | 'logistica' | 'historico';
+type ParcialItem = {
+  codigo: string;
+  descricao: string;
+  quantidade: number;
+  quantidade_entregue: number;
+  unidade: string;
+  restante: number;
+};
 type SortKey =
   | 'numero_mapa'
   | 'cliente_nome'
@@ -113,6 +121,7 @@ export function PedidosList({
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [itensParciais, setItensParciais] = useState<Record<string, ParcialItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<PedidoStatus | 'todos'>(initialStatus ?? 'todos');
@@ -169,6 +178,60 @@ export function PedidosList({
 
     return () => { cancel = true; };
   }, [supabase, status, search, sortBy, sortDir, dateRange, customFrom, customTo]);
+
+  // Busca itens dos pedidos parcialmente entregues (mostra inline na linha)
+  useEffect(() => {
+    const ids = pedidos
+      .filter((p) => p.status === 'parcialmente_entregue')
+      .map((p) => p.id);
+    if (ids.length === 0) {
+      setItensParciais({});
+      return;
+    }
+
+    let cancel = false;
+    (async () => {
+      const { data: pontos } = await supabase
+        .from('pedido_pontos_retirada')
+        .select('id, pedido_id')
+        .in('pedido_id', ids);
+      if (cancel || !pontos) return;
+      const pontoToPedido = new Map(pontos.map((p) => [p.id as string, p.pedido_id as string]));
+      const pontoIds = pontos.map((p) => p.id as string);
+      if (pontoIds.length === 0) return;
+
+      const { data: itens } = await supabase
+        .from('pedido_itens')
+        .select('codigo, descricao, quantidade, quantidade_entregue, unidade, ponto_retirada_id')
+        .in('ponto_retirada_id', pontoIds);
+      if (cancel || !itens) return;
+
+      const byPedido: Record<string, ParcialItem[]> = {};
+      for (const it of itens) {
+        const pedidoId = pontoToPedido.get(it.ponto_retirada_id as string);
+        if (!pedidoId) continue;
+        const qt = Number(it.quantidade);
+        const qe = Number(it.quantidade_entregue);
+        const restante = Math.max(0, qt - qe);
+        if (restante <= 0) continue;
+        (byPedido[pedidoId] ??= []).push({
+          codigo: it.codigo as string,
+          descricao: it.descricao as string,
+          quantidade: qt,
+          quantidade_entregue: qe,
+          unidade: it.unidade as string,
+          restante,
+        });
+      }
+      // Ordena por restante desc (mais pendente primeiro)
+      for (const k of Object.keys(byPedido)) {
+        byPedido[k].sort((a, b) => b.restante - a.restante);
+      }
+      setItensParciais(byPedido);
+    })();
+
+    return () => { cancel = true; };
+  }, [supabase, pedidos]);
 
   useEffect(() => {
     // Defer a subscription pra depois do primeiro paint — assim networkidle
@@ -405,6 +468,9 @@ export function PedidosList({
                     <p className="font-semibold text-sm text-foreground truncate">
                       {p.cliente_nome}
                     </p>
+                    {p.status === 'parcialmente_entregue' && itensParciais[p.id] && (
+                      <ParcialItensInline itens={itensParciais[p.id]} compact />
+                    )}
                     <div className="flex items-center justify-between gap-2 mt-1.5 text-xs">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {p.cliente_bairro && (
@@ -538,8 +604,13 @@ export function PedidosList({
                       <TableCell className={cn('font-mono text-xs text-muted-foreground', !selectable && 'pl-5')}>
                         #{p.numero_mapa}
                       </TableCell>
-                      <TableCell className="font-medium text-foreground truncate" title={p.cliente_nome}>
-                        {p.cliente_nome}
+                      <TableCell className="font-medium text-foreground min-w-0">
+                        <div className="truncate" title={p.cliente_nome}>
+                          {p.cliente_nome}
+                        </div>
+                        {p.status === 'parcialmente_entregue' && itensParciais[p.id] && (
+                          <ParcialItensInline itens={itensParciais[p.id]} />
+                        )}
                       </TableCell>
                       <TableCell className="min-w-0">
                         {p.cliente_bairro ? (
@@ -590,6 +661,38 @@ export function PedidosList({
       )}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Detalhe inline dos itens com saldo pendente (status parcialmente_entregue)
+// ---------------------------------------------------------------------------
+function ParcialItensInline({ itens, compact = false }: { itens: ParcialItem[]; compact?: boolean }) {
+  if (!itens || itens.length === 0) return null;
+  const visiveis = itens.slice(0, 2);
+  const sobra = itens.length - visiveis.length;
+  return (
+    <div className={cn('space-y-0.5 mt-1', compact ? 'text-[11px]' : 'text-xs')}>
+      {visiveis.map((it) => (
+        <div key={it.codigo} className="text-amber-700 dark:text-amber-400 font-normal truncate">
+          <span className="font-medium">{it.descricao}</span>
+          <span className="font-mono ml-1">
+            {fmtQtd(it.quantidade_entregue)}/{fmtQtd(it.quantidade)} {it.unidade}
+          </span>
+          <span className="text-muted-foreground"> · falta {fmtQtd(it.restante)} {it.unidade}</span>
+        </div>
+      ))}
+      {sobra > 0 && (
+        <div className="text-[10px] text-muted-foreground">
+          +{sobra} item{sobra === 1 ? '' : 's'} pendente{sobra === 1 ? '' : 's'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmtQtd(n: number): string {
+  // Inteiro sem decimal; senão, até 3 decimais sem zeros à direita
+  return n % 1 === 0 ? String(n) : Number(n.toFixed(3)).toString();
 }
 
 // ---------------------------------------------------------------------------

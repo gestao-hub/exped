@@ -89,6 +89,25 @@ test.describe('Entrega parcial — fluxo completo', () => {
     await page.context().close();
   });
 
+  test('logistica vê inline na fila "Parcialmente" com itens e saldo', async ({ browser }) => {
+    const page = await loginAs(browser, 'logistica');
+    await page.goto('/logistica?status=parcialmente_entregue');
+    await page.waitForLoadState('networkidle');
+
+    // Linha do pedido recém-criado deve aparecer
+    const linha = page.locator('table').getByText(/QA PARCIAL TEST LTDA/i).first();
+    await expect(linha).toBeVisible({ timeout: 10_000 });
+
+    // Inline deve mostrar item + saldo (6/10 TN · falta 4 TN)
+    const tabela = page.locator('table');
+    await expect(
+      tabela.getByText(/AREIA M[ÉE]DIA QA PARCIAL/i).first(),
+    ).toBeVisible({ timeout: 5_000 });
+    await expect(tabela.getByText(/6\/10 TN/i).first()).toBeVisible();
+    await expect(tabela.getByText(/falta 4 TN/i).first()).toBeVisible();
+    await page.context().close();
+  });
+
   test('logistica entrega o restante (4) → finalizado', async ({ browser }) => {
     const page = await loginAs(browser, 'logistica');
     await page.goto(`/logistica/${pedidoId}`);
