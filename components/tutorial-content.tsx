@@ -15,6 +15,15 @@ import {
   History,
   Lightbulb,
   HelpCircle,
+  KeyRound,
+  Layers,
+  Filter,
+  ArrowUpDown,
+  Moon,
+  Smartphone,
+  RefreshCw,
+  AlertTriangle,
+  Copy,
   type LucideIcon,
 } from 'lucide-react';
 import { ContentCard } from '@/components/layout/content-card';
@@ -30,13 +39,17 @@ type Step = {
   tip?: string;
 };
 
+// ============================================================================
+// FLUXO PRINCIPAL — passos numerados por role
+// ============================================================================
+
 const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
   vendedor: [
     {
       icon: Upload,
       title: 'Importe o PDF do pedido',
       body:
-        'Em "Novo Pedido", arraste um ou vários PDFs gerados pelo ERP. O sistema extrai os dados automaticamente — cliente, endereço, itens, valores. Você pode soltar vários ao mesmo tempo: o lote processa em paralelo.',
+        'Em "Novo Pedido", arraste um ou vários PDFs gerados pelo ERP. O sistema extrai os dados automaticamente — cliente, endereço, itens, valores. Você pode soltar vários ao mesmo tempo: o lote processa em paralelo (até 4 simultâneos).',
       cta: { label: 'Abrir Novo Pedido', href: '/vendas/novo' },
       tip: 'Se o mesmo pedido (mesmo documento ERP) for enviado duas vezes, o sistema detecta e abre o existente em vez de duplicar.',
     },
@@ -44,27 +57,27 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       icon: ListChecks,
       title: 'Revise os dados extraídos',
       body:
-        'Confira o cliente, endereço, bairro, itens e total. Tudo é editável caso o parser não tenha pego algum campo. O bairro fica destacado (ele é a chave da rota da logística).',
-      tip: 'Se preferir, salve como "Rascunho" e finalize depois — ele fica visível só pra você.',
+        'Confira cliente, endereço, bairro, itens e total. Tudo é editável caso o parser não tenha pego algum campo (ex.: PDFs com layout estranho). O bairro fica destacado em laranja porque é a chave da rota da logística.',
+      tip: 'Se preferir, salve como "Rascunho" pra finalizar depois — fica visível só pra você até virar Pendente.',
     },
     {
       icon: Send,
       title: 'Envie para a logística',
       body:
-        'Clique em "Enviar para Logística". O pedido vira pendente e aparece na fila da equipe de entrega em tempo real.',
+        'Clique em "Enviar para Logística". O pedido vira pendente e aparece na fila da equipe de entrega em tempo real — sem precisar avisar manualmente.',
     },
     {
       icon: Bell,
       title: 'Acompanhe o status',
       body:
-        'Em "Meus Pedidos" você vê todos os seus pedidos com filtros (período, status, busca livre). Quando a logística inicia separação ou finaliza, a mudança chega ao vivo — sem precisar atualizar a página.',
+        'Em "Meus Pedidos" você vê todos os seus pedidos com filtros (período, status, busca livre). Quando a logística inicia separação ou finaliza, a mudança chega ao vivo via realtime — sem precisar atualizar a página.',
       cta: { label: 'Ver meus pedidos', href: '/vendas' },
     },
     {
       icon: Ban,
       title: 'Cancele quando precisar',
       body:
-        'Enquanto o pedido está em rascunho ou pendente, você pode cancelar pela tela de detalhe. Depois que entra em separação, só o admin cancela.',
+        'Enquanto o pedido está em rascunho ou pendente, você pode cancelar pela tela de detalhe. Depois que entra em separação, só o admin cancela (regra de processo — a logística já está movimentando estoque).',
     },
   ],
 
@@ -73,33 +86,35 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       icon: Inbox,
       title: 'A fila chega ordenada por bairro',
       body:
-        'Em "Fila", os pedidos pendentes aparecem agrupados por bairro e data de entrega — o mais urgente primeiro. Tem aba pra cada status (Pendentes, Em separação, Finalizados) e atalhos de período (Hoje, Semana, Mês).',
+        'Em "Fila", os pedidos pendentes aparecem agrupados por bairro e data de entrega — o mais urgente primeiro. As tabs no topo (Pendentes / Em separação / Finalizados) trocam o conjunto exibido.',
       cta: { label: 'Ver fila', href: '/logistica' },
-      tip: 'Clique em qualquer cabeçalho de coluna pra reordenar (cliente alfabético, valor maior primeiro, etc.).',
+      tip: 'Clique no cabeçalho de qualquer coluna pra reordenar (Cliente alfabético, Valor maior primeiro, etc.). Use os atalhos Hoje/Semana/Mês ou o range De/Até pra filtrar por data de entrega.',
     },
     {
       icon: Play,
       title: 'Inicie a separação',
       body:
-        'Abra o pedido. Clique em "Iniciar Separação" — isso avisa o vendedor em tempo real que vocês começaram. O pedido vai pra aba "Em separação".',
+        'Clique numa linha da fila pra abrir o pedido. Lá dentro, clique em "Iniciar Separação". Isso muda o status pra "em_separacao" — o vendedor recebe esse status ao vivo, e o pedido sai dos Pendentes pra aba "Em separação".',
+      tip: 'Mesmo durante a separação, dá pra ajustar dados do pedido. Se o vendedor errou um campo, avise ele pra editar — você não tem permissão de editar dados de venda, só dados de logística.',
     },
     {
       icon: Truck,
       title: 'Preencha os dados da carga',
       body:
-        'Pré-carga, motorista, veículo, km inicial/final, região, peso bruto/líquido, conferente e observações. Salve a qualquer momento — o pedido fica em separação até você finalizar.',
+        'No card "Dados de Logística": pré-carga, motorista, veículo, km inicial/final, região, peso bruto/líquido, conferente e observações. Salve a qualquer momento (botão "Salvar" no rodapé do card) — fica em "Em separação" até você finalizar.',
     },
     {
       icon: Printer,
       title: 'Imprima o Mapa de Carregamento',
       body:
-        'Botão "Imprimir Mapa" abre uma versão A4 pronta para impressão, com casa, itens, totais e linha de assinatura do conferente. O navegador chama o diálogo de impressão automaticamente.',
+        'Botão "Imprimir Mapa" abre uma versão A4 pronta numa nova aba, com cliente, endereço, itens, totais, pesos e linha de assinatura do conferente. O navegador chama o diálogo de impressão automaticamente.',
+      tip: 'Pra economizar tinta, configure o Chrome em "Mais configurações → Cor → Preto e branco" antes de imprimir.',
     },
     {
       icon: CheckCircle2,
       title: 'Finalize ao entregar',
       body:
-        'Quando o pedido é entregue, clique em "Marcar como Finalizado". Ele sai da fila ativa e vai pro histórico, contando nos KPIs.',
+        'Quando o pedido foi entregue, clique em "Marcar como Finalizado". Ele sai da fila ativa, vai pra aba "Finalizados" e entra nos KPIs do histórico (valor faturado, clientes únicos).',
       cta: { label: 'Ver histórico', href: '/historico' },
     },
   ],
@@ -109,40 +124,270 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       icon: LayoutDashboard,
       title: 'Dashboard com a visão geral',
       body:
-        'Em "Dashboard" você vê quantidades por status (Pendentes, Em separação, Finalizados) e atalhos pras áreas principais. Boa primeira tela do dia.',
+        'Em "Dashboard" você vê quantidades por status (Total / Pendentes / Em separação / Finalizados) e atalhos pras áreas principais. Boa primeira tela do dia pra checar o ritmo da operação.',
       cta: { label: 'Abrir Dashboard', href: '/admin' },
     },
     {
       icon: ListChecks,
       title: 'Veja todos os pedidos',
       body:
-        'Em "Pedidos" você vê todos da empresa, não só os seus. Use os filtros (período/status/busca) e ordenação por coluna pra investigar.',
+        'Em "Pedidos" você vê todos da empresa, não só os seus. Use os filtros (período / status / busca) e a ordenação por coluna pra investigar. Pode entrar em qualquer pedido pra ver detalhe completo.',
       cta: { label: 'Pedidos', href: '/vendas' },
     },
     {
       icon: Truck,
       title: 'Acompanhe a logística',
       body:
-        'Em "Logística" você vê a mesma fila que a equipe de entrega vê. Útil pra resolver dúvidas, alterar dados de carga ou destravar pedidos parados.',
+        'Em "Logística" você vê a mesma fila que a equipe de entrega vê. Útil pra resolver dúvidas, alterar dados de carga ou destravar pedidos parados. Admin pode cancelar pedidos em qualquer status (vendedor só em rascunho/pendente).',
       cta: { label: 'Fila', href: '/logistica' },
     },
     {
       icon: Users,
       title: 'Gerencie usuários e roles',
       body:
-        'Em "Usuários" você vê todos os profiles cadastrados e pode mudar o role de cada um (admin / vendedor / logística). Você não pode rebaixar o próprio role — guardrail de segurança.',
+        'Em "Usuários" você vê todos os profiles cadastrados e pode mudar o role de cada um (admin / vendedor / logística). Você não pode rebaixar o próprio role — guardrail de segurança pra evitar lockout do admin.',
       cta: { label: 'Usuários', href: '/admin/usuarios' },
-      tip: 'Pra criar usuários novos, rode o script `scripts/seed-users.ts` ou crie via Supabase Dashboard → Authentication.',
+      tip: 'Pra criar usuários novos, rode o script `scripts/seed-users.ts` localmente ou crie via Supabase Dashboard → Authentication → Add User. O sistema gera o profile automaticamente via trigger handle_new_user.',
     },
     {
       icon: History,
       title: 'Histórico com KPIs',
       body:
-        'Em "Histórico", além da lista dos finalizados, você vê total de pedidos, valor faturado acumulado e clientes únicos no período filtrado.',
+        'Em "Histórico", além da lista dos finalizados, você vê 3 KPIs no topo: total de pedidos finalizados, valor faturado acumulado e clientes únicos. Filtre por período pra ver KPIs do mês, semana, etc.',
       cta: { label: 'Histórico', href: '/historico' },
     },
   ],
 };
+
+// ============================================================================
+// COMO COMEÇAR — comum a todos os roles
+// ============================================================================
+
+const GETTING_STARTED: Step[] = [
+  {
+    icon: KeyRound,
+    title: 'Login',
+    body:
+      'Acesse pela URL da empresa com seu e-mail e senha. Se esqueceu a senha, fale com um admin — a recuperação automática por e-mail não está habilitada (o sistema é interno, sem caixa postal externa).',
+    tip: 'Marque o site nos favoritos do navegador. A sessão fica salva por algumas semanas, então no dia a dia você não precisa logar de novo.',
+  },
+  {
+    icon: Layers,
+    title: 'Sidebar e navegação',
+    body:
+      'A barra lateral à esquerda mostra só os menus do seu setor. Cada seção (Operação / Consulta / Ajuda) agrupa funcionalidades relacionadas. Quem é admin enxerga uma seção "Admin" extra.',
+  },
+  {
+    icon: Moon,
+    title: 'Tema claro ou escuro',
+    body:
+      'Ícone de sol/lua no rodapé da sidebar (ao lado do botão Sair). Muda só pra você, não afeta os outros usuários. Útil em galpões com pouca luz ou pra economizar bateria do celular.',
+  },
+  {
+    icon: Smartphone,
+    title: 'Funciona no celular',
+    body:
+      'A plataforma é responsiva — em telas pequenas, a sidebar vira um menu hambúrguer no topo, e as listagens viram cards verticais em vez de tabela horizontal. Pode usar tablet, celular ou desktop, todos com mesmo login.',
+  },
+  {
+    icon: RefreshCw,
+    title: 'Atualização em tempo real',
+    body:
+      'Quando alguém cria, edita ou muda status de um pedido, sua tela é avisada na hora. Não precisa apertar F5. Isso vale entre setores: vendedor vê em tempo real quando a logística pega o pedido dele, e vice-versa.',
+  },
+];
+
+// ============================================================================
+// RECURSOS AVANÇADOS — comum a todos
+// ============================================================================
+
+const ADVANCED_FEATURES: Step[] = [
+  {
+    icon: Upload,
+    title: 'Upload de vários PDFs em lote',
+    body:
+      'Em "Novo Pedido", você pode arrastar 2 ou mais PDFs ao mesmo tempo. O sistema processa em paralelo, checa duplicados e salva todos como rascunho. No fim aparece um resumo com KPIs (Criados / Duplicados / Erros) e link pra cada pedido.',
+    tip: 'Ideal pro vendedor que junta os PDFs do dia inteiro e sobe tudo de uma vez no fim do expediente.',
+  },
+  {
+    icon: Copy,
+    title: 'Detecção automática de duplicado',
+    body:
+      'Se você subir o mesmo PDF (mesmo "Documento ERP" — ex.: L4077) duas vezes, o sistema detecta e abre o existente em vez de criar duplicata. Garantia: índice único parcial no banco (status<>cancelado), então pedidos cancelados podem ser re-importados se precisar.',
+  },
+  {
+    icon: ArrowUpDown,
+    title: 'Ordenação por coluna',
+    body:
+      'Nas listagens, clique no cabeçalho de qualquer coluna pra ordenar. Click de novo inverte a direção. Funciona em Mapa, Cliente, Bairro, Entrega e Valor. O ícone de seta indica a direção atual.',
+  },
+  {
+    icon: Filter,
+    title: 'Filtros de data',
+    body:
+      'Acima da tabela tem atalhos rápidos (Todos / Hoje / Semana / Mês) e um range personalizado (De [data] até [data]). Tudo aplicado sobre "data de entrega". Combina com filtro de status e busca livre.',
+  },
+];
+
+// ============================================================================
+// FAQ — comum a todos
+// ============================================================================
+
+type FAQ = { q: string; a: React.ReactNode };
+
+const FAQS: FAQ[] = [
+  {
+    q: 'O PDF subiu mas vários campos vieram em branco / errados',
+    a: (
+      <>
+        O parser foi calibrado pro layout do ERP padrão da Franzoni. Layouts diferentes podem ter
+        campos não-reconhecidos. <strong>Solução:</strong> na tela de revisão, edite os campos
+        faltantes manualmente antes de enviar pra logística. O texto extraído fica salvo de
+        qualquer forma, então mesmo se a UI tiver problema o dado original do PDF está
+        preservado no Storage.
+      </>
+    ),
+  },
+  {
+    q: 'Tentei subir um pedido e apareceu mensagem "já existe pedido com este documento"',
+    a: (
+      <>
+        Significa que esse <strong>Documento ERP</strong> já foi importado antes e ainda não foi
+        cancelado. O sistema te leva direto pro pedido existente. Se foi engano, ignore; se for
+        re-emissão de um pedido cancelado, peça pro admin reativar (ou re-importe depois de
+        cancelar o duplicado).
+      </>
+    ),
+  },
+  {
+    q: 'Posso cancelar um pedido depois que a logística começou a separar?',
+    a: (
+      <>
+        Vendedor só cancela em <strong>rascunho</strong> ou <strong>pendente</strong>. Depois que
+        entra em <strong>em separação</strong>, só admin cancela. É proteção pra evitar
+        re-trabalho da equipe de entrega que já tirou o produto do estoque.
+      </>
+    ),
+  },
+  {
+    q: 'O número do mapa pulou — vi #5 depois #7, cadê o #6?',
+    a: (
+      <>
+        Provavelmente o #6 foi um pedido que falhou ao salvar e nunca chegou no banco — o número
+        já tinha sido reservado pela sequence do Postgres. Não há perda de dados; é só uma
+        descontinuidade na numeração. Acontece raramente.
+      </>
+    ),
+  },
+  {
+    q: 'A impressão do mapa saiu cortada / muito grande',
+    a: (
+      <>
+        No diálogo de impressão do Chrome, verifique: <strong>Tamanho do papel = A4</strong> e{' '}
+        <strong>Escala = 100%</strong> (não "Ajustar à página"). Margens podem ficar em "Padrão"
+        ou "Mínimas". A view de impressão (<code className="text-xs">/imprimir/[id]</code>) já
+        vem com layout A4 otimizado.
+      </>
+    ),
+  },
+];
+
+// ============================================================================
+// GLOSSÁRIO — comum a todos, agora mais completo
+// ============================================================================
+
+type GlossaryEntry = { term: string; def: React.ReactNode };
+
+const GLOSSARY: GlossaryEntry[] = [
+  {
+    term: 'Mapa de Carregamento',
+    def: (
+      <>
+        Documento que a logística imprime e leva pra entrega. Tem cliente, endereço, itens da
+        loja/depósito, totais, peso e linha de assinatura do conferente. O nome da plataforma vem
+        daí.
+      </>
+    ),
+  },
+  {
+    term: 'Documento ERP',
+    def: (
+      <>
+        Número do pedido como o ERP emitiu (ex.: <code className="text-xs">L4077</code>). Único
+        no sistema — duplicado é detectado e bloqueado.
+      </>
+    ),
+  },
+  {
+    term: 'Número do Mapa',
+    def: (
+      <>
+        Identificador interno do Franzoni (ex.: <code className="text-xs">#42</code>),
+        sequencial. Diferente do Documento ERP. Aparece em todas as listagens e na impressão.
+      </>
+    ),
+  },
+  {
+    term: 'Ponto de Retirada',
+    def: (
+      <>
+        Onde os produtos saem fisicamente — pode ser <strong>Loja</strong> ou{' '}
+        <strong>Depósito</strong>. Um pedido pode ter dois pontos (ex.: parte da loja, parte do
+        depósito).
+      </>
+    ),
+  },
+  {
+    term: 'Rascunho vs Pendente',
+    def: (
+      <>
+        <strong>Rascunho</strong> = só o próprio vendedor vê, ainda não foi pra logística.{' '}
+        <strong>Pendente</strong> = na fila aguardando separação. O vendedor decide quando promover.
+      </>
+    ),
+  },
+  {
+    term: 'Em separação',
+    def: (
+      <>
+        Logística começou a separar fisicamente os produtos. Vendedor não pode mais editar o
+        pedido, só ver status e cancelar via admin.
+      </>
+    ),
+  },
+  {
+    term: 'Pré-carga',
+    def: <>Identificação interna da carga (ex.: lote do dia, código de roteiro).</>,
+  },
+  {
+    term: 'Conferente',
+    def: (
+      <>
+        Pessoa responsável por conferir fisicamente o conteúdo da carga antes da saída. Nome
+        impresso no mapa, com linha pra assinar.
+      </>
+    ),
+  },
+  {
+    term: 'Bairro destacado',
+    def: (
+      <>
+        A logística ordena os pedidos por bairro pra otimizar deslocamento. Por isso o bairro
+        aparece em pill colorida nas listagens e é destacado na revisão — sempre confira esse
+        campo antes de enviar.
+      </>
+    ),
+  },
+  {
+    term: 'Forma de Pagamento',
+    def: (
+      <>
+        Como o cliente vai pagar (ex.: "Entrega a Receber", "À Vista", parcelado). Aparece no
+        mapa pra a logística saber se precisa cobrar na entrega. Parcelas (ex.: "10x") vem junto.
+      </>
+    ),
+  },
+];
 
 const ROLE_HEADERS: Record<UserRole, { title: string; sub: string }> = {
   vendedor: {
@@ -162,13 +407,17 @@ const ROLE_HEADERS: Record<UserRole, { title: string; sub: string }> = {
   },
 };
 
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
+
 export function TutorialContent({ role }: { role: UserRole }) {
   const steps = STEPS_BY_ROLE[role];
   const header = ROLE_HEADERS[role];
 
   return (
-    <div className="max-w-4xl mx-auto w-full space-y-6">
-      {/* Intro */}
+    <div className="max-w-4xl mx-auto w-full space-y-8">
+      {/* Hero */}
       <ContentCard className="p-6!">
         <div className="flex items-start gap-4">
           <div className="h-12 w-12 rounded-xl bg-franzoni-orange/15 flex items-center justify-center shrink-0">
@@ -183,98 +432,149 @@ export function TutorialContent({ role }: { role: UserRole }) {
         </div>
       </ContentCard>
 
-      {/* Steps */}
-      <ol className="space-y-4">
-        {steps.map((step, i) => {
-          const Icon = step.icon;
-          return (
-            <li key={i}>
-              <ContentCard className="p-5!">
-                <div className="flex gap-4">
-                  <div className="flex flex-col items-center shrink-0">
-                    <div className="h-9 w-9 rounded-full bg-franzoni-orange text-white flex items-center justify-center font-heading font-bold text-sm shadow-sm shadow-franzoni-orange/40">
-                      {i + 1}
-                    </div>
-                    {i < steps.length - 1 && (
-                      <div className="w-px flex-1 mt-2 bg-border/60" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 pb-1">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Icon className="h-4 w-4 text-franzoni-navy dark:text-franzoni-navy-100 shrink-0" />
-                      <h3 className="font-heading font-semibold text-base text-foreground">
-                        {step.title}
-                      </h3>
-                    </div>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      {step.body}
-                    </p>
-                    {step.tip && (
-                      <p className="mt-3 text-xs px-3 py-2 rounded-md bg-franzoni-navy/5 dark:bg-white/5 border-l-2 border-franzoni-navy/40 text-foreground/80">
-                        <span className="font-semibold text-franzoni-navy dark:text-franzoni-navy-100">
-                          Dica:
-                        </span>{' '}
-                        {step.tip}
-                      </p>
-                    )}
-                    {step.cta && (
-                      <Link
-                        href={step.cta.href}
-                        className={cn(
-                          buttonVariants({ variant: 'outline', size: 'sm' }),
-                          'mt-3 text-xs',
-                        )}
-                      >
-                        {step.cta.label} →
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              </ContentCard>
-            </li>
-          );
-        })}
-      </ol>
+      {/* Seção: Como começar */}
+      <Section title="Como começar" subtitle="Primeiros passos pra qualquer perfil">
+        <StepList steps={GETTING_STARTED} />
+      </Section>
 
-      {/* Glossário compartilhado */}
+      {/* Seção: Fluxo principal */}
+      <Section
+        title={`Seu fluxo diário (${roleLabel(role)})`}
+        subtitle="As 5 etapas do trabalho de quem é seu setor"
+      >
+        <StepList steps={steps} />
+      </Section>
+
+      {/* Seção: Recursos avançados */}
+      <Section title="Recursos avançados" subtitle="Pra extrair mais da plataforma">
+        <StepList steps={ADVANCED_FEATURES} numbered={false} />
+      </Section>
+
+      {/* FAQ */}
+      <ContentCard className="p-5!">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle className="h-4 w-4 text-franzoni-orange" />
+          <h3 className="font-heading font-semibold text-base">Dúvidas frequentes</h3>
+        </div>
+        <dl className="divide-y divide-border/40">
+          {FAQS.map((faq, i) => (
+            <div key={i} className="py-3 first:pt-0 last:pb-0">
+              <dt className="font-semibold text-sm text-foreground mb-1.5">{faq.q}</dt>
+              <dd className="text-sm text-muted-foreground leading-relaxed">{faq.a}</dd>
+            </div>
+          ))}
+        </dl>
+      </ContentCard>
+
+      {/* Glossário */}
       <ContentCard className="p-5!">
         <div className="flex items-center gap-2 mb-3">
           <HelpCircle className="h-4 w-4 text-franzoni-orange" />
           <h3 className="font-heading font-semibold text-base">Glossário</h3>
         </div>
-        <dl className="space-y-2.5 text-sm">
-          <Term term="Mapa de Carregamento">
-            Documento que a logística imprime e leva pra entrega. Tem cliente, endereço,
-            itens da loja/depósito, totais, peso e linha de assinatura do conferente.
-          </Term>
-          <Term term="Documento ERP">
-            Número do pedido como o ERP emitiu (ex.: <code className="text-xs">L4077</code>).
-            Esse número é único — se você subir o mesmo PDF duas vezes, o sistema detecta.
-          </Term>
-          <Term term="Ponto de Retirada">
-            Onde os produtos saem fisicamente — pode ser <strong>Loja</strong> ou{' '}
-            <strong>Depósito</strong>. Um pedido pode ter dois pontos (ex.: parte da loja,
-            parte do depósito).
-          </Term>
-          <Term term="Rascunho vs Pendente">
-            <strong>Rascunho</strong> = só você vê, ainda não foi pra logística.{' '}
-            <strong>Pendente</strong> = na fila aguardando separação.
-          </Term>
-          <Term term="Bairro destacado">
-            A logística ordena os pedidos por bairro pra economizar deslocamento. Sempre
-            confirme esse campo na revisão.
-          </Term>
+        <dl className="space-y-3 text-sm">
+          {GLOSSARY.map((g, i) => (
+            <div key={i} className="flex flex-col sm:flex-row gap-1 sm:gap-3">
+              <dt className="font-semibold text-foreground sm:w-44 shrink-0">{g.term}</dt>
+              <dd className="text-muted-foreground leading-relaxed">{g.def}</dd>
+            </div>
+          ))}
         </dl>
       </ContentCard>
     </div>
   );
 }
 
-function Term({ term, children }: { term: string; children: React.ReactNode }) {
+// ============================================================================
+// SUBCOMPONENTES
+// ============================================================================
+
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex flex-col sm:flex-row gap-1 sm:gap-3">
-      <dt className="font-semibold text-foreground sm:w-44 shrink-0">{term}</dt>
-      <dd className="text-muted-foreground leading-relaxed">{children}</dd>
-    </div>
+    <section>
+      <header className="mb-3">
+        <h2 className="font-heading text-lg font-bold text-franzoni-navy dark:text-white">
+          {title}
+        </h2>
+        {subtitle && (
+          <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+        )}
+      </header>
+      {children}
+    </section>
   );
+}
+
+function StepList({ steps, numbered = true }: { steps: Step[]; numbered?: boolean }) {
+  return (
+    <ol className="space-y-4">
+      {steps.map((step, i) => {
+        const Icon = step.icon;
+        return (
+          <li key={i}>
+            <ContentCard className="p-5!">
+              <div className="flex gap-4">
+                <div className="flex flex-col items-center shrink-0">
+                  {numbered ? (
+                    <div className="h-9 w-9 rounded-full bg-franzoni-orange text-white flex items-center justify-center font-heading font-bold text-sm shadow-sm shadow-franzoni-orange/40">
+                      {i + 1}
+                    </div>
+                  ) : (
+                    <div className="h-9 w-9 rounded-full bg-franzoni-navy/10 dark:bg-white/10 flex items-center justify-center">
+                      <Icon className="h-4 w-4 text-franzoni-navy dark:text-franzoni-navy-100" />
+                    </div>
+                  )}
+                  {i < steps.length - 1 && (
+                    <div className="w-px flex-1 mt-2 bg-border/60" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0 pb-1">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {numbered && (
+                      <Icon className="h-4 w-4 text-franzoni-navy dark:text-franzoni-navy-100 shrink-0" />
+                    )}
+                    <h3 className="font-heading font-semibold text-base text-foreground">
+                      {step.title}
+                    </h3>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{step.body}</p>
+                  {step.tip && (
+                    <p className="mt-3 text-xs px-3 py-2 rounded-md bg-franzoni-navy/5 dark:bg-white/5 border-l-2 border-franzoni-navy/40 text-foreground/80">
+                      <span className="font-semibold text-franzoni-navy dark:text-franzoni-navy-100">
+                        Dica:
+                      </span>{' '}
+                      {step.tip}
+                    </p>
+                  )}
+                  {step.cta && (
+                    <Link
+                      href={step.cta.href}
+                      className={cn(
+                        buttonVariants({ variant: 'outline', size: 'sm' }),
+                        'mt-3 text-xs',
+                      )}
+                    >
+                      {step.cta.label} →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </ContentCard>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function roleLabel(role: UserRole): string {
+  return role === 'admin' ? 'Admin' : role === 'logistica' ? 'Logística' : 'Vendedor';
 }
