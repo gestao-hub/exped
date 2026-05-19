@@ -673,12 +673,18 @@ function ParcialItensInline({ itens, compact = false }: { itens: ParcialItem[]; 
   return (
     <div className={cn('space-y-0.5 mt-1', compact ? 'text-[11px]' : 'text-xs')}>
       {visiveis.map((it) => (
-        <div key={it.codigo} className="text-amber-700 dark:text-amber-400 font-normal truncate">
-          <span className="font-medium">{it.descricao}</span>
-          <span className="font-mono ml-1">
+        <div
+          key={it.codigo}
+          className="text-amber-700 dark:text-amber-400 font-normal flex items-baseline gap-1.5 min-w-0"
+          title={`${it.descricao} — entregue ${fmtQtd(it.quantidade_entregue)} de ${fmtQtd(it.quantidade)} ${it.unidade}, falta ${fmtQtd(it.restante)} ${it.unidade}`}
+        >
+          <span className="font-medium truncate min-w-0">{it.descricao}</span>
+          <span className="font-mono shrink-0 whitespace-nowrap">
             {fmtQtd(it.quantidade_entregue)}/{fmtQtd(it.quantidade)} {it.unidade}
           </span>
-          <span className="text-muted-foreground"> · falta {fmtQtd(it.restante)} {it.unidade}</span>
+          <span className="text-muted-foreground shrink-0 whitespace-nowrap">
+            · falta {fmtQtd(it.restante)} {it.unidade}
+          </span>
         </div>
       ))}
       {sobra > 0 && (
