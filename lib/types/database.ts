@@ -14,6 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
+      clientes: {
+        Row: {
+          bairro_padrao: string | null
+          cep_padrao: string | null
+          cidade_padrao: string | null
+          cnpj_cpf: string | null
+          codigo_erp: string | null
+          created_at: string
+          endereco_padrao: string | null
+          id: string
+          nome: string
+          observacoes: string | null
+          telefone_padrao: string | null
+          uf_padrao: string | null
+          updated_at: string
+        }
+        Insert: {
+          bairro_padrao?: string | null
+          cep_padrao?: string | null
+          cidade_padrao?: string | null
+          cnpj_cpf?: string | null
+          codigo_erp?: string | null
+          created_at?: string
+          endereco_padrao?: string | null
+          id?: string
+          nome: string
+          observacoes?: string | null
+          telefone_padrao?: string | null
+          uf_padrao?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bairro_padrao?: string | null
+          cep_padrao?: string | null
+          cidade_padrao?: string | null
+          cnpj_cpf?: string | null
+          codigo_erp?: string | null
+          created_at?: string
+          endereco_padrao?: string | null
+          id?: string
+          nome?: string
+          observacoes?: string | null
+          telefone_padrao?: string | null
+          uf_padrao?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       pedido_eventos: {
         Row: {
           created_at: string
@@ -233,6 +281,7 @@ export type Database = {
           cliente_cnpj_cpf: string | null
           cliente_codigo: string | null
           cliente_endereco: string | null
+          cliente_id: string | null
           cliente_nome: string
           cliente_telefone: string | null
           cliente_uf: string | null
@@ -258,6 +307,7 @@ export type Database = {
           cliente_cnpj_cpf?: string | null
           cliente_codigo?: string | null
           cliente_endereco?: string | null
+          cliente_id?: string | null
           cliente_nome?: string
           cliente_telefone?: string | null
           cliente_uf?: string | null
@@ -283,6 +333,7 @@ export type Database = {
           cliente_cnpj_cpf?: string | null
           cliente_codigo?: string | null
           cliente_endereco?: string | null
+          cliente_id?: string | null
           cliente_nome?: string
           cliente_telefone?: string | null
           cliente_uf?: string | null
@@ -302,6 +353,13 @@ export type Database = {
           vendedor_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "pedidos_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "pedidos_vendedor_id_fkey"
             columns: ["vendedor_id"]

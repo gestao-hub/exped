@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
+import { upsertCliente } from '@/lib/clientes/upsert';
 
 export type SavePedidoResult =
   | { error: string }
@@ -48,6 +49,26 @@ export async function criarPedidoAction(
     }
   }
 
+  // Upsert do cliente (cadastro central) — opcional, tolera falha
+  let cliente_id: string | null = null;
+  try {
+    const { id } = await upsertCliente(supabase, {
+      cnpj_cpf:   d.cliente_cnpj_cpf,
+      codigo_erp: d.cliente_codigo,
+      nome:       d.cliente_nome,
+      endereco:   d.cliente_endereco,
+      bairro:     d.cliente_bairro,
+      cidade:     d.cliente_cidade,
+      uf:         d.cliente_uf,
+      cep:        d.cliente_cep,
+      telefone:   d.cliente_telefone,
+    });
+    cliente_id = id;
+  } catch {
+    // não-bloqueante: pedido salva com cliente_id=null se upsert falhar
+    cliente_id = null;
+  }
+
   const { data: pedido, error: insErr } = await supabase
     .from('pedidos')
     .insert({
@@ -63,6 +84,7 @@ export async function criarPedidoAction(
       cliente_uf:       d.cliente_uf ?? null,
       cliente_cep:      d.cliente_cep ?? null,
       cliente_telefone: d.cliente_telefone ?? null,
+      cliente_id,
       forma_pagamento:  d.forma_pagamento ?? null,
       parcelas:         d.parcelas ?? null,
       valor_total:      d.valor_total,

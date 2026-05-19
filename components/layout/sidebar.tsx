@@ -9,6 +9,7 @@ import {
   TruckIcon,
   History,
   Users,
+  UsersRound,
   LogOut,
   Moon,
   Sun,
@@ -77,7 +78,10 @@ const NAV: Record<UserRole, NavSection[]> = {
     },
     {
       title: 'Admin',
-      items: [{ label: 'Usuários', href: '/admin/usuarios', icon: Users }],
+      items: [
+        { label: 'Clientes',  href: '/admin/clientes',  icon: UsersRound },
+        { label: 'Usuários',  href: '/admin/usuarios',  icon: Users },
+      ],
     },
     {
       title: 'Ajuda',
