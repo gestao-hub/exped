@@ -25,7 +25,7 @@ test.describe('Upload PDF (vendedor) — CRUD com cleanup', () => {
     await page.getByRole('button', { name: /processar pdf/i }).click();
 
     await expect(page.getByText(/revisar pedido/i)).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByLabel(/documento erp/i)).toHaveValue(docId);
+    await expect(page.locator('input[name="documento_erp"]')).toHaveValue(docId);
 
     await page.getByRole('button', { name: /salvar rascunho/i }).click();
     await page.waitForURL(/\/vendas\/[0-9a-f-]{36}/, { timeout: 15_000 });
