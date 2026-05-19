@@ -28,14 +28,10 @@ export function BaixaForm({
   pedidoId,
   status,
   defaultValues,
-  motoristas = [],
-  veiculos = [],
 }: {
   pedidoId: string;
   status: PedidoStatus;
   defaultValues: LogisticaFormInput;
-  motoristas?: { nome: string }[];
-  veiculos?: { placa: string; modelo: string | null }[];
 }) {
   const router = useRouter();
   const [savePending, startSave] = useTransition();
@@ -136,20 +132,6 @@ export function BaixaForm({
           <Textarea rows={3} {...register('observacoes')} />
         </FormField>
 
-        {/* Datalists pra autocomplete dos campos motorista/veiculo */}
-        <datalist id="motoristas-list">
-          {motoristas.map((m, i) => (
-            <option key={i} value={m.nome} />
-          ))}
-        </datalist>
-        <datalist id="veiculos-list">
-          {veiculos.map((v, i) => (
-            <option
-              key={i}
-              value={v.modelo ? `${v.placa} - ${v.modelo}` : v.placa}
-            />
-          ))}
-        </datalist>
 
         <Separator />
 

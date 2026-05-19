@@ -67,27 +67,6 @@ export function MapaCarregamento({
         </div>
       </header>
 
-      {/* Logística de Entrega de Mercadorias */}
-      <Section title="Logística de Entrega">
-        <Grid cols={4}>
-          <KV label="Pré-Carga"  value={logistica?.pre_carga} />
-          <KV label="Motorista"  value={logistica?.motorista} />
-          <KV label="Veículo"    value={logistica?.veiculo} />
-          <KV label="Região"     value={logistica?.regiao} />
-          <KV label="Km Inicial" value={logistica?.km_inicial} />
-          <KV label="Km Final"   value={logistica?.km_final} />
-          <KV label="Conferente" value={logistica?.conferente} />
-          <KV
-            label="Atualizado em"
-            value={
-              logistica?.updated_at
-                ? format(new Date(logistica.updated_at), 'dd/MM HH:mm', { locale: ptBR })
-                : '—'
-            }
-          />
-        </Grid>
-      </Section>
-
       {/* Cliente */}
       <Section title="Cliente">
         <Grid cols={4}>

@@ -28,8 +28,6 @@ import {
   BarChart3,
   Download,
   UsersRound,
-  IdCard,
-  Car,
   type LucideIcon,
 } from 'lucide-react';
 import { ContentCard } from '@/components/layout/content-card';
@@ -156,13 +154,6 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       tip: 'Quando vendedor sobe PDF, o sistema busca por CNPJ. Se existe, reutiliza; se não, cria. Nome do cadastro não é sobrescrito automaticamente — você edita aqui se quiser padronizar.',
     },
     {
-      icon: IdCard,
-      title: 'Motoristas e veículos',
-      body:
-        'Em "Motoristas" e "Veículos", cadastre quem dirige e o que dirige. Os ativos aparecem como sugestão (autocomplete) no formulário de baixa da logística — ninguém digita mais nome de motorista do zero.',
-      cta: { label: 'Motoristas', href: '/admin/motoristas' },
-    },
-    {
       icon: Users,
       title: 'Gerencie usuários e roles',
       body:
@@ -266,12 +257,6 @@ const ADVANCED_FEATURES: Step[] = [
     title: 'Exportar histórico em CSV (admin)',
     body:
       'Botão "Exportar CSV" no /histórico baixa planilha completa (cliente, valor, motorista, veículo, conferente, kms, pesos, etc.) pronta pro Excel. BOM UTF-8 incluído então acentos aparecem certo.',
-  },
-  {
-    icon: Car,
-    title: 'Autocomplete de motorista e veículo (logística)',
-    body:
-      'Quando o admin cadastra motoristas e veículos em /admin/motoristas e /admin/veiculos, a logística vê eles como sugestão (autocomplete nativo do browser) ao digitar no formulário de baixa.',
   },
 ];
 

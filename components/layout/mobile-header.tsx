@@ -16,8 +16,6 @@ import {
   History,
   Users,
   UsersRound,
-  IdCard,
-  Car,
   LogOut,
   Lightbulb,
 } from 'lucide-react';
@@ -43,10 +41,8 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Novo Pedido',  href: '/vendas/novo',    icon: PackagePlus },
     { label: 'Logística',    href: '/logistica',      icon: TruckIcon },
     { label: 'Histórico',    href: '/historico',      icon: History },
-    { label: 'Clientes',     href: '/admin/clientes',    icon: UsersRound },
-    { label: 'Motoristas',   href: '/admin/motoristas',  icon: IdCard },
-    { label: 'Veículos',     href: '/admin/veiculos',    icon: Car },
-    { label: 'Usuários',     href: '/admin/usuarios',    icon: Users },
+    { label: 'Clientes',     href: '/admin/clientes', icon: UsersRound },
+    { label: 'Usuários',     href: '/admin/usuarios', icon: Users },
     { label: 'Tutorial',     href: '/tutorial',       icon: Lightbulb },
   ],
 };

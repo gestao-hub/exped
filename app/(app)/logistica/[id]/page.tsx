@@ -5,6 +5,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { StatusBadge } from '@/components/status-badge';
 import { MapaCarregamento, type PontoComItens } from '@/components/mapa-carregamento';
+import { PedidoComentarios } from '@/components/pedido-comentarios';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 import type { PedidoItem } from '@/lib/types';
@@ -19,12 +20,15 @@ export default async function LogisticaDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const [
     { data: pedido },
     { data: pontosRaw },
     { data: logistica },
-    { data: motoristas },
-    { data: veiculos },
+    { data: comentarios },
   ] = await Promise.all([
     supabase.from('pedidos').select('*').eq('id', id).single(),
     supabase
@@ -33,8 +37,11 @@ export default async function LogisticaDetailPage({
       .eq('pedido_id', id)
       .order('ordem'),
     supabase.from('pedido_logistica').select('*').eq('pedido_id', id).maybeSingle(),
-    supabase.from('motoristas').select('nome').eq('ativo', true).order('nome'),
-    supabase.from('veiculos').select('placa, modelo').eq('ativo', true).order('placa'),
+    supabase
+      .from('pedido_comentarios')
+      .select('*, autor:profiles(full_name, email, role)')
+      .eq('pedido_id', id)
+      .order('created_at', { ascending: true }),
   ]);
 
   if (!pedido) notFound();
@@ -114,13 +121,17 @@ export default async function LogisticaDetailPage({
         vendedor={vendedor}
       />
 
-      <BaixaForm
-        pedidoId={id}
-        status={pedido.status}
-        defaultValues={defaults}
-        motoristas={(motoristas ?? []) as { nome: string }[]}
-        veiculos={(veiculos ?? []) as { placa: string; modelo: string | null }[]}
-      />
+      <BaixaForm pedidoId={id} status={pedido.status} defaultValues={defaults} />
+
+      {user && (
+        <PedidoComentarios
+          pedidoId={id}
+          initial={
+            (comentarios ?? []) as unknown as React.ComponentProps<typeof PedidoComentarios>['initial']
+          }
+          currentUserId={user.id}
+        />
+      )}
     </>
   );
 }

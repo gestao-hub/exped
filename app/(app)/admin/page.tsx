@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Package, TruckIcon, History, Users, UsersRound, IdCard, Car, Clock } from 'lucide-react';
+import { Package, TruckIcon, History, Users, UsersRound, Clock } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { ContentCard } from '@/components/layout/content-card';
 import {
@@ -136,13 +136,11 @@ export default async function AdminDashboard() {
   ];
 
   const shortcuts = [
-    { label: 'Ver Pedidos',    href: '/vendas',           icon: Package,   color: 'text-franzoni-orange' },
-    { label: 'Fila Logística', href: '/logistica',        icon: TruckIcon, color: 'text-franzoni-navy' },
-    { label: 'Histórico',      href: '/historico',        icon: History,   color: 'text-status-finalizado' },
-    { label: 'Clientes',       href: '/admin/clientes',   icon: UsersRound, color: 'text-franzoni-orange' },
-    { label: 'Motoristas',     href: '/admin/motoristas', icon: IdCard,    color: 'text-franzoni-navy' },
-    { label: 'Veículos',       href: '/admin/veiculos',   icon: Car,       color: 'text-franzoni-navy' },
-    { label: 'Usuários',       href: '/admin/usuarios',   icon: Users,     color: 'text-franzoni-orange' },
+    { label: 'Ver Pedidos',    href: '/vendas',         icon: Package,    color: 'text-franzoni-orange' },
+    { label: 'Fila Logística', href: '/logistica',      icon: TruckIcon,  color: 'text-franzoni-navy' },
+    { label: 'Histórico',      href: '/historico',      icon: History,    color: 'text-status-finalizado' },
+    { label: 'Clientes',       href: '/admin/clientes', icon: UsersRound, color: 'text-franzoni-orange' },
+    { label: 'Usuários',       href: '/admin/usuarios', icon: Users,      color: 'text-franzoni-orange' },
   ];
 
   return (
