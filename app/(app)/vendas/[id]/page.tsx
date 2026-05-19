@@ -5,6 +5,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { ContentCard, ContentCardTitle } from '@/components/layout/content-card';
 import { MapaCarregamento, type PontoComItens } from '@/components/mapa-carregamento';
+import { PedidoComentarios } from '@/components/pedido-comentarios';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -20,22 +21,36 @@ export default async function PedidoDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: pedido }, { data: pontosRaw }, { data: logistica }, { data: eventos }] =
-    await Promise.all([
-      supabase.from('pedidos').select('*').eq('id', id).single(),
-      supabase
-        .from('pedido_pontos_retirada')
-        .select('*, itens:pedido_itens(*)')
-        .eq('pedido_id', id)
-        .order('ordem'),
-      supabase.from('pedido_logistica').select('*').eq('pedido_id', id).maybeSingle(),
-      supabase
-        .from('pedido_eventos')
-        .select('*, usuario:profiles(full_name)')
-        .eq('pedido_id', id)
-        .order('created_at', { ascending: false })
-        .limit(20),
-    ]);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const [
+    { data: pedido },
+    { data: pontosRaw },
+    { data: logistica },
+    { data: eventos },
+    { data: comentarios },
+  ] = await Promise.all([
+    supabase.from('pedidos').select('*').eq('id', id).single(),
+    supabase
+      .from('pedido_pontos_retirada')
+      .select('*, itens:pedido_itens(*)')
+      .eq('pedido_id', id)
+      .order('ordem'),
+    supabase.from('pedido_logistica').select('*').eq('pedido_id', id).maybeSingle(),
+    supabase
+      .from('pedido_eventos')
+      .select('*, usuario:profiles(full_name)')
+      .eq('pedido_id', id)
+      .order('created_at', { ascending: false })
+      .limit(20),
+    supabase
+      .from('pedido_comentarios')
+      .select('*, autor:profiles(full_name, email, role)')
+      .eq('pedido_id', id)
+      .order('created_at', { ascending: true }),
+  ]);
 
   if (!pedido) notFound();
 
@@ -89,6 +104,16 @@ export default async function PedidoDetailPage({
         logistica={logistica ?? undefined}
         vendedor={vendedor}
       />
+
+      {user && (
+        <PedidoComentarios
+          pedidoId={id}
+          initial={
+            (comentarios ?? []) as unknown as React.ComponentProps<typeof PedidoComentarios>['initial']
+          }
+          currentUserId={user.id}
+        />
+      )}
 
       <ContentCard
         header={
