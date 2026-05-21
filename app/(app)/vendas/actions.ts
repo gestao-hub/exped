@@ -97,6 +97,15 @@ export async function criarPedidoAction(
     .single();
 
   if (insErr || !pedido) {
+    // Colisão no índice único global de documento_erp. O dedup acima roda sob
+    // RLS e só enxerga os pedidos do próprio vendedor; quando o documento já
+    // existe num pedido ATIVO de OUTRO usuário, o dedup não vê e a inserção
+    // bate aqui. Traduz o erro cru do Postgres numa mensagem amigável.
+    if (insErr?.code === '23505' && insErr.message.includes('pedidos_documento_erp_uniq')) {
+      return {
+        error: `Já existe um pedido ativo com o documento ${d.documento_erp}. Ele pode ter sido criado por outro vendedor — fale com um admin se precisar reaproveitar este documento.`,
+      };
+    }
     return { error: insErr?.message ?? 'Falha ao criar pedido' };
   }
 
