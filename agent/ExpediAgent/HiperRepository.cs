@@ -35,7 +35,7 @@ ORDER BY pv.id_pedido_venda;";
                 Codigo = r.GetString(1),
                 DataHoraGeracao = r.GetDateTime(2),
                 IdEntidadeCliente = r.GetInt32(3),
-                IdUsuarioVendedor = r.GetInt32(4),
+                IdUsuarioVendedor = r.IsDBNull(4) ? 0 : Convert.ToInt32(r.GetValue(4)), // id_usuario_vendedor é smallint no Hiper
                 DataEntrega = !r.IsDBNull(5) ? r.GetDateTime(5) : (r.IsDBNull(6) ? null : r.GetDateTime(6)),
                 Observacao = r.IsDBNull(7) ? null : r.GetString(7),
             });
