@@ -207,6 +207,45 @@ export type Database = {
         }
         Relationships: []
       }
+      hiper_vendedor_map: {
+        Row: {
+          created_at: string
+          empresa_id: string
+          hiper_usuario_id: number
+          hiper_usuario_nome: string | null
+          vendedor_id: string
+        }
+        Insert: {
+          created_at?: string
+          empresa_id: string
+          hiper_usuario_id: number
+          hiper_usuario_nome?: string | null
+          vendedor_id: string
+        }
+        Update: {
+          created_at?: string
+          empresa_id?: string
+          hiper_usuario_id?: number
+          hiper_usuario_nome?: string | null
+          vendedor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hiper_vendedor_map_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hiper_vendedor_map_vendedor_id_fkey"
+            columns: ["vendedor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pedido_comentarios: {
         Row: {
           autor_id: string | null
