@@ -7,7 +7,12 @@ import { pontoRetiradaSchema } from './pedido';
  * O PAGAMENTO também não vem aqui — é extraído do PDF no endpoint.
  */
 export const ingestPedidoSchema = z.object({
-  documento_erp: z.string().max(80).nullable().optional(),
+  documento_erp: z
+    .string()
+    .max(80)
+    .regex(/^[A-Za-z0-9._-]+$/, 'documento_erp com caracteres inválidos')
+    .nullable()
+    .optional(),
   data_emissao: z.string().max(80).nullable().optional(),
   data_entrega: z.string().max(80).nullable().optional(),
   hiper_usuario_id: z.number().int(),

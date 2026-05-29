@@ -105,7 +105,9 @@ export async function POST(req: NextRequest) {
   // 5) Upload do PDF (opcional)
   let storage_pdf_path: string | null = null;
   if (buffer) {
-    const path = `hiper-sync/${empresaId}/${d.documento_erp ?? 'sem-doc'}-${Date.now()}.pdf`;
+    // Sanitiza documento_erp (vem do agente) — evita path traversal na chave do Storage.
+    const safeDoc = (d.documento_erp ?? 'sem-doc').replace(/[^A-Za-z0-9._-]/g, '_');
+    const path = `hiper-sync/${empresaId}/${safeDoc}-${Date.now()}.pdf`;
     const { error: upErr } = await supabase.storage
       .from(BUCKET)
       .upload(path, buffer, { contentType: 'application/pdf', upsert: false });

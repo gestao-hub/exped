@@ -64,6 +64,16 @@ export async function atualizarPedidoAction(
   }
   const d = parsed.data;
 
+  // Precondição: só rascunho pode ser editado aqui (RLS já escopa dono/empresa).
+  // Evita que esta ação apague/recrie pontos/itens de um pedido já enviado.
+  const { data: atual } = await supabase
+    .from('pedidos')
+    .select('status')
+    .eq('id', id)
+    .single();
+  if (!atual) return { error: 'Pedido não encontrado' };
+  if (atual.status !== 'rascunho') return { error: 'Apenas rascunhos podem ser editados' };
+
   const { data: pedido, error: upErr } = await supabase
     .from('pedidos')
     .update({
@@ -86,9 +96,10 @@ export async function atualizarPedidoAction(
       status,
     })
     .eq('id', id)
+    .eq('status', 'rascunho') // transição atômica: não corre com mudança de status
     .select('id, numero_mapa')
     .single();
-  if (upErr || !pedido) return { error: upErr?.message ?? 'Falha ao atualizar pedido' };
+  if (upErr || !pedido) return { error: upErr?.message ?? 'Pedido não encontrado ou não é mais rascunho' };
 
   // Substitui pontos/itens (rascunho ainda não tem entrega registrada).
   const { data: pontosAntigos } = await supabase
