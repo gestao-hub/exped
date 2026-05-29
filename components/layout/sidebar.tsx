@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { FranzoniLogo } from '@/components/franzoni-logo';
 import { useUser } from '@/components/providers/user-provider';
 import type { UserRole } from '@/lib/types';
+import type { EmpresaAtual } from '@/lib/empresa/current';
 import type { LucideIcon } from 'lucide-react';
 
 type NavItem = { label: string; href: string; icon: LucideIcon };
@@ -122,7 +123,7 @@ function findActiveHref(pathname: string, sections: NavSection[]): string | null
   return bestHref;
 }
 
-export function Sidebar() {
+export function Sidebar({ empresa }: { empresa?: EmpresaAtual | null }) {
   const { profile } = useUser();
   const pathname = usePathname();
   const { setTheme, resolvedTheme } = useTheme();
@@ -133,8 +134,22 @@ export function Sidebar() {
     <aside className="hidden md:flex w-64 shrink-0 flex-col sidebar-surface text-white">
       {/* Logo — compacto, sem ar extra */}
       <div className="px-3 pt-3 pb-3 flex items-center justify-center border-b border-white/6">
-        <Link href="/" className="block transition-opacity hover:opacity-90">
-          <FranzoniLogo size={80} variant="light" />
+        <Link href="/" className="block text-center transition-opacity hover:opacity-90">
+          {empresa?.logo_url ? (
+            // logo do tenant (white-label); img simples pra aceitar URL externa
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={empresa.logo_url}
+              alt={empresa.nome}
+              className="mx-auto h-16 w-auto object-contain"
+            />
+          ) : empresa && empresa.slug !== 'franzoni' ? (
+            <span className="block px-2 py-3 text-lg font-heading font-bold text-white">
+              {empresa.nome}
+            </span>
+          ) : (
+            <FranzoniLogo size={80} variant="light" />
+          )}
         </Link>
       </div>
 

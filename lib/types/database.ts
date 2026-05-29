@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       cliente_enderecos: {
@@ -46,6 +21,7 @@ export type Database = {
           cidade: string | null
           cliente_id: string
           created_at: string
+          empresa_id: string
           endereco: string | null
           id: string
           is_padrao: boolean
@@ -60,6 +36,7 @@ export type Database = {
           cidade?: string | null
           cliente_id: string
           created_at?: string
+          empresa_id?: string
           endereco?: string | null
           id?: string
           is_padrao?: boolean
@@ -74,6 +51,7 @@ export type Database = {
           cidade?: string | null
           cliente_id?: string
           created_at?: string
+          empresa_id?: string
           endereco?: string | null
           id?: string
           is_padrao?: boolean
@@ -90,6 +68,13 @@ export type Database = {
             referencedRelation: "clientes"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "cliente_enderecos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
         ]
       }
       clientes: {
@@ -100,6 +85,7 @@ export type Database = {
           cnpj_cpf: string | null
           codigo_erp: string | null
           created_at: string
+          empresa_id: string
           endereco_padrao: string | null
           id: string
           nome: string
@@ -115,6 +101,7 @@ export type Database = {
           cnpj_cpf?: string | null
           codigo_erp?: string | null
           created_at?: string
+          empresa_id?: string
           endereco_padrao?: string | null
           id?: string
           nome: string
@@ -130,12 +117,92 @@ export type Database = {
           cnpj_cpf?: string | null
           codigo_erp?: string | null
           created_at?: string
+          empresa_id?: string
           endereco_padrao?: string | null
           id?: string
           nome?: string
           observacoes?: string | null
           telefone_padrao?: string | null
           uf_padrao?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clientes_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dispositivos: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          empresa_id: string
+          id: string
+          last_seen_at: string | null
+          nome: string
+          token_hash: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          empresa_id: string
+          id?: string
+          last_seen_at?: string | null
+          nome: string
+          token_hash: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          empresa_id?: string
+          id?: string
+          last_seen_at?: string | null
+          nome?: string
+          token_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispositivos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      empresas: {
+        Row: {
+          ativo: boolean
+          cor_primaria: string | null
+          created_at: string
+          id: string
+          logo_url: string | null
+          nome: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          cor_primaria?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          nome: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          cor_primaria?: string | null
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          nome?: string
+          slug?: string
           updated_at?: string
         }
         Relationships: []
@@ -410,6 +477,7 @@ export type Database = {
           data_emissao: string | null
           data_entrega: string | null
           documento_erp: string | null
+          empresa_id: string
           forma_pagamento: string | null
           id: string
           numero_mapa: number
@@ -437,6 +505,7 @@ export type Database = {
           data_emissao?: string | null
           data_entrega?: string | null
           documento_erp?: string | null
+          empresa_id?: string
           forma_pagamento?: string | null
           id?: string
           numero_mapa?: number
@@ -464,6 +533,7 @@ export type Database = {
           data_emissao?: string | null
           data_entrega?: string | null
           documento_erp?: string | null
+          empresa_id?: string
           forma_pagamento?: string | null
           id?: string
           numero_mapa?: number
@@ -491,6 +561,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "pedidos_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "pedidos_vendedor_id_fkey"
             columns: ["vendedor_id"]
             isOneToOne: false
@@ -504,8 +581,10 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           email: string
+          empresa_id: string | null
           full_name: string
           id: string
+          is_platform_admin: boolean
           role: Database["public"]["Enums"]["user_role"]
           updated_at: string
         }
@@ -513,8 +592,10 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email?: string
+          empresa_id?: string | null
           full_name?: string
           id: string
+          is_platform_admin?: boolean
           role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
         }
@@ -522,22 +603,34 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email?: string
+          empresa_id?: string | null
           full_name?: string
           id?: string
+          is_platform_admin?: boolean
           role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      current_empresa_id: { Args: never; Returns: string }
       current_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
+      is_platform_admin: { Args: never; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       unaccent: { Args: { "": string }; Returns: string }
@@ -677,9 +770,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       pedido_status: [
