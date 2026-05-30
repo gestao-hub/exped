@@ -179,10 +179,19 @@ export type Database = {
           ativo: boolean
           cor_primaria: string | null
           created_at: string
+          email_remetente: string | null
           id: string
           logo_url: string | null
+          manutencao_lembrete_dias: number
           nome: string
+          notif_email_ativo: boolean
+          notif_whatsapp_ativo: boolean
+          os_situacao_autorizacao: number | null
+          os_situacao_pronto: number | null
           slug: string
+          uazapi_instancia: string | null
+          uazapi_token: string | null
+          uazapi_url: string | null
           updated_at: string
           usa_os: boolean
         }
@@ -190,10 +199,19 @@ export type Database = {
           ativo?: boolean
           cor_primaria?: string | null
           created_at?: string
+          email_remetente?: string | null
           id?: string
           logo_url?: string | null
+          manutencao_lembrete_dias?: number
           nome: string
+          notif_email_ativo?: boolean
+          notif_whatsapp_ativo?: boolean
+          os_situacao_autorizacao?: number | null
+          os_situacao_pronto?: number | null
           slug: string
+          uazapi_instancia?: string | null
+          uazapi_token?: string | null
+          uazapi_url?: string | null
           updated_at?: string
           usa_os?: boolean
         }
@@ -201,10 +219,19 @@ export type Database = {
           ativo?: boolean
           cor_primaria?: string | null
           created_at?: string
+          email_remetente?: string | null
           id?: string
           logo_url?: string | null
+          manutencao_lembrete_dias?: number
           nome?: string
+          notif_email_ativo?: boolean
+          notif_whatsapp_ativo?: boolean
+          os_situacao_autorizacao?: number | null
+          os_situacao_pronto?: number | null
           slug?: string
+          uazapi_instancia?: string | null
+          uazapi_token?: string | null
+          uazapi_url?: string | null
           updated_at?: string
           usa_os?: boolean
         }
@@ -253,6 +280,7 @@ export type Database = {
         Row: {
           categoria: string | null
           cliente_cnpj_cpf: string | null
+          cliente_email: string | null
           cliente_id: string | null
           cliente_nome: string
           cliente_telefone: string | null
@@ -260,6 +288,7 @@ export type Database = {
           data_abertura: string | null
           data_conclusao: string | null
           data_previsao: string | null
+          data_proxima_manutencao: string | null
           defeito_relatado: string | null
           diagnostico: string | null
           documento_erp: string | null
@@ -271,6 +300,7 @@ export type Database = {
           observacao: string | null
           os_erp_id: number | null
           prioridade: number | null
+          proxima_manutencao_obs: string | null
           situacao_erp: number | null
           status: string
           storage_pdf_path: string | null
@@ -282,6 +312,7 @@ export type Database = {
         Insert: {
           categoria?: string | null
           cliente_cnpj_cpf?: string | null
+          cliente_email?: string | null
           cliente_id?: string | null
           cliente_nome?: string
           cliente_telefone?: string | null
@@ -289,6 +320,7 @@ export type Database = {
           data_abertura?: string | null
           data_conclusao?: string | null
           data_previsao?: string | null
+          data_proxima_manutencao?: string | null
           defeito_relatado?: string | null
           diagnostico?: string | null
           documento_erp?: string | null
@@ -300,6 +332,7 @@ export type Database = {
           observacao?: string | null
           os_erp_id?: number | null
           prioridade?: number | null
+          proxima_manutencao_obs?: string | null
           situacao_erp?: number | null
           status?: string
           storage_pdf_path?: string | null
@@ -311,6 +344,7 @@ export type Database = {
         Update: {
           categoria?: string | null
           cliente_cnpj_cpf?: string | null
+          cliente_email?: string | null
           cliente_id?: string | null
           cliente_nome?: string
           cliente_telefone?: string | null
@@ -318,6 +352,7 @@ export type Database = {
           data_abertura?: string | null
           data_conclusao?: string | null
           data_previsao?: string | null
+          data_proxima_manutencao?: string | null
           defeito_relatado?: string | null
           diagnostico?: string | null
           documento_erp?: string | null
@@ -329,6 +364,7 @@ export type Database = {
           observacao?: string | null
           os_erp_id?: number | null
           prioridade?: number | null
+          proxima_manutencao_obs?: string | null
           situacao_erp?: number | null
           status?: string
           storage_pdf_path?: string | null
@@ -401,6 +437,72 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "os_itens_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "ordens_servico"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      os_notificacoes: {
+        Row: {
+          agendada_para: string
+          assunto: string | null
+          canal: string
+          corpo: string
+          created_at: string
+          destino: string
+          empresa_id: string
+          enviada_em: string | null
+          erro: string | null
+          id: string
+          os_id: string | null
+          status: string
+          tentativas: number
+          tipo: string
+        }
+        Insert: {
+          agendada_para?: string
+          assunto?: string | null
+          canal: string
+          corpo: string
+          created_at?: string
+          destino: string
+          empresa_id?: string
+          enviada_em?: string | null
+          erro?: string | null
+          id?: string
+          os_id?: string | null
+          status?: string
+          tentativas?: number
+          tipo: string
+        }
+        Update: {
+          agendada_para?: string
+          assunto?: string | null
+          canal?: string
+          corpo?: string
+          created_at?: string
+          destino?: string
+          empresa_id?: string
+          enviada_em?: string | null
+          erro?: string | null
+          id?: string
+          os_id?: string | null
+          status?: string
+          tentativas?: number
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_notificacoes_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_notificacoes_os_id_fkey"
             columns: ["os_id"]
             isOneToOne: false
             referencedRelation: "ordens_servico"

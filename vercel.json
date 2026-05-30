@@ -9,5 +9,11 @@
       "maxDuration": 30,
       "memory": 1024
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/notificacoes",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server';
 import { PageHeader } from '@/components/layout/page-header';
 import { ContentCard, ContentCardTitle } from '@/components/layout/content-card';
 import { Button } from '@/components/ui/button';
+import { OsNotificacoesPanel, type NotificacaoRow } from '@/components/os-notificacoes-panel';
 
 const BRL = (n: number) => Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dt = (s: string | null) => (s ? format(new Date(s), "dd/MM/yyyy HH:mm", { locale: ptBR }) : '—');
@@ -21,6 +22,22 @@ export default async function OsDetailPage({ params }: { params: Promise<{ id: s
     .eq('id', id)
     .single();
   if (!os) notFound();
+
+  const [{ data: empresa }, { data: notifs }] = await Promise.all([
+    supabase
+      .from('empresas')
+      .select('notif_whatsapp_ativo, notif_email_ativo')
+      .eq('id', os.empresa_id)
+      .single(),
+    supabase
+      .from('os_notificacoes')
+      .select('id, canal, tipo, destino, status, agendada_para, enviada_em, erro')
+      .eq('os_id', id)
+      .order('created_at', { ascending: false })
+      .limit(30),
+  ]);
+  const canaisAtivos = !!(empresa?.notif_whatsapp_ativo || empresa?.notif_email_ativo);
+  const temContato = !!(os.cliente_telefone || os.cliente_email);
 
   const itens = (os.itens ?? []) as Array<{ id: string; codigo: string | null; descricao: string; quantidade: number; preco_unitario: number; total: number }>;
   const servicos = (os.servicos ?? []) as Array<{ id: string; descricao: string; quantidade: number; valor_unitario: number; total: number; tecnico_nome: string | null }>;
@@ -110,6 +127,14 @@ export default async function OsDetailPage({ params }: { params: Promise<{ id: s
           </table>
         )}
       </ContentCard>
+
+      <OsNotificacoesPanel
+        osId={id}
+        canaisAtivos={canaisAtivos}
+        temContato={temContato}
+        proximaManutencao={{ data: os.data_proxima_manutencao, obs: os.proxima_manutencao_obs }}
+        notificacoes={(notifs ?? []) as NotificacaoRow[]}
+      />
     </>
   );
 }
