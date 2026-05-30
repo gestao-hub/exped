@@ -21,8 +21,10 @@ export async function enviarWhatsapp(
   texto: string,
 ): Promise<EnvioResult> {
   if (!creds.uazapi_url || !creds.uazapi_token) return { ok: false, error: 'uazapi não configurado' };
-  const numero = destino.replace(/\D/g, '');
+  let numero = destino.replace(/\D/g, '');
   if (!numero) return { ok: false, error: 'telefone inválido' };
+  // BR: telefone do Hiper costuma vir sem DDI. 10-11 dígitos = DDD+número → prefixa 55.
+  if (numero.length >= 10 && numero.length <= 11 && !numero.startsWith('55')) numero = '55' + numero;
   try {
     const res = await fetch(`${creds.uazapi_url.replace(/\/$/, '')}/send/text`, {
       method: 'POST',
