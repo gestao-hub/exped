@@ -135,8 +135,9 @@ export async function POST(req: NextRequest) {
     cliente_cep: d.cliente_cep ?? null,
     cliente_telefone: d.cliente_telefone ?? null,
     cliente_endereco_id: null,
-    forma_pagamento,
-    parcelas,
+    // Pagamento estruturado do Hiper (negociacao) tem precedência sobre o do PDF.
+    forma_pagamento: d.forma_pagamento ?? forma_pagamento,
+    parcelas: d.parcelas ?? parcelas,
     valor_total: d.valor_total,
     observacoes: d.observacoes ?? null,
     storage_pdf_path,

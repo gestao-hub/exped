@@ -17,6 +17,9 @@ public sealed class PedidoHeader
     public string? NfChave { get; set; }
     public DateTime? NfEmitidaEm { get; set; }
     public decimal? NfValor { get; set; }
+    // Pagamento estruturado (só em pedido finalizado, via negociacao)
+    public string? FormaPagamento { get; set; }
+    public string? Parcelas { get; set; }
 }
 
 public sealed class ClienteRow
@@ -146,6 +149,8 @@ public sealed class IngestPayload
     [JsonPropertyName("cliente_cep")] public string? ClienteCep { get; set; }
     [JsonPropertyName("cliente_telefone")] public string? ClienteTelefone { get; set; }
     [JsonPropertyName("valor_total")] public decimal ValorTotal { get; set; }
+    [JsonPropertyName("forma_pagamento")] public string? FormaPagamento { get; set; }
+    [JsonPropertyName("parcelas")] public string? Parcelas { get; set; }
     [JsonPropertyName("observacoes")] public string? Observacoes { get; set; }
     [JsonPropertyName("pontos_retirada")] public List<IngestPonto> PontosRetirada { get; set; } = new();
 }

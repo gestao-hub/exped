@@ -34,6 +34,10 @@ export const ingestPedidoSchema = z.object({
   cliente_cep: z.string().max(80).nullable().optional(),
   cliente_telefone: z.string().max(80).nullable().optional(),
   valor_total: z.number().nonnegative(),
+  // Pagamento estruturado (só em pedido FINALIZADO no Hiper, via negociacao/finalizador).
+  // Quando vier, tem precedência sobre o extraído do PDF (mais confiável).
+  forma_pagamento: z.string().max(1000).nullable().optional(),
+  parcelas: z.string().max(80).nullable().optional(),
   observacoes: z.string().max(5000).nullable().optional(),
   pontos_retirada: z.array(pontoRetiradaSchema).max(5),
 });

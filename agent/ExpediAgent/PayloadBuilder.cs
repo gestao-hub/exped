@@ -31,6 +31,8 @@ public static class PayloadBuilder
             NfChave = h.NfChave,
             NfEmitidaEm = h.NfEmitidaEm?.ToString("yyyy-MM-dd HH:mm:ss"),
             NfValor = h.NfValor,
+            FormaPagamento = h.FormaPagamento,
+            Parcelas = h.Parcelas,
             HiperUsuarioId = h.IdUsuarioVendedor,
             ClienteNome = string.IsNullOrWhiteSpace(c?.Nome) ? "Cliente" : c!.Nome,
             ClienteCnpjCpf = string.IsNullOrWhiteSpace(c?.CpfCnpj) ? null : c!.CpfCnpj,

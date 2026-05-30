@@ -160,6 +160,36 @@ ORDER BY nf.data_hora_emissao DESC;";
     }
 
     /// <summary>
+    /// #2 PAGAMENTO ao finalizar (best-effort): forma + parcelas estruturadas do Hiper.
+    /// Confirmado no raio-x: negociacao_finalizador(id_finalizador, numero_parcelas, valor_parcelas)
+    /// → finalizador_pdv (catálogo: Dinheiro/Cheque/Cartão/Pix/...). SÓ existe em pedido FINALIZADO.
+    /// ⚠️ INFERIDO (validar no Hiper real — degrada gracioso no catch do Worker, cai pro PDF):
+    ///    negociacao.id_operacao_pdv, negociacao.id_negociacao (PK),
+    ///    negociacao_finalizador.id_negociacao (FK), finalizador_pdv.id_finalizador (PK) + .nome.
+    /// Pega o finalizador dominante (maior valor) quando há pagamento dividido.
+    /// </summary>
+    public async Task<(string? Forma, string? Parcelas)?> PagamentoDoPedidoAsync(int idPedido, CancellationToken ct)
+    {
+        const string sql = @"
+SELECT TOP 1 fp.nome, nfin.numero_parcelas
+FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
+JOIN negociacao n WITH (NOLOCK) ON n.id_operacao_pdv = pvo.id_operacao_pdv
+JOIN negociacao_finalizador nfin WITH (NOLOCK) ON nfin.id_negociacao = n.id_negociacao
+JOIN finalizador_pdv fp WITH (NOLOCK) ON fp.id_finalizador = nfin.id_finalizador
+WHERE pvo.id_pedido_venda = @id
+ORDER BY nfin.valor_parcelas DESC;";
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, cn);
+        cmd.Parameters.AddWithValue("@id", idPedido);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct)) return null;
+        var forma = r.IsDBNull(0) ? null : Convert.ToString(r.GetValue(0));
+        int? parc = r.IsDBNull(1) ? null : Convert.ToInt32(r.GetValue(1));
+        return (forma, parc is > 1 ? $"{parc}x" : null);
+    }
+
+    /// <summary>
     /// Self-check de schema: confere no INFORMATION_SCHEMA se as colunas que as queries
     /// usam existem no Hiper. Devolve a lista das que FALTAM (vazia = schema ok). Roda no
     /// startup pra avisar claramente numa versão divergente do Hiper, em vez de quebrar no meio.

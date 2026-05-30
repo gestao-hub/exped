@@ -122,6 +122,17 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
             }
             catch (Exception ex) { log.LogWarning("Saldos do pedido {Cod} indisponíveis: {Msg}", h.Codigo, ex.Message); }
 
+            // #2 pagamento estruturado (best-effort): só finalizado tem negociacao.
+            try
+            {
+                var pg = await repo.PagamentoDoPedidoAsync(h.IdPedidoVenda, ct);
+                if (pg is { } p && !string.IsNullOrWhiteSpace(p.Forma))
+                {
+                    h.FormaPagamento = p.Forma; h.Parcelas = p.Parcelas;
+                }
+            }
+            catch (Exception ex) { log.LogWarning("Pagamento do pedido {Cod} indisponível (usa PDF): {Msg}", h.Codigo, ex.Message); }
+
             var payload = PayloadBuilder.Build(h, cli, itens);
             var r = await client.EnviarAsync(payload, pdfExiste ? pdf : null, ct);
 
