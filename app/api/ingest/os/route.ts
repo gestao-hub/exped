@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { hashToken } from '@/lib/crypto/token';
 import { ingestOsSchema } from '@/lib/validators/ingest-os';
 import { inserirOrdemServico } from '@/lib/os/inserir';
+import { enfileirarNotificacao, type TipoNotificacao } from '@/lib/os/notificacoes';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -62,5 +63,37 @@ export async function POST(req: NextRequest) {
   const r = await inserirOrdemServico(supabase, d, { vendedorId, empresaId, storagePdfPath });
   if ('error' in r) return NextResponse.json(r, { status: 500 });
   if ('duplicate' in r) return NextResponse.json({ duplicate: true, id: r.existing_id }, { status: 200 });
+
+  // Auto-notificação por situação (dorme até o operador mapear os gatilhos da empresa).
+  // Best-effort: nunca quebra a ingestão.
+  try {
+    const { data: emp } = await supabase
+      .from('empresas')
+      .select('nome, notif_whatsapp_ativo, notif_email_ativo, os_situacao_autorizacao, os_situacao_pronto')
+      .eq('id', empresaId)
+      .single();
+    if (emp && (emp.notif_whatsapp_ativo || emp.notif_email_ativo) && d.situacao_erp != null) {
+      let tipo: TipoNotificacao | null = null;
+      if (emp.os_situacao_autorizacao != null && d.situacao_erp === emp.os_situacao_autorizacao) tipo = 'autorizacao';
+      else if (emp.os_situacao_pronto != null && d.situacao_erp === emp.os_situacao_pronto) tipo = 'pronto';
+      if (tipo) {
+        const { data: os } = await supabase
+          .from('ordens_servico')
+          .select('id, empresa_id, documento_erp, cliente_nome, cliente_telefone, cliente_email, objeto, valor_total, proxima_manutencao_obs')
+          .eq('id', r.id)
+          .single();
+        if (os) {
+          await enfileirarNotificacao(supabase, {
+            os,
+            empresa: { nome: emp.nome, notif_whatsapp_ativo: emp.notif_whatsapp_ativo, notif_email_ativo: emp.notif_email_ativo },
+            tipo,
+          });
+        }
+      }
+    }
+  } catch {
+    // ingestão não falha por causa de notificação
+  }
+
   return NextResponse.json({ id: r.id }, { status: 201 });
 }
