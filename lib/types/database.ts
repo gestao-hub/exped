@@ -184,6 +184,7 @@ export type Database = {
           nome: string
           slug: string
           updated_at: string
+          usa_os: boolean
         }
         Insert: {
           ativo?: boolean
@@ -194,6 +195,7 @@ export type Database = {
           nome: string
           slug: string
           updated_at?: string
+          usa_os?: boolean
         }
         Update: {
           ativo?: boolean
@@ -204,6 +206,7 @@ export type Database = {
           nome?: string
           slug?: string
           updated_at?: string
+          usa_os?: boolean
         }
         Relationships: []
       }
@@ -242,6 +245,206 @@ export type Database = {
             columns: ["vendedor_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ordens_servico: {
+        Row: {
+          categoria: string | null
+          cliente_cnpj_cpf: string | null
+          cliente_id: string | null
+          cliente_nome: string
+          cliente_telefone: string | null
+          created_at: string
+          data_abertura: string | null
+          data_conclusao: string | null
+          data_previsao: string | null
+          defeito_relatado: string | null
+          diagnostico: string | null
+          documento_erp: string | null
+          empresa_id: string
+          garantia_fim: string | null
+          garantia_inicio: string | null
+          id: string
+          objeto: string | null
+          observacao: string | null
+          os_erp_id: number | null
+          prioridade: number | null
+          situacao_erp: number | null
+          status: string
+          storage_pdf_path: string | null
+          tecnico_nome: string | null
+          updated_at: string
+          valor_total: number
+          vendedor_id: string | null
+        }
+        Insert: {
+          categoria?: string | null
+          cliente_cnpj_cpf?: string | null
+          cliente_id?: string | null
+          cliente_nome?: string
+          cliente_telefone?: string | null
+          created_at?: string
+          data_abertura?: string | null
+          data_conclusao?: string | null
+          data_previsao?: string | null
+          defeito_relatado?: string | null
+          diagnostico?: string | null
+          documento_erp?: string | null
+          empresa_id?: string
+          garantia_fim?: string | null
+          garantia_inicio?: string | null
+          id?: string
+          objeto?: string | null
+          observacao?: string | null
+          os_erp_id?: number | null
+          prioridade?: number | null
+          situacao_erp?: number | null
+          status?: string
+          storage_pdf_path?: string | null
+          tecnico_nome?: string | null
+          updated_at?: string
+          valor_total?: number
+          vendedor_id?: string | null
+        }
+        Update: {
+          categoria?: string | null
+          cliente_cnpj_cpf?: string | null
+          cliente_id?: string | null
+          cliente_nome?: string
+          cliente_telefone?: string | null
+          created_at?: string
+          data_abertura?: string | null
+          data_conclusao?: string | null
+          data_previsao?: string | null
+          defeito_relatado?: string | null
+          diagnostico?: string | null
+          documento_erp?: string | null
+          empresa_id?: string
+          garantia_fim?: string | null
+          garantia_inicio?: string | null
+          id?: string
+          objeto?: string | null
+          observacao?: string | null
+          os_erp_id?: number | null
+          prioridade?: number | null
+          situacao_erp?: number | null
+          status?: string
+          storage_pdf_path?: string | null
+          tecnico_nome?: string | null
+          updated_at?: string
+          valor_total?: number
+          vendedor_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ordens_servico_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ordens_servico_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ordens_servico_vendedor_id_fkey"
+            columns: ["vendedor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      os_itens: {
+        Row: {
+          codigo: string | null
+          desconto: number
+          descricao: string
+          id: string
+          ordem: number | null
+          os_id: string
+          preco_unitario: number
+          quantidade: number
+          total: number
+          unidade: string | null
+        }
+        Insert: {
+          codigo?: string | null
+          desconto?: number
+          descricao?: string
+          id?: string
+          ordem?: number | null
+          os_id: string
+          preco_unitario?: number
+          quantidade?: number
+          total?: number
+          unidade?: string | null
+        }
+        Update: {
+          codigo?: string | null
+          desconto?: number
+          descricao?: string
+          id?: string
+          ordem?: number | null
+          os_id?: string
+          preco_unitario?: number
+          quantidade?: number
+          total?: number
+          unidade?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_itens_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "ordens_servico"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      os_servicos: {
+        Row: {
+          descricao: string
+          id: string
+          ordem: number | null
+          os_id: string
+          quantidade: number
+          tecnico_nome: string | null
+          total: number
+          valor_unitario: number
+        }
+        Insert: {
+          descricao?: string
+          id?: string
+          ordem?: number | null
+          os_id: string
+          quantidade?: number
+          tecnico_nome?: string | null
+          total?: number
+          valor_unitario?: number
+        }
+        Update: {
+          descricao?: string
+          id?: string
+          ordem?: number | null
+          os_id?: string
+          quantidade?: number
+          tecnico_nome?: string | null
+          total?: number
+          valor_unitario?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_servicos_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "ordens_servico"
             referencedColumns: ["id"]
           },
         ]
