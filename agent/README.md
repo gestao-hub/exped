@@ -87,6 +87,18 @@ sc config ExpediAgent obj= ".\UsuarioDoPDV" password= "<senha>"
 **OU** conceda à conta do serviço um **login de leitura** no SQL Server do Hiper. Sem uma dessas,
 o `Trusted_Connection` falha na conexão.
 
+## Instalador automático (Inno Setup) + heartbeat/versão
+Em `agent/installer/` há `ExpediAgent.iss` (Inno Setup) + `start.cmd` que empacotam a publish
+num **setup SEM admin**: instala em `%LOCALAPPDATA%\ExpediAgent` e configura o auto-start no
+logon (via `.vbs` na Startup). No Windows, com Inno Setup 6+:
+```bat
+dotnet publish agent\ExpediAgent -c Release -o agent\installer\publish
+:: abra agent\installer\ExpediAgent.iss no Inno Setup e compile -> gera ExpediAgentSetup.exe
+:: ASSINE o ExpediAgentSetup.exe com o certificado de assinatura (signtool) antes de distribuir
+```
+O agente também faz **heartbeat** (fica "online" no painel da plataforma) e **checa a versão**
+publicada em `/api/agent/version`, avisando no log se estiver desatualizado.
+
 ## Provisionamento (nuvem, operador)
 No Supabase (SQL Editor), gere um token aleatório (ex.: `openssl rand -hex 24` com prefixo
 `hpr_`), guarde o cru pro `appsettings.json` e insira só o SHA-256:

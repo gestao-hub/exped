@@ -4,6 +4,7 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { MobileHeader } from '@/components/layout/mobile-header';
 import { UserProvider } from '@/components/providers/user-provider';
 import { getEmpresaAtual } from '@/lib/empresa/current';
+import { brandVars } from '@/lib/empresa/brand-vars';
 import type { Profile } from '@/lib/types';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <UserProvider profile={profile as Profile}>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden" style={brandVars(empresa?.cor_primaria)}>
         <Sidebar empresa={empresa} />
         <div className="flex-1 flex flex-col min-w-0">
           <MobileHeader />
