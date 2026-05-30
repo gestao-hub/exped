@@ -7,6 +7,7 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         log.LogInformation("ExpediAgent {Ver} iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", AgentInfo.Version, cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
+        await ChecarSchemaAsync(ct);
         int tick = 0;
         while (!ct.IsCancellationRequested)
         {
@@ -25,6 +26,19 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         var latest = await client.LatestVersionAsync(ct);
         if (!string.IsNullOrEmpty(latest) && latest != AgentInfo.Version)
             log.LogWarning("Agente desatualizado: rodando {Cur}, disponível {New}. Reinstale a versão nova.", AgentInfo.Version, latest);
+    }
+
+    private async Task ChecarSchemaAsync(CancellationToken ct)
+    {
+        try
+        {
+            var faltando = await repo.VerificarSchemaAsync(ct);
+            if (faltando.Count == 0)
+                log.LogInformation("Schema do Hiper: OK.");
+            else
+                log.LogWarning("Schema do Hiper DIVERGENTE — colunas não encontradas: {Cols}. Ajuste as queries em HiperRepository.cs para esta versão do Hiper.", string.Join(", ", faltando));
+        }
+        catch (Exception ex) { log.LogWarning("Não consegui verificar o schema do Hiper: {Msg}", ex.Message); }
     }
 
     private async Task TickAsync(CancellationToken ct)

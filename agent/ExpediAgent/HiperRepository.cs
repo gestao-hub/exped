@@ -99,4 +99,46 @@ ORDER BY ipv.sequencia_item;";
         }
         return list;
     }
+
+    /// <summary>
+    /// Self-check de schema: confere no INFORMATION_SCHEMA se as colunas que as queries
+    /// usam existem no Hiper. Devolve a lista das que FALTAM (vazia = schema ok). Roda no
+    /// startup pra avisar claramente numa versão divergente do Hiper, em vez de quebrar no meio.
+    /// </summary>
+    public async Task<List<string>> VerificarSchemaAsync(CancellationToken ct)
+    {
+        var esperado = new (string T, string C)[]
+        {
+            ("pedido_venda","id_pedido_venda"), ("pedido_venda","codigo"), ("pedido_venda","situacao"),
+            ("pedido_venda","data_hora_geracao"), ("pedido_venda","id_entidade_cliente"),
+            ("pedido_venda","id_usuario_vendedor"), ("pedido_venda","data_previsao_entrega_final"),
+            ("pedido_venda","data_previsao_entrega_inicial"), ("pedido_venda","observacao"), ("pedido_venda","excluido"),
+            ("entidade","nome"), ("entidade","logradouro"), ("entidade","numero_endereco"), ("entidade","complemento"),
+            ("entidade","bairro"), ("entidade","cep"), ("entidade","fone_primario_ddd"),
+            ("entidade","fone_primario_numero"), ("entidade","id_cidade"),
+            ("pessoa_fisica","cpf"), ("pessoa_juridica","cnpj"),
+            ("cidade","nome"), ("cidade","uf"), ("cidade","id_cidade"),
+            ("item_pedido_venda","sequencia_item"), ("item_pedido_venda","id_produto"),
+            ("item_pedido_venda","valor_unitario"), ("item_pedido_venda","valor_unitario_com_desconto"),
+            ("item_pedido_venda","excluido"), ("item_pedido_venda","cancelado"),
+            ("grade_pedido_venda","quantidade"), ("grade_pedido_venda","sequencia_item"),
+            ("grade_pedido_venda","id_pedido_venda"),
+            ("produto","codigo"), ("produto","nome"), ("produto","id_produto"),
+        };
+        var tabelas = esperado.Select(e => e.T).Distinct().ToArray();
+        var nomes = tabelas.Select((_, i) => "@t" + i).ToArray();
+        var sql = $"select TABLE_NAME, COLUMN_NAME from INFORMATION_SCHEMA.COLUMNS where TABLE_NAME in ({string.Join(",", nomes)})";
+        var existentes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, cn);
+        for (int i = 0; i < tabelas.Length; i++) cmd.Parameters.AddWithValue(nomes[i], tabelas[i]);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            existentes.Add($"{r.GetString(0)}.{r.GetString(1)}");
+        return esperado
+            .Where(e => !existentes.Contains($"{e.T}.{e.C}"))
+            .Select(e => $"{e.T}.{e.C}")
+            .ToList();
+    }
 }
