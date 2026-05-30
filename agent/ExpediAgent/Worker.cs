@@ -6,14 +6,25 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        log.LogInformation("ExpediAgent iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
+        log.LogInformation("ExpediAgent {Ver} iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", AgentInfo.Version, cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
+        int tick = 0;
         while (!ct.IsCancellationRequested)
         {
             try { await TickAsync(ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no ciclo de sync"); }
+            await client.HeartbeatAsync(ct);
+            if (tick % 120 == 0) await ChecarVersaoAsync(ct); // ~1x/h (120 ticks de 30s)
+            tick++;
             try { await Task.Delay(TimeSpan.FromSeconds(cfg.PollIntervalSeconds), ct); }
             catch (TaskCanceledException) { break; }
         }
+    }
+
+    private async Task ChecarVersaoAsync(CancellationToken ct)
+    {
+        var latest = await client.LatestVersionAsync(ct);
+        if (!string.IsNullOrEmpty(latest) && latest != AgentInfo.Version)
+            log.LogWarning("Agente desatualizado: rodando {Cur}, disponível {New}. Reinstale a versão nova.", AgentInfo.Version, latest);
     }
 
     private async Task TickAsync(CancellationToken ct)
