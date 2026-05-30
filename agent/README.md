@@ -37,6 +37,56 @@ sc start ExpediAgent
 > Se o PDF não for encontrado: rode o serviço sob a conta do usuário do PDV, ou aponte
 > `Agent:TempDir` pro temp correto, ou configure o Hiper pra salvar o PDF numa pasta fixa.
 
+## Instalação na máquina do cliente (Windows)
+
+**Pré-requisitos:** Windows + **.NET 8 SDK** (`winget install Microsoft.DotNet.SDK.8`) **apenas para publicar**.
+O publish é **self-contained** — a máquina final **não precisa** ter o runtime instalado.
+
+**1) Publicar** (gera o `.exe` + dependências numa pasta do usuário):
+```bat
+dotnet publish -c Release -o "%LOCALAPPDATA%\ExpediAgent"
+```
+
+**2) Configurar** o `appsettings.json` **da pasta publicada** (`%LOCALAPPDATA%\ExpediAgent`)
+com os valores **reais**: `ApiBaseUrl`, `DeviceToken` e `SqlConnectionString`.
+⚠️ **NUNCA commitar esses valores** — o `DeviceToken` é segredo e fica só na máquina do cliente.
+
+**3) Conta de execução (importante):** o `SqlConnectionString` usa `Trusted_Connection=True`
+(autenticação do Windows). Logo, o agente **precisa rodar sob a conta de um usuário que tenha
+acesso ao SQL do Hiper**. A conta de serviço padrão (`NT AUTHORITY\SYSTEM`) normalmente **NÃO**
+tem esse acesso.
+
+**⚠️ GOTCHA — ConsoleLifetime:** o host usa `ConsoleLifetime`, então o `.exe` **precisa de um
+console**. Se for iniciado "oculto" sem console (ex.: `powershell -WindowStyle Hidden` chamando
+o exe direto), ele **encerra na hora**. Solução validada — iniciar via um `start.cmd` que aloca
+console e redireciona o log:
+```bat
+@echo off
+cd /d "%~dp0"
+"%~dp0ExpediAgent.exe" >> "%~dp0agent.log" 2>&1
+```
+
+### Opção A — Auto-start no logon SEM admin (recomendado sem direitos de Administrador)
+Quando não há direitos de Administrador nem conta de serviço com acesso ao SQL, crie um `.vbs`
+na pasta **Startup** do usuário
+(`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ExpediAgent.vbs`) que roda o
+`start.cmd` 100% oculto:
+```vbs
+Set sh = CreateObject("WScript.Shell")
+sh.Run "cmd /c ""<caminho>\ExpediAgent\start.cmd""", 0, False
+```
+(troque `<caminho>` pelo caminho real, ex.: `%LOCALAPPDATA%\ExpediAgent`). Roda sob a conta do
+usuário logado — que tem o acesso Windows Auth ao SQL.
+
+### Opção B — Serviço do Windows (com Administrador)
+O projeto já chama `AddWindowsService`. Instale como serviço (ver seção acima, `sc create`),
+porém rodando sob uma **conta COM acesso ao SQL** (não `LocalSystem`):
+```bat
+sc config ExpediAgent obj= ".\UsuarioDoPDV" password= "<senha>"
+```
+**OU** conceda à conta do serviço um **login de leitura** no SQL Server do Hiper. Sem uma dessas,
+o `Trusted_Connection` falha na conexão.
+
 ## Provisionamento (nuvem, operador)
 No Supabase (SQL Editor), gere um token aleatório (ex.: `openssl rand -hex 24` com prefixo
 `hpr_`), guarde o cru pro `appsettings.json` e insira só o SHA-256:
