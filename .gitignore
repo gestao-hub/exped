@@ -48,3 +48,6 @@ next-env.d.ts
 # Playwright MCP artifacts
 .playwright-mcp/
 plataforma-teste.png
+
+# local-stack native binaries (PostgREST, GoTrue, etc.) — baixados localmente, não versionar
+scripts/local-stack/bin/
