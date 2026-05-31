@@ -74,7 +74,15 @@ Source: "{#Payload}\app\*";                 DestDir: "{app}\app";   Flags: recur
 Source: "{#Payload}\hub\*";                 DestDir: "{app}\hub";   Flags: recursesubdirs createallsubdirs ignoreversion
 
 ; --- Local-stack: SQL de bootstrap + gateway + scripts auxiliares -----------
+; Inclui o gotrue.env (lido por hub/bootstrap.mjs em scripts\local-stack\gotrue.env
+; para o `auth migrate`). Garanta que payload\scripts\local-stack\gotrue.env exista
+; (ver README, Fase 1.3).
 Source: "{#Payload}\scripts\local-stack\*"; DestDir: "{app}\scripts\local-stack"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+; --- Migrations do APP (supabase\migrations\*.sql) --------------------------
+; O maestro/bootstrap aplica essas no 1o start (hub/config.mjs migrationsDir =
+; supabase/migrations, relativo a C:\Exped). SEM elas o bootstrap do schema falha.
+Source: "{#Payload}\supabase\migrations\*"; DestDir: "{app}\supabase\migrations"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 ; --- GoTrue (auth.exe + migrations) — vem do payload, NAO é baixado ---------
 Source: "{#Payload}\bin\auth.exe";          DestDir: "{app}\bin";   Flags: ignoreversion
@@ -158,7 +166,8 @@ begin
   { ssPostInstall roda DEPOIS de [Files] (config.json ja copiado) e ANTES de [Run]. }
   if CurStep = ssPostInstall then
   begin
-    Randomize;
+    { Inno Setup 6.7.3+ removeu a chamada explicita Randomize (o Random ja e
+      auto-semeado pelo runtime). Nao chamar Randomize aqui — quebra a compilacao. }
     ConfigFile := ExpandConstant('{app}\config.json');
     if LoadStringFromFile(ConfigFile, Content) then
     begin

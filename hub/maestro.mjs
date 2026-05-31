@@ -28,7 +28,7 @@ import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
@@ -73,6 +73,30 @@ function makeLogger(logPath) {
 /** host TCP do Postgres (em Linux o pgHost é socket dir; o app/peers usam 127.0.0.1). */
 function pgTcpHost(cfg) {
   return cfg.paths.pgHost.startsWith('/') ? '127.0.0.1' : cfg.paths.pgHost;
+}
+
+/**
+ * Um diretório de dados é um cluster Postgres válido sse tem o arquivo
+ * PG_VERSION (criado pelo initdb). Se NÃO existe, precisamos rodar initdb antes
+ * do pg_ctl start. Idempotente: já inicializado => false (pula o initdb).
+ */
+export function needsInitdb(pgDataDir) {
+  if (!pgDataDir) return true;
+  return !existsSync(path.join(pgDataDir, 'PG_VERSION'));
+}
+
+/**
+ * Resolve o entrypoint do app Next testando, em ordem:
+ *   1. <root>/app/server.js              (layout do instalador Windows)
+ *   2. <root>/.next/standalone/server.js (layout dev/CI standalone)
+ * Devolve o primeiro que existir; senão o layout dev (default histórico), pra
+ * mensagem de erro do spawn apontar pro caminho esperado.
+ */
+export function resolveAppEntrypoint(root, exists = existsSync) {
+  const installer = path.join(root, 'app', 'server.js');
+  const dev = path.join(root, '.next', 'standalone', 'server.js');
+  if (exists(installer)) return installer;
+  return dev;
 }
 
 // --------------------------------------------------------------------------
@@ -166,7 +190,9 @@ function appSupervisor(cfg, logDir, keys) {
   return new Supervisor({
     name: 'app',
     cmd: process.execPath,
-    args: [path.join(ROOT, '.next', 'standalone', 'server.js')],
+    // Entrypoint resolvido: app/server.js (instalador) ou .next/standalone/server.js
+    // (dev). Remove a necessidade do junction usado como workaround no Windows.
+    args: [resolveAppEntrypoint(ROOT)],
     cwd: ROOT,
     env: {
       PORT: String(cfg.ports.app),
@@ -230,6 +256,18 @@ export async function startMaestro(cfg, opts = {}) {
   // reusePg=true: assume um Postgres já de pé (não dá start nem stop nele).
   const reusePg = opts.reusePg === true;
   if (!reusePg) {
+    // initdb auto-suficiente: se o data dir ainda não é um cluster válido
+    // (sem PG_VERSION), inicializa ANTES do pg_ctl start. Cobre instalador
+    // Windows (data dir vazio no 1º boot), smoke e Linux. Idempotente.
+    if (needsInitdb(cfg.paths.pgData)) {
+      logger.info(`initdb: inicializando cluster em ${cfg.paths.pgData}`);
+      execFileSync(
+        exe(path.join(PG_BIN, 'initdb')),
+        ['-D', cfg.paths.pgData, '-U', cfg.paths.user || 'postgres', '-E', 'UTF8'],
+        { stdio: 'ignore' },
+      );
+      logger.info('initdb concluido');
+    }
     logger.info(`subindo Postgres :${cfg.ports.pg}`);
     supervisors.postgres = pgSupervisor(cfg, logDir).start();
   } else {

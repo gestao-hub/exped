@@ -117,6 +117,15 @@ cp ../../scripts/local-stack/*.sql       payload/scripts/local-stack/
 cp ../../scripts/local-stack/gateway.mjs payload/scripts/local-stack/
 cp ../../scripts/local-stack/postgrest.conf payload/scripts/local-stack/
 cp ../../scripts/local-stack/make-keys.sh    payload/scripts/local-stack/
+# gotrue.env é OBRIGATÓRIO: hub/bootstrap.mjs lê scripts/local-stack/gotrue.env
+# para rodar o `auth migrate` (cria auth.users). Sem ele o bootstrap falha.
+cp ../../scripts/local-stack/gotrue.env  payload/scripts/local-stack/
+
+# (c.2) Migrations do APP -> payload/supabase/migrations
+#     hub/config.mjs migrationsDir = supabase/migrations (relativo a C:\Exped).
+#     O bootstrap aplica esses *.sql no 1º start; SEM eles o schema do app não sobe.
+mkdir -p payload/supabase/migrations
+cp ../../supabase/migrations/*.sql       payload/supabase/migrations/
 
 # (d) GoTrue: auth.exe + migrations  -> payload/scripts/local-stack/bin
 #     (é AQUI que o maestro procura — ver Aviso acima)
@@ -307,6 +316,17 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
 5. **`config.json` não é lido pelo maestro** — o `install-service.ps1` traduz `config.json`
    → env `EXPED_*` do serviço. Se editar o `config.json` depois, rode o `install-service.ps1`
    de novo pra propagar.
+6. **`initdb` automático no maestro — RESOLVIDO.** O maestro inicializa o cluster Postgres
+   sozinho: antes do `pg_ctl start`, se `cfg.paths.pgData` ainda não é um cluster válido
+   (sem o arquivo `PG_VERSION`), ele roda `initdb -D <pgData> -U <user> -E UTF8`. Idempotente
+   (cluster já inicializado = pula). Cobre instalador (data dir vazio no 1º boot), smoke e
+   Linux — não há mais passo manual de `initdb` no instalador.
+7. **PATH do serviço.** O `install-service.ps1` injeta `PATH` no serviço com
+   `C:\Exped\bin\pgsql\bin` e `C:\Exped\bin\node` ANTES do PATH herdado, pra que o maestro
+   ache `psql`/`pg_ctl`/`initdb` (chamados no bootstrap) num ambiente de serviço minimo.
+8. **Entrypoint do app resolvido.** O maestro testa `app\server.js` (layout do instalador) e
+   depois `.next\standalone\server.js` (dev), usando o primeiro que existir — não precisa mais
+   do junction que foi usado como workaround.
 
 Todos os bloqueios cross-platform conhecidos foram corrigidos (PRs #20/#21, 40 testes hub
 verdes no Linux). O que resta é validação real no Windows (binários nativos + instalador).
