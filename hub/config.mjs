@@ -13,8 +13,11 @@ const DEFAULTS = {
     app: 3000,
   },
   paths: {
-    // Em Linux usamos o socket dir do cluster do spike; em Windows o maestro
-    // sobrescreve para 127.0.0.1 via overrides/env.
+    // pgData: DIRETORIO DE DADOS do cluster (pg_ctl -D <pgData>).
+    // pgHost: HOST DE CONEXAO (psql/PostgREST/GoTrue). Em Linux ambos default
+    // para o socket dir do cluster do spike (conexao via socket Unix). Em
+    // Windows separam: pgData = C:\Exped\data\pg, pgHost = 127.0.0.1 (TCP).
+    pgData: '/tmp/exped-pg',
     pgHost: '/tmp/exped-pg',
     db: 'exped',
     user: 'postgres',
@@ -65,6 +68,9 @@ export function loadConfig(overrides = {}) {
   if (process.env.EXPED_STORAGE_PORT) ports.storage = Number(process.env.EXPED_STORAGE_PORT);
   if (process.env.EXPED_APP_PORT) ports.app = Number(process.env.EXPED_APP_PORT);
 
+  // pgData (diretorio de dados) e pgHost (host de conexao) sao independentes.
+  // Se EXPED_PG_DATA nao vier, pgData mantem o default — NUNCA herda EXPED_PG_HOST.
+  if (process.env.EXPED_PG_DATA) paths.pgData = process.env.EXPED_PG_DATA;
   if (process.env.EXPED_PG_HOST) paths.pgHost = process.env.EXPED_PG_HOST;
   if (process.env.EXPED_DB) paths.db = process.env.EXPED_DB;
   if (process.env.EXPED_DB_USER) paths.user = process.env.EXPED_DB_USER;

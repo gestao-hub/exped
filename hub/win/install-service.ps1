@@ -76,8 +76,15 @@ if (Test-Path $ConfigPath) {
         if ($cfg.ports.app)       { $envMap['EXPED_APP_PORT']       = "$($cfg.ports.app)" }
     }
     if ($cfg.paths) {
-        # pgHost no Windows é o diretorio do cluster (data dir TCP em 127.0.0.1).
+        # No Windows os dois conceitos sao SEPARADOS:
+        #   pgData = diretorio de dados do cluster (pg_ctl -D <pgData>)
+        #   pgHost = host de conexao TCP (psql/PostgREST/GoTrue) -> 127.0.0.1
+        # Defaults seguros se o config.json nao trouxer: data em C:\Exped\data\pg,
+        # host em 127.0.0.1 (nao ha socket Unix no Windows).
+        if ($cfg.paths.pgData) { $envMap['EXPED_PG_DATA'] = "$($cfg.paths.pgData)" }
+        else                   { $envMap['EXPED_PG_DATA'] = (Join-Path $Root 'data\pg') }
         if ($cfg.paths.pgHost) { $envMap['EXPED_PG_HOST'] = "$($cfg.paths.pgHost)" }
+        else                   { $envMap['EXPED_PG_HOST'] = '127.0.0.1' }
         if ($cfg.paths.db)     { $envMap['EXPED_DB']       = "$($cfg.paths.db)" }
         if ($cfg.paths.user)   { $envMap['EXPED_DB_USER']  = "$($cfg.paths.user)" }
     }

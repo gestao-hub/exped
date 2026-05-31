@@ -1,0 +1,5 @@
+# Forca LF nos arquivos que precisam de line-endings Unix mesmo em checkout Windows.
+# O gotrue-windows.patch e aplicado com `git apply` (inclusive no Windows): CRLF
+# quebra o apply, entao fixamos LF. Scripts .sh tambem rodam em ambiente Unix.
+hub/win/gotrue-windows.patch text eol=lf
+*.sh text eol=lf

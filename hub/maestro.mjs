@@ -86,9 +86,14 @@ function pgSupervisor(cfg, logDir) {
   return new Supervisor({
     name: 'postgres',
     cmd: exe(path.join(PG_BIN, 'pg_ctl')),
+    // -D usa o DIRETORIO DE DADOS (pgData), nunca o host de conexao.
+    // -o repassa opcoes ao postmaster: porta sempre; -k (socket dir) só quando
+    // pgData parece um socket dir Unix (Linux). No Windows não há socket Unix.
     args: [
-      '-D', cfg.paths.pgHost,
-      '-o', `-p ${cfg.ports.pg} -k ${cfg.paths.pgHost} -h 127.0.0.1`,
+      '-D', cfg.paths.pgData,
+      '-o', cfg.paths.pgData.startsWith('/')
+        ? `-p ${cfg.ports.pg} -k ${cfg.paths.pgData} -h 127.0.0.1`
+        : `-p ${cfg.ports.pg} -h 127.0.0.1`,
       '-l', path.join(logDir, 'postgres.log'),
       'start',
     ],
@@ -316,7 +321,7 @@ export async function startMaestro(cfg, opts = {}) {
     // Em reusePg NÃO paramos — o cluster não é nosso.
     if (!reusePg) {
       try {
-        execFileSync(exe(path.join(PG_BIN, 'pg_ctl')), ['-D', cfg.paths.pgHost, 'stop', '-m', 'fast'], {
+        execFileSync(exe(path.join(PG_BIN, 'pg_ctl')), ['-D', cfg.paths.pgData, 'stop', '-m', 'fast'], {
           stdio: 'ignore',
         });
       } catch {

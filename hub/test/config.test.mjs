@@ -40,3 +40,54 @@ describe('config.loadConfig — jwtSecret obrigatório', () => {
     expect(cfg.jwtSecret).toBe(VALID);
   });
 });
+
+describe('config.loadConfig — pgData vs pgHost (Bug 2 portabilidade Windows)', () => {
+  const ENVS = ['EXPED_PG_DATA', 'EXPED_PG_HOST'];
+  let savedJwt;
+  let savedEnvs;
+  beforeEach(() => {
+    savedJwt = process.env.EXPED_JWT_SECRET;
+    process.env.EXPED_JWT_SECRET = VALID;
+    savedEnvs = {};
+    for (const k of ENVS) {
+      savedEnvs[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    if (savedJwt === undefined) delete process.env.EXPED_JWT_SECRET;
+    else process.env.EXPED_JWT_SECRET = savedJwt;
+    for (const k of ENVS) {
+      if (savedEnvs[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnvs[k];
+    }
+  });
+
+  it('default: pgData e pgHost coincidem no socket dir do Linux', () => {
+    const cfg = loadConfig();
+    expect(cfg.paths.pgData).toBe('/tmp/exped-pg');
+    expect(cfg.paths.pgHost).toBe('/tmp/exped-pg');
+  });
+
+  it('EXPED_PG_DATA e EXPED_PG_HOST sao respeitadas independentemente', () => {
+    process.env.EXPED_PG_DATA = 'C:\\Exped\\data\\pg';
+    process.env.EXPED_PG_HOST = '127.0.0.1';
+    const cfg = loadConfig();
+    expect(cfg.paths.pgData).toBe('C:\\Exped\\data\\pg');
+    expect(cfg.paths.pgHost).toBe('127.0.0.1');
+  });
+
+  it('EXPED_PG_HOST sozinho NAO vira data dir (pgData fica no default)', () => {
+    process.env.EXPED_PG_HOST = '127.0.0.1';
+    const cfg = loadConfig();
+    expect(cfg.paths.pgHost).toBe('127.0.0.1');
+    expect(cfg.paths.pgData).toBe('/tmp/exped-pg');
+  });
+
+  it('overrides.paths tem prioridade sobre env para pgData/pgHost', () => {
+    process.env.EXPED_PG_DATA = '/env/data';
+    const cfg = loadConfig({ paths: { pgData: '/over/data', pgHost: '/over/host' } });
+    expect(cfg.paths.pgData).toBe('/over/data');
+    expect(cfg.paths.pgHost).toBe('/over/host');
+  });
+});
