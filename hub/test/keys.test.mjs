@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'node:crypto';
-import { mintJwt, makeKeys } from '../keys.mjs';
+import { mintJwt, makeKeys, verifyJwt } from '../keys.mjs';
 
 const SECRET = 'exped-local-super-secret-jwt-with-at-least-32-chars';
 
@@ -47,5 +47,25 @@ describe('keys (JWT HS256 em node:crypto puro)', () => {
 
   it('é determinístico para o mesmo secret/role', () => {
     expect(mintJwt('anon', SECRET)).toBe(mintJwt('anon', SECRET));
+  });
+});
+
+describe('verifyJwt', () => {
+  it('valida um token assinado com o mesmo secret e devolve o payload', () => {
+    const token = mintJwt('service_role', SECRET);
+    expect(verifyJwt(token, SECRET)).toEqual({ role: 'service_role' });
+  });
+
+  it('rejeita token assinado com outro secret', () => {
+    const token = mintJwt('service_role', SECRET);
+    expect(verifyJwt(token, 'outro-segredo-totalmente-diferente-com-32+')).toBeNull();
+  });
+
+  it('rejeita token malformado sem lançar', () => {
+    expect(verifyJwt('xyz', SECRET)).toBeNull();
+    expect(verifyJwt('a.b', SECRET)).toBeNull();
+    expect(verifyJwt('', SECRET)).toBeNull();
+    expect(verifyJwt(undefined, SECRET)).toBeNull();
+    expect(verifyJwt('a.b.c', SECRET)).toBeNull();
   });
 });

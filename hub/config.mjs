@@ -22,9 +22,25 @@ const DEFAULTS = {
     sqlDir: 'scripts/local-stack',
     authBin: 'scripts/local-stack/bin/auth',
   },
-  jwtSecret: 'exped-local-super-secret-jwt-with-at-least-32-chars',
   manifestUrl: null,
 };
+
+/** Placeholder histórico (segredo conhecido) — NUNCA aceitar como secret real. */
+const JWT_PLACEHOLDER = 'exped-local-super-secret-jwt-with-at-least-32-chars';
+
+/**
+ * Resolve e valida o jwtSecret. Ordem: overrides.jwtSecret -> EXPED_JWT_SECRET.
+ * Lança se ausente, igual ao placeholder conhecido, ou com menos de 32 chars.
+ */
+function resolveJwtSecret(overrides) {
+  const secret = overrides.jwtSecret ?? process.env.EXPED_JWT_SECRET;
+  if (!secret || secret === JWT_PLACEHOLDER || secret.length < 32) {
+    throw new Error(
+      'EXPED_JWT_SECRET ausente/placeholder: defina um segredo forte (>=32 chars) por instalação',
+    );
+  }
+  return secret;
+}
 
 /** merge raso preservando os sub-objetos ports/paths */
 function shallowMerge(base, over = {}) {
@@ -53,13 +69,17 @@ export function loadConfig(overrides = {}) {
   if (process.env.EXPED_DB) paths.db = process.env.EXPED_DB;
   if (process.env.EXPED_DB_USER) paths.user = process.env.EXPED_DB_USER;
 
-  if (process.env.EXPED_JWT_SECRET) env.jwtSecret = process.env.EXPED_JWT_SECRET;
   if (process.env.EXPED_MANIFEST_URL) env.manifestUrl = process.env.EXPED_MANIFEST_URL;
 
   if (Object.keys(ports).length) env.ports = ports;
   if (Object.keys(paths).length) env.paths = paths;
 
-  return shallowMerge(shallowMerge(DEFAULTS, env), overrides);
+  // jwtSecret é obrigatório e validado — sem default fixo (segredo por instalação).
+  const jwtSecret = resolveJwtSecret(overrides);
+
+  const cfg = shallowMerge(shallowMerge(DEFAULTS, env), overrides);
+  cfg.jwtSecret = jwtSecret;
+  return cfg;
 }
 
 export default loadConfig;

@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 const TEST_DB = 'exped_boot_test';
 
 const cfg = loadConfig({
+  jwtSecret: 'segredo-de-teste-bootstrap-com-mais-de-32-chars',
   paths: {
     db: TEST_DB,
     pgHost: '/tmp/exped-pg',

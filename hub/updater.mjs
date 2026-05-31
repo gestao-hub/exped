@@ -24,6 +24,15 @@ import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Valida que `v` é um semver "limpo" (1, 1.2 ou 1.2.3), só dígitos e pontos.
+ * Bloqueia injeção de comando / path traversal (`; rm`, `../`, etc.) antes de
+ * a versão ser usada pra montar paths ou args de processo.
+ */
+export function validVersion(v) {
+  return typeof v === 'string' && /^[0-9]+(\.[0-9]+){0,2}$/.test(v);
+}
+
 /** Parse "1.2.3" -> [1,2,3]; segmentos ausentes/NaN viram 0. */
 function parseSemver(v) {
   return String(v)
@@ -77,10 +86,19 @@ async function defaultExtract(file, dir) {
   try {
     await execFileAsync('tar', ['-xf', file, '-C', dir], { maxBuffer: 1024 * 1024 * 64 });
   } catch {
-    // fallback Windows (PowerShell Expand-Archive)
+    // fallback Windows (PowerShell Expand-Archive). Forma PARAMETRIZADA: os
+    // paths vão como argumentos posicionais ($s/$d) via array de args (não shell
+    // string), então não há interpolação nem injeção possível.
     await execFileAsync(
       'powershell',
-      ['-NoProfile', '-Command', `Expand-Archive -Force -Path '${file}' -DestinationPath '${dir}'`],
+      [
+        '-NoProfile',
+        '-Command',
+        '& {param($s,$d) Expand-Archive -Force -Path $s -DestinationPath $d}',
+        '--',
+        file,
+        dir,
+      ],
       { maxBuffer: 1024 * 1024 * 64 },
     );
   }
@@ -142,6 +160,13 @@ export async function checkAndUpdate(cfg, cb, deps = {}) {
   // (2) manifesto
   const manifest = await fetchManifest(cfg.manifestUrl);
   const { versao, url, sha256 } = manifest;
+
+  // (2.1) versao precisa ser semver limpo ANTES de virar path/arg de processo.
+  // Bloqueia injeção de comando / path traversal sem baixar nem extrair nada.
+  if (!validVersion(versao)) {
+    logger.error?.(`[updater] versão inválida no manifesto: ${JSON.stringify(versao)}`);
+    return { updated: false, reason: 'versão inválida' };
+  }
 
   // (3) mais nova?
   if (!isNewer(versao, getCurrentVersion())) {

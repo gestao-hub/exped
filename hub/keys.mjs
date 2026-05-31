@@ -21,6 +21,32 @@ export function mintJwt(role, secret) {
   return `${signingInput}.${sig}`;
 }
 
+/**
+ * Verifica um JWT HS256: recomputa o HMAC-SHA256 sobre `header.payload` e
+ * compara com a assinatura em tempo constante (crypto.timingSafeEqual).
+ * Retorna o payload decodificado se válido; `null` se malformado/inválido.
+ * Nunca lança.
+ */
+export function verifyJwt(token, secret) {
+  try {
+    if (typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [header, payload, sig] = parts;
+    if (!header || !payload || !sig) return null;
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(`${header}.${payload}`)
+      .digest();
+    const got = Buffer.from(sig, 'base64url');
+    if (got.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(got, expected)) return null;
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 /** Retorna { anon, service } assinadas com o mesmo secret. */
 export function makeKeys(secret) {
   return {

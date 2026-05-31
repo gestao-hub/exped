@@ -1,5 +1,25 @@
 import { describe, it, expect } from 'vitest';
-import { isNewer, checkAndUpdate } from '../updater.mjs';
+import { isNewer, checkAndUpdate, validVersion } from '../updater.mjs';
+
+describe('updater.validVersion', () => {
+  it('aceita versões semver simples', () => {
+    expect(validVersion('1.2.3')).toBe(true);
+    expect(validVersion('1.2')).toBe(true);
+    expect(validVersion('1')).toBe(true);
+  });
+  it('rejeita injeção de comando', () => {
+    expect(validVersion('1.2.3; rm -rf /')).toBe(false);
+  });
+  it('rejeita path traversal', () => {
+    expect(validVersion('../x')).toBe(false);
+  });
+  it('rejeita vazio/lixo', () => {
+    expect(validVersion('')).toBe(false);
+    expect(validVersion('v1.2.3')).toBe(false);
+    expect(validVersion('1.2.3.4')).toBe(false);
+    expect(validVersion(undefined)).toBe(false);
+  });
+});
 
 describe('updater.isNewer', () => {
   it('detecta versão mais nova (semver)', () => {
@@ -83,6 +103,32 @@ describe('updater.checkAndUpdate', () => {
     expect(res).toEqual({ updated: true, versao: '1.1.0' });
     expect(pointer).toBe('1.1.0');
     expect(restartCalls.length).toBe(1);
+  });
+
+  it('rejeita manifesto com versão inválida sem baixar/extrair', async () => {
+    let downloaded = false;
+    let extracted = false;
+    const res = await checkAndUpdate(
+      { manifestUrl: 'http://x/manifest.json' },
+      {
+        getCurrentVersion: () => '1.0.0',
+        restart: async () => {},
+        health: async () => {},
+        logger: { info() {}, error() {} },
+      },
+      {
+        fetchManifest: async () => ({ versao: '1.1.0; rm -rf /', url: 'http://x/a.zip', sha256: 'ok' }),
+        download: async () => { downloaded = true; },
+        verifySha: async () => 'ok',
+        extract: async () => { extracted = true; },
+        setPointer: async () => {},
+        getPointer: async () => '1.0.0',
+      },
+    );
+    expect(res.updated).toBe(false);
+    expect(res.reason).toBe('versão inválida');
+    expect(downloaded).toBe(false);
+    expect(extracted).toBe(false);
   });
 
   it('faz rollback (restart 2x) quando o health da nova versão lança', async () => {

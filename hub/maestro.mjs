@@ -250,6 +250,7 @@ export async function startMaestro(cfg, opts = {}) {
   storageHandle = await startStorage({
     port: cfg.ports.storage,
     root: cfg.paths.storageRoot || path.join(logDir, 'storage'),
+    secret: cfg.jwtSecret,
   });
 
   logger.info(`subindo gateway :${cfg.ports.gateway}`);

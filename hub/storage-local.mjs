@@ -21,6 +21,19 @@
 import http from 'node:http';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
+import { verifyJwt } from './keys.mjs';
+
+/** Extrai o JWT do header Authorization (Bearer) ou do header apikey. */
+function extractToken(req) {
+  const auth = req.headers['authorization'];
+  if (auth) {
+    const m = /^Bearer\s+(.+)$/i.exec(auth);
+    if (m) return m[1].trim();
+  }
+  const apikey = req.headers['apikey'];
+  if (typeof apikey === 'string' && apikey) return apikey.trim();
+  return null;
+}
 
 function safeRel(raw) {
   // decodifica %2F etc., normaliza separadores e remove segmentos `..` / absolutos.
@@ -31,9 +44,17 @@ function safeRel(raw) {
   return parts.join(sep);
 }
 
-export async function startStorage({ port = 5402, root }) {
+export async function startStorage({ port = 5402, root, secret }) {
+  if (!secret) throw new Error('startStorage: secret (jwtSecret) é obrigatório');
   const server = http.createServer(async (req, res) => {
     const url = req.url || '/';
+    // Autenticação obrigatória ANTES de qualquer I/O: GET e POST/PUT exigem JWT válido.
+    const token = extractToken(req);
+    if (!token || !verifyJwt(token, secret)) {
+      res.statusCode = 401;
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ error: 'unauthorized' }));
+    }
     // aceita /storage/v1/object/<bucket>/<path>, com prefixo opcional sign/ ou public/.
     const m = url.match(/^\/storage\/v1\/object\/(?:sign\/|public\/)?([^?]+)/);
     if (!m) {
