@@ -1,12 +1,12 @@
 using Microsoft.Extensions.Logging;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, ILogger<Worker> log)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        log.LogInformation("ExpediAgent {Ver} iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", AgentInfo.Version, cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
+        log.LogInformation("ExpedAgent {Ver} iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", AgentInfo.Version, cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
         await ChecarSchemaAsync(ct);
         int tick = 0;
         while (!ct.IsCancellationRequested)

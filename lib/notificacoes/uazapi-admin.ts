@@ -40,7 +40,7 @@ async function req(path: string, method: string, headers: Record<string, string>
 /** Cria uma instância no servidor e retorna o TOKEN dela (pra guardar na empresa). */
 export async function criarInstancia(nome: string): Promise<{ token: string } | { error: string }> {
   if (!ADMIN) return { error: 'UAZAPI_ADMIN_TOKEN não configurado no servidor' };
-  const r = await req('/instance/init', 'POST', { admintoken: ADMIN }, { name: nome, systemName: 'Expedi' });
+  const r = await req('/instance/init', 'POST', { admintoken: ADMIN }, { name: nome, systemName: 'Exped' });
   if (!r.ok) return { error: `uazapi init ${r.status}: ${r.txt.slice(0, 200)}` };
   const token = pick(r.json, ['token']);
   if (!token) return { error: 'uazapi não retornou token da instância' };

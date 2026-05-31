@@ -1,4 +1,4 @@
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class AgentConfig
 {

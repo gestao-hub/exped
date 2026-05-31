@@ -1,12 +1,12 @@
 using System.Text.Json;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class StateStore
 {
     private readonly string _path;
     public StateStore()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ExpediAgent");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ExpedAgent");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "state.json");
     }

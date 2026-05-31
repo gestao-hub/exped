@@ -1,25 +1,25 @@
-# Expedi — Visão geral da plataforma & guia de marca
+# Exped — Visão geral da plataforma & guia de marca
 
-Documento de referência: **o que é o Expedi**, como funciona, o que usamos de UI/UX hoje, e
+Documento de referência: **o que é o Exped**, como funciona, o que usamos de UI/UX hoje, e
 as **especificações pra criar a logo própria** (favicon incluído). Serve de brief pra design.
 
 ---
 
-## 1. O que é o Expedi
+## 1. O que é o Exped
 
-O Expedi é uma **plataforma SaaS multi-empresa** que conecta o ERP **Hiper** dos clientes a um
+O Exped é uma **plataforma SaaS multi-empresa** que conecta o ERP **Hiper** dos clientes a um
 sistema de **logística, vendas e ordens de serviço** moderno, acessível de qualquer lugar.
 
-A ideia central: o cliente já lança vendas/OS no Hiper. O Expedi **lê esses dados automaticamente**
+A ideia central: o cliente já lança vendas/OS no Hiper. O Exped **lê esses dados automaticamente**
 e transforma em **mapas de carregamento**, **fila de logística**, **acompanhamento de OS** e
 **notificações ao cliente final** — sem ninguém redigitar nada.
 
 **Antes:** o operador arrastava PDFs do pedido na mão.
-**Agora:** um agente lê o Hiper e tudo aparece pronto no Expedi.
+**Agora:** um agente lê o Hiper e tudo aparece pronto no Exped.
 
 ## 2. Para quem é (multi-nicho)
 
-O Hiper atende muitos ramos, então o Expedi é **genérico por design**. Exemplos de clientes:
+O Hiper atende muitos ramos, então o Exped é **genérico por design**. Exemplos de clientes:
 - **Comércio/distribuição** (ex.: Franzoni — casa & construção): foco em **mapa de carregamento** e entrega.
 - **Automecânica / oficina**: foco em **Ordem de Serviço** — autorização, "serviço pronto", lembrete de próxima manutenção.
 - **Assistência técnica de eletrônicos**: OS com defeito/diagnóstico/garantia.
@@ -29,11 +29,11 @@ Cada cliente é uma **empresa (tenant)** isolada, com seus dados, usuários e **
 ## 3. Como funciona (em linguagem simples)
 
 - **Hiper (no PC do cliente):** onde nascem os pedidos/OS.
-- **Agente Expedi (no PC do cliente):** lê o Hiper e envia pro Expedi.
-- **Expedi (nuvem):** as telas que a equipe usa (mapa, logística, OS, notificações).
+- **Agente Exped (no PC do cliente):** lê o Hiper e envia pro Exped.
+- **Exped (nuvem):** as telas que a equipe usa (mapa, logística, OS, notificações).
 - **Operador (você):** painel central que cria/gerencia os clientes (cross-tenant).
 
-**Em evolução (aprovado):** versão **híbrida offline** — uma cópia do Expedi roda **no PC do
+**Em evolução (aprovado):** versão **híbrida offline** — uma cópia do Exped roda **no PC do
 cliente** e funciona **com ou sem internet**, sincronizando com a nuvem quando a conexão volta
 (ver `docs/superpowers/specs/2026-05-31-expedi-local-offline-design.md`).
 
@@ -65,7 +65,7 @@ cliente** e funciona **com ou sem internet**, sincronizando com a nuvem quando a
 - **Dark + Light mode** (respeita preferência do sistema).
 - **Acessibilidade:** contraste adequado, mínimo 12px.
 
-**Paleta da marca (atual, Expedi):**
+**Paleta da marca (atual, Exped):**
 - Laranja principal: **`#F37021`** (tokens `--color-brand-*`)
   - `brand-50 #FEF3EC` · `brand-100 #FCE1CC` · `brand-500 #F37021` · `brand-600 #D85A0F` · `brand-700 #B14709`
 - Base neutra (VibeUX): fundo `#F9FAFB` · texto `#1D2939` · cinza `#667085` · sucesso `#039855` · erro `#D92D20`
@@ -73,12 +73,12 @@ cliente** e funciona **com ou sem internet**, sincronizando com a nuvem quando a
 > Observação: a cor laranja `#F37021` foi herdada e pode ser **revista** se a nova marca pedir.
 > Se você definir uma cor nova pra logo, a gente ajusta os tokens `--color-brand-*` junto.
 
-## 6. Guia pra criar a logo do Expedi
+## 6. Guia pra criar a logo do Exped
 
 ### Por que precisamos
 Hoje a logo e o favicon **ainda são da Franzoni** (a casinha laranja + "Casa & Construção"). Como o
-Expedi é um **produto multi-empresa**, a marca **padrão** (login, painel do operador, e-mails,
-favicon) tem que ser **do Expedi** — a Franzoni passa a ser só um cliente, com a logo dela no
+Exped é um **produto multi-empresa**, a marca **padrão** (login, painel do operador, e-mails,
+favicon) tem que ser **do Exped** — a Franzoni passa a ser só um cliente, com a logo dela no
 white-label dela.
 
 ### Onde a logo aparece
@@ -101,7 +101,7 @@ Caminhos exatos no projeto:
   qualquer tamanho e é perfeito pra favicon e impressão. A partir do SVG eu gero os PNGs.
 
 ### Formato/proporção
-- A logo **horizontal** (símbolo + "Expedi") é renderizada **pela altura** (a largura se ajusta sozinha).
+- A logo **horizontal** (símbolo + "Exped") é renderizada **pela altura** (a largura se ajusta sozinha).
   Mande com **fundo transparente** (PNG/SVG). Boa altura de referência: 80–160px de export.
 - O **símbolo isolado** precisa funcionar **dentro de um quadrado** (favicon/app) — deixe margem.
 
@@ -118,10 +118,10 @@ Caminhos exatos no projeto:
 notificações (WhatsApp/e-mail + lembrete de manutenção), self-service de WhatsApp por QR,
 painel do operador com white-label (logo/cor por empresa) e interruptor de OS.
 
-**Aprovado e a fazer:** versão **híbrida offline** (Expedi local no PC do cliente, sincronizando
+**Aprovado e a fazer:** versão **híbrida offline** (Exped local no PC do cliente, sincronizando
 com a nuvem) — começando pelo sub-projeto fundação ("desacoplar a camada de dados/auth").
 
-**Aguardando você:** a **logo do Expedi** (arquivos da seção 6). Assim que chegar, eu:
+**Aguardando você:** a **logo do Exped** (arquivos da seção 6). Assim que chegar, eu:
 1. troco os arquivos, ajusto o `AppLogo` e os tokens de cor (se a cor mudar);
 2. atualizo favicon/apple-icon;
 3. garanto que a Franzoni use a logo dela via white-label (não a do produto);

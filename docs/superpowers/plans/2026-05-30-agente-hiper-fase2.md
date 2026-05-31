@@ -21,16 +21,16 @@
 
 ## File Structure (projeto em `agent/` do repo)
 
-- `agent/ExpediAgent/ExpediAgent.csproj` — projeto Worker Service.
-- `agent/ExpediAgent/appsettings.json` — config (URL, token, conexão, intervalo, situação-gatilho, carência do PDF).
-- `agent/ExpediAgent/Config.cs` — POCO de configuração.
-- `agent/ExpediAgent/Models.cs` — DTOs (PedidoHeader, Cliente, Item, payload de ingestão).
-- `agent/ExpediAgent/HiperRepository.cs` — consultas ao SQL Server.
-- `agent/ExpediAgent/PayloadBuilder.cs` — monta o JSON do `dados`.
-- `agent/ExpediAgent/IngestClient.cs` — POST multipart pro endpoint.
-- `agent/ExpediAgent/StateStore.cs` — high-water mark em `%ProgramData%`.
-- `agent/ExpediAgent/Worker.cs` — loop principal (BackgroundService).
-- `agent/ExpediAgent/Program.cs` — host + Windows Service.
+- `agent/ExpedAgent/ExpedAgent.csproj` — projeto Worker Service.
+- `agent/ExpedAgent/appsettings.json` — config (URL, token, conexão, intervalo, situação-gatilho, carência do PDF).
+- `agent/ExpedAgent/Config.cs` — POCO de configuração.
+- `agent/ExpedAgent/Models.cs` — DTOs (PedidoHeader, Cliente, Item, payload de ingestão).
+- `agent/ExpedAgent/HiperRepository.cs` — consultas ao SQL Server.
+- `agent/ExpedAgent/PayloadBuilder.cs` — monta o JSON do `dados`.
+- `agent/ExpedAgent/IngestClient.cs` — POST multipart pro endpoint.
+- `agent/ExpedAgent/StateStore.cs` — high-water mark em `%ProgramData%`.
+- `agent/ExpedAgent/Worker.cs` — loop principal (BackgroundService).
+- `agent/ExpedAgent/Program.cs` — host + Windows Service.
 - `agent/.gitignore` — ignora `bin/`, `obj/`.
 - `agent/README.md` — build, config, instalação como serviço, teste.
 
@@ -38,7 +38,7 @@
 
 - **Gatilho:** poll periódico de `pedido_venda` por `situacao = SituacaoGatilho` (default 5) e `id_pedido_venda > HWM`.
 - **PDF + carência:** ao detectar um pedido novo, se o PDF ainda não existe em `%TEMP%`, **espera** (não avança o HWM) até o PDF aparecer OU o pedido ficar mais velho que `PdfGraceMinutes` (default 3) — então sincroniza sem PDF (pagamento fica vazio; vendedor preenche na revisão). Cobre o caso "DB nasce antes da impressão".
-- **HWM:** maior `id_pedido_venda` já sincronizado, em `%ProgramData%\ExpediAgent\state.json`. Dedup definitivo é no servidor (por `documento_erp`).
+- **HWM:** maior `id_pedido_venda` já sincronizado, em `%ProgramData%\ExpedAgent\state.json`. Dedup definitivo é no servidor (por `documento_erp`).
 - **Auth:** Bearer = token do dispositivo (provisionado na nuvem; ver Tarefa 11).
 - **Sem credencial de banco:** Windows Auth (Trusted_Connection) — o serviço roda sob conta com acesso de leitura ao `Hiper`.
 
@@ -46,12 +46,12 @@
 
 ## Task 1: Scaffold do projeto
 
-**Files:** `agent/ExpediAgent/ExpediAgent.csproj`, `agent/.gitignore`
+**Files:** `agent/ExpedAgent/ExpedAgent.csproj`, `agent/.gitignore`
 
 - [ ] **Step 1: Criar o projeto** (na máquina Windows, na raiz do repo)
 ```bat
-dotnet new worker -n ExpediAgent -o agent\ExpediAgent
-cd agent\ExpediAgent
+dotnet new worker -n ExpedAgent -o agent\ExpedAgent
+cd agent\ExpedAgent
 dotnet add package Microsoft.Data.SqlClient
 dotnet add package Microsoft.Extensions.Hosting.WindowsServices
 ```
@@ -67,7 +67,7 @@ dotnet add package Microsoft.Extensions.Hosting.WindowsServices
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <AssemblyName>ExpediAgent</AssemblyName>
+    <AssemblyName>ExpedAgent</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
@@ -91,7 +91,7 @@ obj/
 
 ## Task 2: Configuração
 
-**Files:** `agent/ExpediAgent/appsettings.json`, `Config.cs`
+**Files:** `agent/ExpedAgent/appsettings.json`, `Config.cs`
 
 - [ ] **Step 1: `appsettings.json`**
 ```json
@@ -112,7 +112,7 @@ obj/
 
 - [ ] **Step 2: `Config.cs`**
 ```csharp
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class AgentConfig
 {
@@ -133,12 +133,12 @@ public sealed class AgentConfig
 
 ## Task 3: DTOs
 
-**Files:** `agent/ExpediAgent/Models.cs`
+**Files:** `agent/ExpedAgent/Models.cs`
 
 - [ ] **Step 1: `Models.cs`**
 ```csharp
 using System.Text.Json.Serialization;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class PedidoHeader
 {
@@ -221,14 +221,14 @@ public sealed class IngestPayload
 
 ## Task 4: Repositório SQL
 
-**Files:** `agent/ExpediAgent/HiperRepository.cs`
+**Files:** `agent/ExpedAgent/HiperRepository.cs`
 
 > ⚠️ Nomes de coluna do cliente (`numero_endereco`, `fone_primario_*`, `entidade.codigo`) vieram do mapeamento; **confirmar 1x** no SQL Server real e ajustar se preciso (o agente loga o erro de coluna se divergir).
 
 - [ ] **Step 1: `HiperRepository.cs`**
 ```csharp
 using Microsoft.Data.SqlClient;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class HiperRepository(string connectionString)
 {
@@ -331,11 +331,11 @@ ORDER BY ipv.sequencia_item;";
 
 ## Task 5: Builder do payload
 
-**Files:** `agent/ExpediAgent/PayloadBuilder.cs`
+**Files:** `agent/ExpedAgent/PayloadBuilder.cs`
 
 - [ ] **Step 1: `PayloadBuilder.cs`**
 ```csharp
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public static class PayloadBuilder
 {
@@ -387,14 +387,14 @@ public static class PayloadBuilder
 
 ## Task 6: Cliente HTTP (POST multipart)
 
-**Files:** `agent/ExpediAgent/IngestClient.cs`
+**Files:** `agent/ExpedAgent/IngestClient.cs`
 
 - [ ] **Step 1: `IngestClient.cs`**
 ```csharp
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public enum IngestResult { Created, Duplicate, Unauthorized, Invalid, Error }
 
@@ -440,19 +440,19 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
 
 ## Task 7: Estado (high-water mark)
 
-**Files:** `agent/ExpediAgent/StateStore.cs`
+**Files:** `agent/ExpedAgent/StateStore.cs`
 
 - [ ] **Step 1: `StateStore.cs`**
 ```csharp
 using System.Text.Json;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class StateStore
 {
     private readonly string _path;
     public StateStore()
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ExpediAgent");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ExpedAgent");
         Directory.CreateDirectory(dir);
         _path = Path.Combine(dir, "state.json");
     }
@@ -473,11 +473,11 @@ public sealed class StateStore
 
 ## Task 8: Worker (loop principal)
 
-**Files:** `agent/ExpediAgent/Worker.cs`, `Program.cs`
+**Files:** `agent/ExpedAgent/Worker.cs`, `Program.cs`
 
 - [ ] **Step 1: `Worker.cs`**
 ```csharp
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, ILogger<Worker> log)
     : BackgroundService
@@ -538,10 +538,10 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
 
 - [ ] **Step 2: `Program.cs`**
 ```csharp
-using ExpediAgent;
+using ExpedAgent;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddWindowsService(o => o.ServiceName = "ExpediAgent");
+builder.Services.AddWindowsService(o => o.ServiceName = "ExpedAgent");
 
 var cfg = builder.Configuration.GetSection("Agent").Get<AgentConfig>() ?? new AgentConfig();
 builder.Services.AddSingleton(cfg);
@@ -564,7 +564,7 @@ host.Run();
 - [ ] **Step 1: Provisionar dispositivo + vendedor na nuvem** (ver Tarefa 11) e colar o token em `appsettings.json` (`DeviceToken`). Conferir `SituacaoGatilho` real no Hiper.
 - [ ] **Step 2: Rodar em console** (não como serviço ainda)
 ```bat
-cd agent\ExpediAgent
+cd agent\ExpedAgent
 dotnet run
 ```
 - [ ] **Step 3: No Hiper, criar um pedido de venda real** (com itens, cliente, e imprimir o PDF). Em até `PollInterval`+`carência`, o log deve mostrar `Pedido Lxxx sincronizado (Created, com PDF)`.
@@ -577,19 +577,19 @@ dotnet run
 
 - [ ] **Step 1: Publicar single-file**
 ```bat
-dotnet publish agent\ExpediAgent -c Release -r win-x64 ^
+dotnet publish agent\ExpedAgent -c Release -r win-x64 ^
   -p:PublishSingleFile=true --self-contained true ^
-  -o C:\ExpediAgent
+  -o C:\ExpedAgent
 ```
-Copie o `appsettings.json` (com o token) pra `C:\ExpediAgent` ao lado do `.exe`.
+Copie o `appsettings.json` (com o token) pra `C:\ExpedAgent` ao lado do `.exe`.
 
 - [ ] **Step 2: Criar o serviço** (Admin)
 ```bat
-sc create ExpediAgent binPath= "C:\ExpediAgent\ExpediAgent.exe" start= auto
-sc description ExpediAgent "Sincroniza pedidos do Hiper com a plataforma Franzoni"
-sc start ExpediAgent
+sc create ExpedAgent binPath= "C:\ExpedAgent\ExpedAgent.exe" start= auto
+sc description ExpedAgent "Sincroniza pedidos do Hiper com a plataforma Franzoni"
+sc start ExpedAgent
 ```
-- [ ] **Step 3: Verificar** `sc query ExpediAgent` → RUNNING. Logs no Visualizador de Eventos (Application) ou redirecionar pra arquivo (Tarefa futura).
+- [ ] **Step 3: Verificar** `sc query ExpedAgent` → RUNNING. Logs no Visualizador de Eventos (Application) ou redirecionar pra arquivo (Tarefa futura).
 - [ ] **Step 4: Commit** `git add agent/README.md && git commit -m "docs(agent): build, instalação como serviço e teste"`
 
 ---

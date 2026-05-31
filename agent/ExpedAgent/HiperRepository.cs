@@ -1,5 +1,5 @@
 using Microsoft.Data.SqlClient;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 // ⚠️ Nomes de coluna do cliente (numero_endereco, fone_primario_*, etc.) vieram do
 // mapeamento; confirmar 1x no SQL Server real e ajustar se divergir (o log mostra o erro).

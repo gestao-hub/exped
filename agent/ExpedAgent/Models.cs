@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public sealed class PedidoHeader
 {

@@ -18,7 +18,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: 'Expedi — Mapa de Carregamento',
+  title: 'Exped — Mapa de Carregamento',
   description: 'Sistema de pedidos e logística — Franzoni Casa & Construção',
 };
 

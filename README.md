@@ -1,4 +1,4 @@
-# Expedi — Mapa de Carregamento
+# Exped — Mapa de Carregamento
 
 Sistema interno da **Franzoni Casa & Construção** para gerar e gerenciar o Mapa
 de Carregamento a partir do PDF de pedido emitido pelo ERP. Substitui o fluxo

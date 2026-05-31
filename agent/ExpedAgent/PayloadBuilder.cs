@@ -1,4 +1,4 @@
-namespace ExpediAgent;
+namespace ExpedAgent;
 
 public static class PayloadBuilder
 {

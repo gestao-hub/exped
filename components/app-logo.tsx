@@ -2,7 +2,7 @@ import Image from 'next/image';
 import { cn } from '@/lib/utils';
 
 /**
- * Logo Expedi.
+ * Logo Exped.
  * - variant="light" (default): texto branco — use em fundos escuros (sidebar)
  * - variant="dark": texto navy — use em fundos claros (login, impressão)
  */
@@ -19,7 +19,7 @@ export function AppLogo({
   return (
     <Image
       src={src}
-      alt="Expedi"
+      alt="Exped"
       width={size}
       height={size}
       priority

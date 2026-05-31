@@ -21,7 +21,7 @@ async function isPlatformAdmin(): Promise<boolean> {
   return !!me?.is_platform_admin;
 }
 
-/** Mapeia (ou atualiza) um vendedor do Hiper → vendedor Expedi, por empresa. */
+/** Mapeia (ou atualiza) um vendedor do Hiper → vendedor Exped, por empresa. */
 export async function salvarVendedorMapAction(
   input: VendedorMapInput,
 ): Promise<{ ok: true } | { error: string }> {

@@ -1,7 +1,7 @@
-using ExpediAgent;
+using ExpedAgent;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddWindowsService(o => o.ServiceName = "ExpediAgent");
+builder.Services.AddWindowsService(o => o.ServiceName = "ExpedAgent");
 
 var cfg = builder.Configuration.GetSection("Agent").Get<AgentConfig>() ?? new AgentConfig();
 builder.Services.AddSingleton(cfg);

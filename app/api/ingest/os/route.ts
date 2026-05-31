@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   }
   const d = dados.data;
 
-  // vendedor/responsável Hiper → Expedi
+  // vendedor/responsável Hiper → Exped
   const { data: map } = await supabase
     .from('hiper_vendedor_map').select('vendedor_id')
     .eq('empresa_id', empresaId).eq('hiper_usuario_id', d.hiper_usuario_id).maybeSingle();

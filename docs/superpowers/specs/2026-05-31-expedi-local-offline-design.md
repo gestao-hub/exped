@@ -1,21 +1,21 @@
-# Expedi Local — Operação híbrida offline (Abordagem B)
+# Exped Local — Operação híbrida offline (Abordagem B)
 
 **Data:** 2026-05-31
 **Status:** Design aprovado (aguardando revisão da spec)
-**Origem:** Necessidade de o Expedi continuar operando quando cai a internet do cliente.
+**Origem:** Necessidade de o Exped continuar operando quando cai a internet do cliente.
 
 ---
 
 ## 1. Problema
 
-Hoje o Expedi é um SaaS **100% na nuvem** (Next.js na Vercel + Supabase). Na máquina do
-cliente roda apenas o **agente .NET** (ExpediAgent), que lê o Hiper (SQL Server local) e
+Hoje o Exped é um SaaS **100% na nuvem** (Next.js na Vercel + Supabase). Na máquina do
+cliente roda apenas o **agente .NET** (ExpedAgent), que lê o Hiper (SQL Server local) e
 **empurra** os dados pra nuvem (mão única, depende de internet).
 
 Se a internet do cliente cai:
 - O Hiper (local) continua funcionando.
 - O agente **pausa** o envio (sem perda — retoma do high-water-mark quando volta).
-- **O app Expedi fica inacessível** (mapa de carregamento, OS, notificações) — a equipe não consegue trabalhar no Expedi.
+- **O app Exped fica inacessível** (mapa de carregamento, OS, notificações) — a equipe não consegue trabalhar no Exped.
 
 O cliente precisa de **paridade total offline**: ver/imprimir, mudar status (separar/entregar),
 criar/editar pedido e OS, e enfileirar notificações — tudo sem internet, sincronizando quando volta.
@@ -26,38 +26,38 @@ criar/editar pedido e OS, e enfileirar notificações — tudo sem internet, sin
 |------|---------|
 | Escopo offline | **Paridade total**: ver/imprimir, mudar status, criar/editar pedido+OS, notificações |
 | Usuários/dispositivos | **Variável por cliente** → desenhar pro caso amplo: **servidor local na LAN** servindo PCs e celulares via navegador; funciona também em 1 PC só |
-| Escrita no Hiper | **NÃO.** O que o Expedi cria/edita vive **só no Expedi**. Nunca escrevemos no banco do Hiper (risco/escopo do ERP) |
+| Escrita no Hiper | **NÃO.** O que o Exped cria/edita vive **só no Exped**. Nunca escrevemos no banco do Hiper (risco/escopo do ERP) |
 | Login offline | **Sessão lembrada por dispositivo** (loga 1x online → segue offline naquele aparelho) |
 | Conflito | **Última edição vence** (por timestamp). Aceitável porque é 1 cliente / 1 equipe por site |
 | Abordagem | **B — o agente vira "hub local"**: banco local + serve a UI na rede + sincroniza com a nuvem |
 
 ## 3. Arquitetura: local-first no site, nuvem como espelho
 
-O site do cliente **sempre usa o Expedi local** (principal). A nuvem é o **espelho
+O site do cliente **sempre usa o Exped local** (principal). A nuvem é o **espelho
 sincronizado** + ponto de acesso remoto. Elimina a ambiguidade de "qual cópia é a verdadeira":
 no site é a local; fora é a nuvem; o sincronizador mantém as duas iguais.
 
 ```
 MÁQUINA DO CLIENTE (hub local):
-  Hiper (SQL local) ─> [Leitor Hiper] ─> Banco LOCAL (Postgres) <─> [Expedi LOCAL] (equipe, via LAN/navegador)
+  Hiper (SQL local) ─> [Leitor Hiper] ─> Banco LOCAL (Postgres) <─> [Exped LOCAL] (equipe, via LAN/navegador)
                                               │
                                        [Sincronizador] ⇅ internet (quando há)
                                               │
 NUVEM:                                        ▼
-  Banco nuvem (Supabase) <─> [Expedi NUVEM] (operador + dono, acesso remoto; disparo de notificações)
+  Banco nuvem (Supabase) <─> [Exped NUVEM] (operador + dono, acesso remoto; disparo de notificações)
 ```
 
-- Equipe no site → **Expedi local** (rápido, LAN, com/sem internet).
+- Equipe no site → **Exped local** (rápido, LAN, com/sem internet).
 - Sincronizador → replica **local ⇄ nuvem continuamente** quando online.
-- Operador/dono → **Expedi nuvem** (sempre igual ao local, via sync).
+- Operador/dono → **Exped nuvem** (sempre igual ao local, via sync).
 - Hiper → alimenta o **banco local** (o agente evoluído).
 - Notificações → fila; saem pela nuvem assim que alcançável.
 
 ## 4. Componentes no hub local (um instalador único, sem Docker)
 
-1. **Expedi local** — o mesmo Next.js de hoje, rodando como processo Node na máquina, servindo a LAN. Mesmas telas.
+1. **Exped local** — o mesmo Next.js de hoje, rodando como processo Node na máquina, servindo a LAN. Mesmas telas.
 2. **Banco local** — Postgres embarcado/portátil (sem Docker; bundle no instalador). Guarda os dados desta empresa + ingestão do Hiper.
-3. **Leitor Hiper** — o ExpediAgent atual, evoluído pra gravar no **banco local** (em vez de POSTar pra nuvem).
+3. **Leitor Hiper** — o ExpedAgent atual, evoluído pra gravar no **banco local** (em vez de POSTar pra nuvem).
 4. **Sincronizador** — peça nova; mantém banco local ⇄ nuvem iguais (fila + última-edição-vence).
 
 Instalador único (estilo Inno Setup, como o do agente hoje): "avançar → concluir". Requisito:
@@ -90,7 +90,7 @@ O mesmo código Next roda nos dois modos, escolhendo a implementação conforme 
 ## 7. Login offline + segurança
 
 - Sessão **lembrada por dispositivo**: 1º login exige internet; depois funciona offline naquele aparelho.
-- Expedi local responde **só na LAN** do cliente (não exposto na internet aberta); continua exigindo login.
+- Exped local responde **só na LAN** do cliente (não exposto na internet aberta); continua exigindo login.
 - Credenciais sensíveis (token uazapi etc.) ficam no lado servidor do hub, nunca expostas ao navegador.
 - **Limitação conhecida:** aparelho novo que nunca logou online não consegue 1º login durante queda.
 

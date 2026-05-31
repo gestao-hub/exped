@@ -1,25 +1,25 @@
-; ExpediAgent.iss — instalador (Inno Setup). Compile no Windows com Inno Setup 6+.
+; ExpedAgent.iss — instalador (Inno Setup). Compile no Windows com Inno Setup 6+.
 ; Instala SEM admin em %LOCALAPPDATA% e configura auto-start no logon do usuário
-; (roda start.cmd oculto via .vbs na pasta Startup). Assine o ExpediAgentSetup.exe
+; (roda start.cmd oculto via .vbs na pasta Startup). Assine o ExpedAgentSetup.exe
 ; gerado com o certificado de assinatura de código (signtool) antes de distribuir.
 ;
 ; Pré-passo (gerar o publish self-contained que este script empacota):
-;   dotnet publish ..\ExpediAgent -c Release -o publish
+;   dotnet publish ..\ExpedAgent -c Release -o publish
 
 #define MyVersion "1.0.0"
 
 [Setup]
-AppName=Expedi Agent
+AppName=Exped Agent
 AppVersion={#MyVersion}
-AppPublisher=Expedi
-DefaultDirName={localappdata}\ExpediAgent
+AppPublisher=Exped
+DefaultDirName={localappdata}\ExpedAgent
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputBaseFilename=ExpediAgentSetup
+OutputBaseFilename=ExpedAgentSetup
 Compression=lzma2
 SolidCompression=yes
-UninstallDisplayName=Expedi Agent
+UninstallDisplayName=Exped Agent
 
 [Files]
 ; Conteúdo do publish (self-contained — máquina final não precisa de runtime).
@@ -35,7 +35,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     appDir := ExpandConstant('{app}');
-    vbsPath := ExpandConstant('{userstartup}\ExpediAgent.vbs');
+    vbsPath := ExpandConstant('{userstartup}\ExpedAgent.vbs');
     vbsBody := 'Set sh = CreateObject("WScript.Shell")' + #13#10 +
                'sh.Run "cmd /c ""' + appDir + '\start.cmd""", 0, False';
     SaveStringToFile(vbsPath, vbsBody, False);
@@ -46,5 +46,5 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
-    DeleteFile(ExpandConstant('{userstartup}\ExpediAgent.vbs'));
+    DeleteFile(ExpandConstant('{userstartup}\ExpedAgent.vbs'));
 end;

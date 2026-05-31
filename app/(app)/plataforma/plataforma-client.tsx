@@ -364,7 +364,7 @@ function VendedoresSection({
   function salvar() {
     const id = Number(hiperId);
     if (!Number.isInteger(id)) { toast.error('id do Hiper inválido'); return; }
-    if (!vendedorId) { toast.error('Escolha o vendedor Expedi'); return; }
+    if (!vendedorId) { toast.error('Escolha o vendedor Exped'); return; }
     start(async () => {
       const r = await salvarVendedorMapAction({
         empresa_id: empresaId, hiper_usuario_id: id,
@@ -383,11 +383,11 @@ function VendedoresSection({
 
   return (
     <div className="space-y-2">
-      <h4 className="text-sm font-medium inline-flex items-center gap-2"><Users className="h-4 w-4" /> Vendedores (Hiper → Expedi)</h4>
+      <h4 className="text-sm font-medium inline-flex items-center gap-2"><Users className="h-4 w-4" /> Vendedores (Hiper → Exped)</h4>
       <div className="flex flex-wrap gap-2 items-end">
         <Field label="ID Hiper"><Input value={hiperId} onChange={(e) => setHiperId(e.target.value)} className="w-24" placeholder="1" /></Field>
         <Field label="Nome no Hiper"><Input value={hiperNome} onChange={(e) => setHiperNome(e.target.value)} className="w-40" placeholder="Michel" /></Field>
-        <Field label="Vendedor Expedi">
+        <Field label="Vendedor Exped">
           <select value={vendedorId} onChange={(e) => setVendedorId(e.target.value)}
             className="h-9 rounded-md border border-input bg-transparent px-3 text-sm min-w-[200px]">
             <option value="">— escolher —</option>
