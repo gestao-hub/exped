@@ -6,7 +6,7 @@
 //
 //   /auth/v1/*    -> GoTrue     127.0.0.1:9999   (remove prefixo /auth/v1)
 //   /rest/v1/*    -> PostgREST  127.0.0.1:54331  (remove prefixo /rest/v1)
-//   /storage/v1/* -> 501 stub (storage fora do escopo do spike offline)
+//   /storage/v1/* -> storage local (hub/storage-local.mjs) 127.0.0.1:5402 (mantém prefixo)
 //
 // Repassa método + headers (Authorization, apikey, Content-Type, Prefer, etc.) + body.
 //
@@ -16,10 +16,14 @@
 import http from 'node:http';
 
 const PORT = Number(process.env.GATEWAY_PORT || 54320);
+const STORAGE_PORT = Number(process.env.STORAGE_PORT || 5402);
 
 const TARGETS = [
   { prefix: '/auth/v1', host: '127.0.0.1', port: 9999, name: 'gotrue' },
   { prefix: '/rest/v1', host: '127.0.0.1', port: 54331, name: 'postgrest' },
+  // Storage local (hub/storage-local.mjs) espera o path COMPLETO /storage/v1/object/...,
+  // então mantemos o prefixo (keepPrefix) em vez de removê-lo como nas demais rotas.
+  { prefix: '/storage/v1', host: '127.0.0.1', port: STORAGE_PORT, name: 'storage', keepPrefix: true },
 ];
 
 function pickTarget(url) {
@@ -34,14 +38,6 @@ function pickTarget(url) {
 const server = http.createServer((req, res) => {
   const url = req.url || '/';
 
-  // Storage não existe offline -> stub 501.
-  if (url === '/storage/v1' || url.startsWith('/storage/v1/') || url.startsWith('/storage/v1?')) {
-    console.log(`${req.method} ${url} -> 501 (storage stub)`);
-    res.writeHead(501, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'storage não disponível offline (fora do escopo do spike)' }));
-    return;
-  }
-
   const target = pickTarget(url);
   if (!target) {
     console.log(`${req.method} ${url} -> 404 (sem rota)`);
@@ -50,11 +46,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Reescreve o path tirando o prefixo (/auth/v1 ou /rest/v1).
-  let downstreamPath = url.slice(target.prefix.length);
-  if (downstreamPath === '') downstreamPath = '/';
-  if (!downstreamPath.startsWith('/') && !downstreamPath.startsWith('?')) {
-    downstreamPath = '/' + downstreamPath;
+  // Reescreve o path tirando o prefixo (/auth/v1 ou /rest/v1). Para o storage,
+  // keepPrefix=true mantém o /storage/v1 intacto (o servidor local casa o path completo).
+  let downstreamPath;
+  if (target.keepPrefix) {
+    downstreamPath = url;
+  } else {
+    downstreamPath = url.slice(target.prefix.length);
+    if (downstreamPath === '') downstreamPath = '/';
+    if (!downstreamPath.startsWith('/') && !downstreamPath.startsWith('?')) {
+      downstreamPath = '/' + downstreamPath;
+    }
   }
 
   // Repassa todos os headers, ajustando Host pro alvo.
@@ -83,5 +85,5 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[gateway] escutando em http://127.0.0.1:${PORT}`);
-  console.log(`[gateway] /auth/v1/* -> 127.0.0.1:9999  |  /rest/v1/* -> 127.0.0.1:54331  |  /storage/v1/* -> 501`);
+  console.log(`[gateway] /auth/v1/* -> 127.0.0.1:9999  |  /rest/v1/* -> 127.0.0.1:54331  |  /storage/v1/* -> 127.0.0.1:${STORAGE_PORT}`);
 });

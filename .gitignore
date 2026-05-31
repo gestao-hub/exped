@@ -51,3 +51,10 @@ plataforma-teste.png
 
 # local-stack native binaries (PostgREST, GoTrue, etc.) — baixados localmente, não versionar
 scripts/local-stack/bin/
+
+# hub Windows native binaries (auth.exe, migrations/, Postgres, PostgREST) — empacotados/baixados, não versionar
+hub/win/bin/
+# pasta de payload montada no pre-build (app standalone + binarios) — nunca versionar
+hub/win/payload/
+# saida do compilador Inno Setup
+hub/win/Output/
