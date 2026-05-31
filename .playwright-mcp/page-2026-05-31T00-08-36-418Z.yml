@@ -1,0 +1,90 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "Expedi" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "Expedi" [ref=e6]
+      - navigation [ref=e7]:
+        - generic [ref=e8]:
+          - paragraph [ref=e9]: Operador
+          - list [ref=e10]:
+            - listitem [ref=e11]:
+              - link "Plataforma" [ref=e12] [cursor=pointer]:
+                - /url: /plataforma
+                - img [ref=e13]
+                - generic [ref=e17]: Plataforma
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e21]: E(
+          - generic [ref=e22]:
+            - paragraph [ref=e23]: Excluvia (operador)
+            - paragraph [ref=e24]: vendedor
+        - generic [ref=e25]:
+          - button "Alternar tema" [ref=e26]:
+            - img
+          - button "Sair" [ref=e28]:
+            - img
+            - text: Sair
+    - main [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e33]:
+          - heading "Plataforma" [level=1] [ref=e34]
+          - paragraph [ref=e35]: "Operador: empresas, agentes e mapeamentos (cross-tenant)."
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img [ref=e39]
+            - text: Empresas
+          - button "Nova empresa" [ref=e43]:
+            - img
+            - text: Nova empresa
+        - generic [ref=e44]:
+          - generic [ref=e46]:
+            - text: Franzoni Casa & Construção
+            - generic [ref=e47]: /franzoni
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - heading "Agentes (1)" [level=4] [ref=e50]:
+                - img [ref=e51]
+                - text: Agentes (1)
+              - generic [ref=e54]:
+                - 'textbox "Nome do agente (ex.: PDV Loja Centro)" [ref=e55]'
+                - button "Gerar token" [ref=e56]:
+                  - img
+                  - text: Gerar token
+              - list [ref=e57]:
+                - listitem [ref=e58]:
+                  - generic [ref=e59]: PDV Franzoni
+                  - generic [ref=e61]:
+                    - generic [ref=e62]: visto 29/05/2026, 22:56:01
+                    - button "Revogar" [ref=e63]:
+                      - img
+            - generic [ref=e64]:
+              - heading "Vendedores (Hiper → Expedi)" [level=4] [ref=e65]:
+                - img [ref=e66]
+                - text: Vendedores (Hiper → Expedi)
+              - generic [ref=e71]:
+                - generic [ref=e72]:
+                  - generic [ref=e73]: ID Hiper
+                  - textbox "1" [ref=e74]
+                - generic [ref=e75]:
+                  - generic [ref=e76]: Nome no Hiper
+                  - textbox "Michel" [ref=e77]
+                - generic [ref=e78]:
+                  - generic [ref=e79]: Vendedor Expedi
+                  - combobox [ref=e80]:
+                    - option "— escolher —" [selected]
+                    - option "Admin Franzoni (admin)"
+                    - option "Vendedor 1 (vendedor)"
+                    - option "Vendedor 2 (vendedor)"
+                    - option "Vendedor 3 (vendedor)"
+                    - option "Vendedor 4 (vendedor)"
+                    - option "Logística Franzoni (logistica)"
+                - button "Adicionar" [ref=e81]:
+                  - img
+                  - text: Adicionar
+              - list [ref=e82]:
+                - listitem [ref=e83]:
+                  - generic [ref=e84]: "Hiper #1 (Michel)"
+                  - generic [ref=e85]: → Vendedor 1
+  - region "Notifications alt+T"
+  - alert [ref=e86]

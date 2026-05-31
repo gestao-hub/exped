@@ -1,0 +1,1 @@
+[    5333ms] [WARNING] The resource https://franzoni.vercel.app/_next/image?url=%2Flogo-light.png&w=48&q=75&dpl=dpl_B8s4QpS9cQ6Wng7cDGJV9om6pb4c was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded intentionally. @ https://franzoni.vercel.app/plataforma:0

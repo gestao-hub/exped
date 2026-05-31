@@ -1,0 +1,119 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "Expedi" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - img "Expedi" [ref=e6]
+      - navigation [ref=e7]:
+        - generic [ref=e8]:
+          - paragraph [ref=e9]: Operador
+          - list [ref=e10]:
+            - listitem [ref=e11]:
+              - link "Plataforma" [ref=e12] [cursor=pointer]:
+                - /url: /plataforma
+                - img [ref=e13]
+                - generic [ref=e17]: Plataforma
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e21]: E(
+          - generic [ref=e22]:
+            - paragraph [ref=e23]: Excluvia (operador)
+            - paragraph [ref=e24]: vendedor
+        - generic [ref=e25]:
+          - button "Alternar tema" [ref=e26]:
+            - img
+          - button "Sair" [ref=e28]:
+            - img
+            - text: Sair
+    - main [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e33]:
+          - heading "Plataforma" [level=1] [ref=e34]
+          - paragraph [ref=e35]: "Operador: empresas, agentes e mapeamentos (cross-tenant)."
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img [ref=e39]
+            - text: Empresas
+          - button "Nova empresa" [ref=e43]:
+            - img
+            - text: Nova empresa
+        - generic [ref=e44]:
+          - generic [ref=e46]:
+            - text: Franzoni Casa & Construção
+            - generic [ref=e47]: /franzoni
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - heading "Agentes (1)" [level=4] [ref=e50]:
+                - img [ref=e51]
+                - text: Agentes (1)
+              - generic [ref=e54]:
+                - 'textbox "Nome do agente (ex.: PDV Loja Centro)" [ref=e55]'
+                - button "Gerar token" [ref=e56]:
+                  - img
+                  - text: Gerar token
+              - list [ref=e57]:
+                - listitem [ref=e58]:
+                  - generic [ref=e59]: PDV Franzoni
+                  - generic [ref=e61]:
+                    - generic [ref=e62]: visto 29/05/2026, 22:56:01
+                    - button "Revogar" [ref=e63]:
+                      - img
+            - generic [ref=e64]:
+              - heading "Vendedores (Hiper → Expedi)" [level=4] [ref=e65]:
+                - img [ref=e66]
+                - text: Vendedores (Hiper → Expedi)
+              - generic [ref=e71]:
+                - generic [ref=e72]:
+                  - generic [ref=e73]: ID Hiper
+                  - textbox "1" [ref=e74]
+                - generic [ref=e75]:
+                  - generic [ref=e76]: Nome no Hiper
+                  - textbox "Michel" [ref=e77]
+                - generic [ref=e78]:
+                  - generic [ref=e79]: Vendedor Expedi
+                  - combobox [ref=e80]:
+                    - option "— escolher —" [selected]
+                    - option "Admin Franzoni (admin)"
+                    - option "Vendedor 1 (vendedor)"
+                    - option "Vendedor 2 (vendedor)"
+                    - option "Vendedor 3 (vendedor)"
+                    - option "Vendedor 4 (vendedor)"
+                    - option "Logística Franzoni (logistica)"
+                - button "Adicionar" [ref=e81]:
+                  - img
+                  - text: Adicionar
+              - list [ref=e82]:
+                - listitem [ref=e83]:
+                  - generic [ref=e84]: "Hiper #1 (Michel)"
+                  - generic [ref=e85]: → Vendedor 1
+            - generic [ref=e86]:
+              - heading "Notificações (OS)" [level=3] [ref=e87]:
+                - img [ref=e88]
+                - text: Notificações (OS)
+              - generic [ref=e91]:
+                - generic [ref=e92]:
+                  - generic [ref=e93]:
+                    - checkbox "WhatsApp (uazapi)" [ref=e94]
+                    - text: WhatsApp (uazapi)
+                  - generic [ref=e95]:
+                    - textbox "URL da instância (uazapi_url)" [ref=e96]
+                    - textbox "Token" [ref=e97]
+                    - textbox "Instância (opcional)" [ref=e98]
+                - generic [ref=e99]:
+                  - generic [ref=e100]:
+                    - checkbox "E-mail (Resend)" [ref=e101]
+                    - text: E-mail (Resend)
+                  - 'textbox "Remetente — ex: \"Oficina X <oi@oficina.com>\"" [ref=e102]'
+                - generic [ref=e103]:
+                  - generic [ref=e104]:
+                    - generic [ref=e105]: Situação = Autorização
+                    - spinbutton [ref=e106]
+                  - generic [ref=e107]:
+                    - generic [ref=e108]: Situação = Pronto
+                    - spinbutton [ref=e109]
+                  - generic [ref=e110]:
+                    - generic [ref=e111]: "Lembrete: dias antes"
+                    - spinbutton [ref=e112]: "7"
+                - button "Salvar notificações" [ref=e113]
+                - paragraph [ref=e114]: Sem credencial, a notificação é enfileirada mas não enviada. As situações vêm do Hiper do cliente (deixe em branco para não disparar automático).
+  - region "Notifications alt+T"

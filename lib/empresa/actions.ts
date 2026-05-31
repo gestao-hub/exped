@@ -109,3 +109,37 @@ export async function salvarNotifConfigAction(
   if (error) return { error: error.message };
   return { ok: true };
 }
+
+export type EmpresaConfigInput = {
+  usa_os: boolean;
+  ativo: boolean;
+  logo_url: string | null;
+  cor_primaria: string | null;
+};
+
+/**
+ * Config geral da empresa (operador): liga/desliga Ordem de Serviço, ativo, e marca
+ * (logo + cor). Tira a dependência de SQL pra habilitar OS num cliente novo.
+ */
+export async function salvarEmpresaConfigAction(
+  empresaId: string,
+  cfg: EmpresaConfigInput,
+): Promise<{ ok: true } | { error: string }> {
+  const supa = await createClient();
+  const { data: { user } } = await supa.auth.getUser();
+  if (!user) return { error: 'Não autenticado' };
+  const { data: me } = await supa.from('profiles').select('is_platform_admin').eq('id', user.id).single();
+  if (!me?.is_platform_admin) return { error: 'Apenas o operador pode configurar a empresa' };
+
+  const norm = (s: string | null) => (s && s.trim() ? s.trim() : null);
+  const cor = norm(cfg.cor_primaria);
+  if (cor && !/^#[0-9a-fA-F]{6}$/.test(cor)) return { error: 'Cor inválida (use #RRGGBB)' };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('empresas')
+    .update({ usa_os: cfg.usa_os, ativo: cfg.ativo, logo_url: norm(cfg.logo_url), cor_primaria: cor })
+    .eq('id', empresaId);
+  if (error) return { error: error.message };
+  return { ok: true };
+}

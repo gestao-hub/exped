@@ -12,12 +12,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
-import { criarEmpresaComAdminAction, salvarNotifConfigAction, type NotifConfigInput } from '@/lib/empresa/actions';
+import { criarEmpresaComAdminAction, salvarNotifConfigAction, salvarEmpresaConfigAction, type NotifConfigInput, type EmpresaConfigInput } from '@/lib/empresa/actions';
 import { criarDispositivoAction, setDispositivoAtivoAction } from '@/lib/empresa/devices-actions';
 import { salvarVendedorMapAction } from '@/lib/empresa/vendedor-map-actions';
 
 type Empresa = {
   id: string; nome: string; slug: string; ativo: boolean; usa_os: boolean;
+  logo_url: string | null; cor_primaria: string | null;
   notif_whatsapp_ativo: boolean; uazapi_url: string | null; uazapi_token: string | null;
   uazapi_instancia: string | null; notif_email_ativo: boolean; email_remetente: string | null;
   manutencao_lembrete_dias: number; os_situacao_autorizacao: number | null; os_situacao_pronto: number | null;
@@ -143,6 +144,7 @@ function EmpresaCard({
         <CardTitle className="text-base">{empresa.nome} <span className="text-xs text-muted-foreground">/{empresa.slug}</span></CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        <EmpresaConfigSection empresa={empresa} />
         <DispositivosSection empresaId={empresa.id} dispositivos={dispositivos} onTokenGerado={onTokenGerado} />
         <VendedoresSection empresaId={empresa.id} mapeamentos={mapeamentos} vendedores={vendedores} />
         {empresa.usa_os && <NotificacoesSection empresa={empresa} />}
@@ -231,6 +233,61 @@ function NotificacoesSection({ empresa }: { empresa: Empresa }) {
         <p className="text-[11px] text-muted-foreground">
           Sem credencial, a notificação é enfileirada mas não enviada. As situações vêm do Hiper do cliente (deixe em branco para não disparar automático).
         </p>
+      </div>
+    </section>
+  );
+}
+
+function EmpresaConfigSection({ empresa }: { empresa: Empresa }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [f, setF] = useState<EmpresaConfigInput>({
+    usa_os: empresa.usa_os,
+    ativo: empresa.ativo,
+    logo_url: empresa.logo_url,
+    cor_primaria: empresa.cor_primaria,
+  });
+  const set = <K extends keyof EmpresaConfigInput>(k: K, v: EmpresaConfigInput[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  function salvar() {
+    start(async () => {
+      const r = await salvarEmpresaConfigAction(empresa.id, f);
+      if ('error' in r) toast.error(r.error);
+      else { toast.success('Empresa atualizada.'); router.refresh(); }
+    });
+  }
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+        <Building2 className="h-4 w-4" /> Configuração da empresa
+      </h3>
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.usa_os} onChange={(e) => set('usa_os', e.target.checked)} />
+            Usa Ordem de Serviço
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.ativo} onChange={(e) => set('ativo', e.target.checked)} />
+            Empresa ativa
+          </label>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+          <div className="md:col-span-2">
+            <Label className="text-[11px]">Logo (URL)</Label>
+            <Input placeholder="https://…/logo.png" value={f.logo_url ?? ''} onChange={(e) => set('logo_url', e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-[11px]">Cor da marca</Label>
+            <div className="flex gap-2 items-center">
+              <input type="color" value={f.cor_primaria ?? '#039855'} onChange={(e) => set('cor_primaria', e.target.value)}
+                className="h-9 w-12 rounded border cursor-pointer" />
+              <Input placeholder="#039855" value={f.cor_primaria ?? ''} onChange={(e) => set('cor_primaria', e.target.value)} />
+            </div>
+          </div>
+        </div>
+        <Button size="sm" onClick={salvar} disabled={pending}>Salvar empresa</Button>
       </div>
     </section>
   );
