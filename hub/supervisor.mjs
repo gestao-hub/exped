@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { openSync } from 'node:fs';
 
 /**
  * Supervisiona um processo filho: inicia, vigia e reinicia (com backoff) se
@@ -21,7 +21,9 @@ export class Supervisor {
   }
 
   _spawn() {
-    const out = this.logPath ? createWriteStream(this.logPath, { flags: 'a' }) : 'inherit';
+    // Para stdio o child_process exige um fd (não um WriteStream ainda não
+    // aberto). Abrimos o arquivo de log em modo append e passamos o fd.
+    const out = this.logPath ? openSync(this.logPath, 'a') : 'inherit';
     this.child = spawn(this.cmd, this.args, {
       env: { ...process.env, ...this.env },
       cwd: this.cwd,
