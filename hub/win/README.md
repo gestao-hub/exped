@@ -81,7 +81,10 @@ via `golang.org/x/sys/unix`). Aplicamos `hub/win/gotrue-windows.patch` sobre o t
 ```bash
 git clone https://github.com/supabase/auth /tmp/auth
 cd /tmp/auth && git checkout v2.189.0          # commit 4fa66ba71d8c55b5c95cd5635766ed8bbae6d96a
-git apply /caminho/para/franzoni/hub/win/gotrue-windows.patch
+# --ignore-whitespace: o patch falha por diferenca de line-endings (CRLF) quando
+# aplicado no Windows; este flag torna o apply tolerante a isso. O .gitattributes
+# do repo ja forca LF no .patch, mas mantenha o flag por seguranca.
+git apply --ignore-whitespace /caminho/para/franzoni/hub/win/gotrue-windows.patch
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
   -ldflags "-X github.com/supabase/auth/internal/utilities.Version=v2.189.0" \
   -o auth.exe .

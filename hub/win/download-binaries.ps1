@@ -56,7 +56,11 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 # ---------------------------------------------------------------------------
 Write-Step "Criando diretorio de instalacao: $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-$tmp = Join-Path $env:TEMP "exped-hub-dl"
+# Diretorio de trabalho FIXO sob $InstallDir (ex.: C:\Exped\bin\_tmp), evitando o
+# $env:TEMP — que no Win11 pode conter ESPACO (ex.: C:\Users\Joao Silva\AppData\...),
+# o que quebra Move-Item/Expand-Archive sem -LiteralPath. Aqui o caminho e controlado.
+$tmp = Join-Path $InstallDir "_tmp"
+if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 # ---------------------------------------------------------------------------
@@ -70,10 +74,10 @@ Invoke-WebRequest -Uri $pgUrl -OutFile $pgZip
 
 Write-Step "Extraindo PostgreSQL para $InstallDir\pgsql ..."
 # O zip da EDB contem uma pasta raiz "pgsql\". Extraimos direto em $InstallDir.
-if (Test-Path (Join-Path $InstallDir 'pgsql')) {
-    Remove-Item -Recurse -Force (Join-Path $InstallDir 'pgsql')
+if (Test-Path -LiteralPath (Join-Path $InstallDir 'pgsql')) {
+    Remove-Item -LiteralPath (Join-Path $InstallDir 'pgsql') -Recurse -Force
 }
-Expand-Archive -Path $pgZip -DestinationPath $InstallDir -Force
+Expand-Archive -LiteralPath $pgZip -DestinationPath $InstallDir -Force
 
 $initdb = Join-Path $InstallDir 'pgsql\bin\initdb.exe'
 if (-not (Test-Path $initdb)) {
@@ -91,7 +95,7 @@ Write-Host "    $prUrl"
 Invoke-WebRequest -Uri $prUrl -OutFile $prZip
 
 Write-Step "Extraindo PostgREST para $InstallDir ..."
-Expand-Archive -Path $prZip -DestinationPath $InstallDir -Force
+Expand-Archive -LiteralPath $prZip -DestinationPath $InstallDir -Force
 
 $postgrest = Join-Path $InstallDir 'postgrest.exe'
 if (-not (Test-Path $postgrest)) {
@@ -106,8 +110,8 @@ Write-Host "    OK: $postgrest"
 $root = Split-Path -Parent $InstallDir
 $lsBin = Join-Path $root 'scripts\local-stack\bin'
 New-Item -ItemType Directory -Force -Path $lsBin | Out-Null
-Copy-Item -Path $postgrest -Destination (Join-Path $lsBin 'postgrest.exe') -Force
-Copy-Item -Path $postgrest -Destination (Join-Path $lsBin 'postgrest')     -Force
+Copy-Item -LiteralPath $postgrest -Destination (Join-Path $lsBin 'postgrest.exe') -Force
+Copy-Item -LiteralPath $postgrest -Destination (Join-Path $lsBin 'postgrest')     -Force
 Write-Host "    Copiado para $lsBin (postgrest.exe + postgrest)"
 
 # ---------------------------------------------------------------------------
@@ -134,15 +138,17 @@ Write-Step "Extraindo Node.js para $InstallDir\node ..."
 # O zip contem uma pasta raiz "node-vX-win-x64\". Extraimos no tmp e movemos
 # o conteudo pra $InstallDir\node (achatando a pasta raiz versionada).
 $nodeExtract = Join-Path $tmp "node-extract"
-if (Test-Path $nodeExtract) { Remove-Item -Recurse -Force $nodeExtract }
-Expand-Archive -Path $nodeZip -DestinationPath $nodeExtract -Force
+if (Test-Path -LiteralPath $nodeExtract) { Remove-Item -LiteralPath $nodeExtract -Recurse -Force }
+Expand-Archive -LiteralPath $nodeZip -DestinationPath $nodeExtract -Force
 $nodeDest = Join-Path $InstallDir 'node'
-if (Test-Path $nodeDest) { Remove-Item -Recurse -Force $nodeDest }
-Move-Item -Path (Join-Path $nodeExtract $nodeDirName) -Destination $nodeDest
+if (Test-Path -LiteralPath $nodeDest) { Remove-Item -LiteralPath $nodeDest -Recurse -Force }
+# -LiteralPath em Move-Item: o source/destino podem conter caracteres especiais;
+# como $tmp agora e sob $InstallDir (sem espaco herdado do TEMP), isto e estavel.
+Move-Item -LiteralPath (Join-Path $nodeExtract $nodeDirName) -Destination $nodeDest
 
 # Copia node.exe pra raiz do bin\ tambem, pra o comando do serviço ficar simples
 # (C:\Exped\bin\node.exe ...). O resto do runtime (npm etc.) fica em bin\node\.
-Copy-Item -Path (Join-Path $nodeDest 'node.exe') -Destination (Join-Path $InstallDir 'node.exe') -Force
+Copy-Item -LiteralPath (Join-Path $nodeDest 'node.exe') -Destination (Join-Path $InstallDir 'node.exe') -Force
 
 $nodeExe = Join-Path $InstallDir 'node.exe'
 if (-not (Test-Path $nodeExe)) {
@@ -164,8 +170,8 @@ Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip
 
 Write-Step "Extraindo NSSM (nssm.exe win64) para $InstallDir ..."
 $nssmExtract = Join-Path $tmp "nssm-extract"
-if (Test-Path $nssmExtract) { Remove-Item -Recurse -Force $nssmExtract }
-Expand-Archive -Path $nssmZip -DestinationPath $nssmExtract -Force
+if (Test-Path -LiteralPath $nssmExtract) { Remove-Item -LiteralPath $nssmExtract -Recurse -Force }
+Expand-Archive -LiteralPath $nssmZip -DestinationPath $nssmExtract -Force
 # O zip do NSSM tem layout: nssm-2.24\win64\nssm.exe e nssm-2.24\win32\nssm.exe.
 # Pegamos o win64.
 $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter 'nssm.exe' |
@@ -174,7 +180,7 @@ $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter 'nssm.exe' |
 if (-not $nssmSrc) {
     throw "nssm.exe (win64) nao encontrado no zip extraido em $nssmExtract."
 }
-Copy-Item -Path $nssmSrc.FullName -Destination (Join-Path $InstallDir 'nssm.exe') -Force
+Copy-Item -LiteralPath $nssmSrc.FullName -Destination (Join-Path $InstallDir 'nssm.exe') -Force
 $nssmExe = Join-Path $InstallDir 'nssm.exe'
 Write-Host "    OK: $nssmExe"
 
@@ -195,7 +201,7 @@ if (Test-Path $authExe) {
 # ---------------------------------------------------------------------------
 # Limpeza + resumo
 # ---------------------------------------------------------------------------
-Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Step "Concluido. Binarios em $InstallDir :"
 Write-Host "    PostgreSQL : pgsql\bin\ (initdb.exe, pg_ctl.exe, psql.exe, postgres.exe)"

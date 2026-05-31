@@ -11,8 +11,10 @@
   },
 
   "paths": {
-    "_comment_pgHost": "No Windows, pgHost e o DIRETORIO do cluster Postgres (data dir). O maestro faz pg_ctl -D <pgHost> e binda 127.0.0.1. NAO e um socket dir como no Linux.",
-    "pgHost": "C:\\Exped\\data\\pg",
+    "_comment_pgData": "DIRETORIO DE DADOS do cluster Postgres. O maestro faz pg_ctl -D <pgData> start. No Windows nao ha socket Unix, entao data dir e host de conexao sao SEPARADOS.",
+    "pgData": "C:\\Exped\\data\\pg",
+    "_comment_pgHost": "HOST DE CONEXAO TCP usado por psql/PostgREST/GoTrue/app. No Windows e sempre 127.0.0.1 (sem socket Unix).",
+    "pgHost": "127.0.0.1",
     "db": "exped",
     "user": "postgres"
   },

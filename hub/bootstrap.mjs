@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,7 +24,7 @@ const execFileAsync = promisify(execFile);
  * via execFile do binário GoTrue (lendo gotrue.env). Sem libs novas.
  */
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function resolveRoot(p) {
   return path.isAbsolute(p) ? p : path.join(ROOT, p);
