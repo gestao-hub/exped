@@ -147,19 +147,19 @@ Source: "{#AgentStartCmd}";  DestDir: "{localappdata}\ExpedAgent"; Flags: ignore
 Filename: "powershell.exe"; \
     Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\download-binaries.ps1"" -InstallDir ""{app}\bin"""; \
     StatusMsg: "Baixando binarios (PostgreSQL, PostgREST, Node, NSSM)..."; \
-    Flags: runhidden
+    Flags: runhidden waituntilterminated
 
 Filename: "powershell.exe"; \
     Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\install-service.ps1"" -Root ""{app}"" -ConfigPath ""{app}\config.json"""; \
     StatusMsg: "Registrando e iniciando o serviço ExpedHub..."; \
-    Flags: runhidden
+    Flags: runhidden waituntilterminated
 
 ; --- Provisionamento: MODO CÓDIGO (default) ---------------------------------
 ; Resgata o código digitado no wizard. {code:GetCode} usa o scripted constant
 ; GetCode (ver [Code]) que retorna Trim(CodePage.Values[0]). Só roda se NÃO estiver
 ; em modo manual e o código não estiver vazio (Check: IsCodeMode).
 Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\provision.ps1"" -Code ""{code:GetCode}"""; \
+    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\provision.ps1"" -Code ""{code:GetCode}"" -Root ""{app}"" -AgentDir ""{localappdata}\ExpedAgent"""; \
     StatusMsg: "Provisionando..."; \
     Flags: runhidden waituntilterminated; \
     Check: IsCodeMode
@@ -169,7 +169,7 @@ Filename: "powershell.exe"; \
 ; provision.ps1 aceita -DeviceToken/-CloudApi e pula o resgate (escreve os configs
 ; com os valores informados). Só roda se o checkbox "modo manual" estiver marcado.
 Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\provision.ps1"" -DeviceToken ""{code:GetManualToken}"" -CloudApi ""{code:GetManualUrl}"""; \
+    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\provision.ps1"" -DeviceToken ""{code:GetManualToken}"" -CloudApi ""{code:GetManualUrl}"" -Root ""{app}"" -AgentDir ""{localappdata}\ExpedAgent"""; \
     StatusMsg: "Provisionando (modo manual)..."; \
     Flags: runhidden waituntilterminated; \
     Check: IsManualMode
