@@ -17,6 +17,8 @@ export default async function RevisarPedidoPage({
       .from('pedido_pontos_retirada')
       .select('*, itens:pedido_itens(*)')
       .eq('pedido_id', id)
+      .is('deleted_at', null)
+      .is('itens.deleted_at', null)
       .order('ordem'),
   ]);
   if (!pedido) notFound();

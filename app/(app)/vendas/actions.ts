@@ -5,6 +5,134 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 import { inserirPedido } from '@/lib/pedidos/inserir';
+import { reconcileChildren, type ExistingPonto } from '@/lib/pedidos/reconcile';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/types/database';
+
+/**
+ * Persiste pontos/itens de um pedido IN-PLACE usando reconcileChildren:
+ * UPDATE (mantém id) p/ os que continuam, INSERT p/ novos, soft-delete p/ os que
+ * saíram (set deleted_at = now()). Retorna mensagem de erro ou null em sucesso.
+ */
+async function persistirFilhosPedido(
+  supabase: SupabaseClient<Database>,
+  pedidoId: string,
+  pontosForm: PedidoFormInput['pontos_retirada'],
+): Promise<string | null> {
+  // Estado atual (apenas vivo: deleted_at is null) pra reconciliar.
+  const { data: pontosAtuais, error: eAtual } = await supabase
+    .from('pedido_pontos_retirada')
+    .select('id, itens:pedido_itens(id)')
+    .eq('pedido_id', pedidoId)
+    .is('deleted_at', null)
+    .is('itens.deleted_at', null); // ignora itens já soft-deletados na reconciliação
+  if (eAtual) return eAtual.message;
+
+  const existing: ExistingPonto[] = (pontosAtuais ?? []).map((p) => ({
+    id: p.id as string,
+    itens: ((p.itens ?? []) as { id: string }[]).map((it) => ({ id: it.id as string })),
+  }));
+
+  const { pontos } = reconcileChildren(existing, pontosForm);
+  const now = new Date().toISOString();
+
+  for (const op of pontos) {
+    if (op.kind === 'softDelete') {
+      // soft-delete itens primeiro, depois o ponto
+      if (op.itens.length) {
+        const ids = op.itens.map((i) => ('id' in i ? i.id : '')).filter(Boolean);
+        if (ids.length) {
+          const { error } = await supabase
+            .from('pedido_itens')
+            .update({ deleted_at: now })
+            .in('id', ids);
+          if (error) return `Falha ao remover itens: ${error.message}`;
+        }
+      }
+      const { error } = await supabase
+        .from('pedido_pontos_retirada')
+        .update({ deleted_at: now })
+        .eq('id', op.id);
+      if (error) return `Falha ao remover ponto: ${error.message}`;
+      continue;
+    }
+
+    // determina o ponto_retirada_id alvo (update mantém; insert cria e captura)
+    let pontoId: string;
+    if (op.kind === 'update') {
+      const { error } = await supabase
+        .from('pedido_pontos_retirada')
+        .update({
+          tipo: op.data.tipo,
+          empresa_nome: op.data.empresa_nome,
+          endereco: op.data.endereco ?? null,
+          ordem: op.ordem,
+        })
+        .eq('id', op.id);
+      if (error) return `Falha ao atualizar ponto: ${error.message}`;
+      pontoId = op.id;
+    } else {
+      const { data: novo, error } = await supabase
+        .from('pedido_pontos_retirada')
+        .insert({
+          pedido_id: pedidoId,
+          tipo: op.data.tipo,
+          empresa_nome: op.data.empresa_nome,
+          endereco: op.data.endereco ?? null,
+          ordem: op.ordem,
+        })
+        .select('id')
+        .single();
+      if (error || !novo) return `Falha ao criar ponto: ${error?.message}`;
+      pontoId = novo.id as string;
+    }
+
+    // reconcilia itens deste ponto
+    for (const it of op.itens) {
+      if (it.kind === 'softDelete') {
+        const { error } = await supabase
+          .from('pedido_itens')
+          .update({ deleted_at: now })
+          .eq('id', it.id);
+        if (error) return `Falha ao remover item: ${error.message}`;
+      } else if (it.kind === 'update') {
+        const { error } = await supabase
+          .from('pedido_itens')
+          .update({
+            codigo: it.data.codigo,
+            descricao: it.data.descricao,
+            quantidade: it.data.quantidade,
+            unidade: it.data.unidade,
+            preco_unitario: it.data.preco_unitario,
+            desconto: it.data.desconto,
+            total: it.data.total,
+            referencia: it.data.referencia ?? null,
+            saldo_estoque: it.data.saldo_estoque ?? null,
+            ordem: it.ordem,
+          })
+          .eq('id', it.id);
+        if (error) return `Falha ao atualizar item: ${error.message}`;
+      } else {
+        const { error } = await supabase.from('pedido_itens').insert({
+          ponto_retirada_id: pontoId,
+          codigo: it.data.codigo,
+          descricao: it.data.descricao,
+          quantidade: it.data.quantidade,
+          unidade: it.data.unidade,
+          preco_unitario: it.data.preco_unitario,
+          desconto: it.data.desconto,
+          total: it.data.total,
+          referencia: it.data.referencia ?? null,
+          saldo_estoque: it.data.saldo_estoque ?? null,
+          ordem: it.ordem,
+        });
+        if (error) return `Falha ao criar item: ${error.message}`;
+      }
+    }
+  }
+
+  return null;
+}
 
 export type SavePedidoResult =
   | { error: string }
@@ -101,48 +229,11 @@ export async function atualizarPedidoAction(
     .single();
   if (upErr || !pedido) return { error: upErr?.message ?? 'Pedido não encontrado ou não é mais rascunho' };
 
-  // Substitui pontos/itens (rascunho ainda não tem entrega registrada).
-  const { data: pontosAntigos } = await supabase
-    .from('pedido_pontos_retirada')
-    .select('id')
-    .eq('pedido_id', id);
-  const idsAntigos = (pontosAntigos ?? []).map((p) => p.id);
-  if (idsAntigos.length) {
-    await supabase.from('pedido_itens').delete().in('ponto_retirada_id', idsAntigos);
-    await supabase.from('pedido_pontos_retirada').delete().eq('pedido_id', id);
-  }
-  for (let i = 0; i < d.pontos_retirada.length; i++) {
-    const ponto = d.pontos_retirada[i];
-    const { data: pontoRow, error: pErr } = await supabase
-      .from('pedido_pontos_retirada')
-      .insert({
-        pedido_id: id,
-        tipo: ponto.tipo,
-        empresa_nome: ponto.empresa_nome,
-        endereco: ponto.endereco ?? null,
-        ordem: i,
-      })
-      .select('id')
-      .single();
-    if (pErr || !pontoRow) return { error: `Falha no ponto ${i + 1}: ${pErr?.message}` };
-    if (ponto.itens.length) {
-      const itens = ponto.itens.map((it, idx) => ({
-        ponto_retirada_id: pontoRow.id,
-        codigo: it.codigo,
-        descricao: it.descricao,
-        quantidade: it.quantidade,
-        unidade: it.unidade,
-        preco_unitario: it.preco_unitario,
-        desconto: it.desconto,
-        total: it.total,
-        referencia: it.referencia ?? null,
-        saldo_estoque: it.saldo_estoque ?? null,
-        ordem: idx,
-      }));
-      const { error: iErr } = await supabase.from('pedido_itens').insert(itens);
-      if (iErr) return { error: `Falha nos itens do ponto ${i + 1}: ${iErr.message}` };
-    }
-  }
+  // Reconcilia pontos/itens IN-PLACE (PK estável p/ sincronizador multi-site):
+  // itens que continuam → UPDATE (mantém id); novos → INSERT; removidos → soft-delete.
+  // NÃO faz delete+reinsert (geraria uuids novos a cada save e quebraria o merge).
+  const recErr = await persistirFilhosPedido(supabase, id, d.pontos_retirada);
+  if (recErr) return { error: recErr };
 
   revalidatePath('/vendas');
   revalidatePath(`/vendas/${id}`);
@@ -266,12 +357,14 @@ export async function registrarEntregaAction(input: {
   const { data: pontosTodos } = await supabase
     .from('pedido_pontos_retirada')
     .select('id')
-    .eq('pedido_id', input.pedido_id);
+    .eq('pedido_id', input.pedido_id)
+    .is('deleted_at', null);
   const pontoIdsTodos = (pontosTodos ?? []).map((p) => p.id);
   const { data: itensTodos } = await supabase
     .from('pedido_itens')
     .select('quantidade, quantidade_entregue')
-    .in('ponto_retirada_id', pontoIdsTodos);
+    .in('ponto_retirada_id', pontoIdsTodos)
+    .is('deleted_at', null);
 
   let novoStatus: 'em_separacao' | 'parcialmente_entregue' | 'finalizado' = 'em_separacao';
   if (itensTodos && itensTodos.length > 0) {

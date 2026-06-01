@@ -195,7 +195,8 @@ export function PedidosList({
       const { data: pontos } = await supabase
         .from('pedido_pontos_retirada')
         .select('id, pedido_id')
-        .in('pedido_id', ids);
+        .in('pedido_id', ids)
+        .is('deleted_at', null);
       if (cancel || !pontos) return;
       const pontoToPedido = new Map(pontos.map((p) => [p.id as string, p.pedido_id as string]));
       const pontoIds = pontos.map((p) => p.id as string);
@@ -204,7 +205,8 @@ export function PedidosList({
       const { data: itens } = await supabase
         .from('pedido_itens')
         .select('codigo, descricao, quantidade, quantidade_entregue, unidade, ponto_retirada_id')
-        .in('ponto_retirada_id', pontoIds);
+        .in('ponto_retirada_id', pontoIds)
+        .is('deleted_at', null);
       if (cancel || !itens) return;
 
       const byPedido: Record<string, ParcialItem[]> = {};

@@ -33,6 +33,8 @@ export default async function ImprimirLotePage({
       .from('pedido_pontos_retirada')
       .select('*, itens:pedido_itens(*)')
       .in('pedido_id', ids)
+      .is('deleted_at', null)
+      .is('itens.deleted_at', null)
       .order('ordem'),
     supabase.from('pedido_logistica').select('*').in('pedido_id', ids),
   ]);

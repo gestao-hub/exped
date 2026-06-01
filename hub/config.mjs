@@ -26,6 +26,14 @@ const DEFAULTS = {
     authBin: 'scripts/local-stack/bin/auth',
   },
   manifestUrl: null,
+  // Sync com a nuvem (sub-projeto 3). Se apiBase E deviceToken presentes, o
+  // maestro liga o cliente de sync; ausentes => modo ilha (hub roda sem sync,
+  // não quebra).
+  cloud: {
+    apiBase: null, // EXPED_CLOUD_API — base da API de sync (ex.: https://app.exped.com.br)
+    deviceToken: null, // EXPED_DEVICE_TOKEN — token do dispositivo (Bearer)
+    syncIntervalMs: 10000, // EXPED_SYNC_INTERVAL_MS
+  },
 };
 
 /** Placeholder histórico (segredo conhecido) — NUNCA aceitar como secret real. */
@@ -50,6 +58,7 @@ function shallowMerge(base, over = {}) {
   const out = { ...base, ...over };
   out.ports = { ...base.ports, ...(over.ports || {}) };
   out.paths = { ...base.paths, ...(over.paths || {}) };
+  out.cloud = { ...base.cloud, ...(over.cloud || {}) };
   return out;
 }
 
@@ -77,8 +86,15 @@ export function loadConfig(overrides = {}) {
 
   if (process.env.EXPED_MANIFEST_URL) env.manifestUrl = process.env.EXPED_MANIFEST_URL;
 
+  // Sync com a nuvem (sub-projeto 3).
+  const cloud = {};
+  if (process.env.EXPED_CLOUD_API) cloud.apiBase = process.env.EXPED_CLOUD_API;
+  if (process.env.EXPED_DEVICE_TOKEN) cloud.deviceToken = process.env.EXPED_DEVICE_TOKEN;
+  if (process.env.EXPED_SYNC_INTERVAL_MS) cloud.syncIntervalMs = Number(process.env.EXPED_SYNC_INTERVAL_MS);
+
   if (Object.keys(ports).length) env.ports = ports;
   if (Object.keys(paths).length) env.paths = paths;
+  if (Object.keys(cloud).length) env.cloud = cloud;
 
   // jwtSecret é obrigatório e validado — sem default fixo (segredo por instalação).
   const jwtSecret = resolveJwtSecret(overrides);

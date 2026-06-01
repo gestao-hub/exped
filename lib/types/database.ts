@@ -85,8 +85,10 @@ export type Database = {
           cnpj_cpf: string | null
           codigo_erp: string | null
           created_at: string
+          deleted_at: string | null
           empresa_id: string
           endereco_padrao: string | null
+          field_updated_at: Json
           id: string
           nome: string
           observacoes: string | null
@@ -101,8 +103,10 @@ export type Database = {
           cnpj_cpf?: string | null
           codigo_erp?: string | null
           created_at?: string
+          deleted_at?: string | null
           empresa_id?: string
           endereco_padrao?: string | null
+          field_updated_at?: Json
           id?: string
           nome: string
           observacoes?: string | null
@@ -117,8 +121,10 @@ export type Database = {
           cnpj_cpf?: string | null
           codigo_erp?: string | null
           created_at?: string
+          deleted_at?: string | null
           empresa_id?: string
           endereco_padrao?: string | null
+          field_updated_at?: Json
           id?: string
           nome?: string
           observacoes?: string | null
@@ -290,9 +296,11 @@ export type Database = {
           data_previsao: string | null
           data_proxima_manutencao: string | null
           defeito_relatado: string | null
+          deleted_at: string | null
           diagnostico: string | null
           documento_erp: string | null
           empresa_id: string
+          field_updated_at: Json
           garantia_fim: string | null
           garantia_inicio: string | null
           id: string
@@ -322,9 +330,11 @@ export type Database = {
           data_previsao?: string | null
           data_proxima_manutencao?: string | null
           defeito_relatado?: string | null
+          deleted_at?: string | null
           diagnostico?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          field_updated_at?: Json
           garantia_fim?: string | null
           garantia_inicio?: string | null
           id?: string
@@ -354,9 +364,11 @@ export type Database = {
           data_previsao?: string | null
           data_proxima_manutencao?: string | null
           defeito_relatado?: string | null
+          deleted_at?: string | null
           diagnostico?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          field_updated_at?: Json
           garantia_fim?: string | null
           garantia_inicio?: string | null
           id?: string
@@ -400,8 +412,10 @@ export type Database = {
       os_itens: {
         Row: {
           codigo: string | null
+          deleted_at: string | null
           desconto: number
           descricao: string
+          field_updated_at: Json
           id: string
           ordem: number | null
           os_id: string
@@ -409,11 +423,14 @@ export type Database = {
           quantidade: number
           total: number
           unidade: string | null
+          updated_at: string
         }
         Insert: {
           codigo?: string | null
+          deleted_at?: string | null
           desconto?: number
           descricao?: string
+          field_updated_at?: Json
           id?: string
           ordem?: number | null
           os_id: string
@@ -421,11 +438,14 @@ export type Database = {
           quantidade?: number
           total?: number
           unidade?: string | null
+          updated_at?: string
         }
         Update: {
           codigo?: string | null
+          deleted_at?: string | null
           desconto?: number
           descricao?: string
+          field_updated_at?: Json
           id?: string
           ordem?: number | null
           os_id?: string
@@ -433,6 +453,7 @@ export type Database = {
           quantidade?: number
           total?: number
           unidade?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -451,15 +472,18 @@ export type Database = {
           canal: string
           corpo: string
           created_at: string
+          deleted_at: string | null
           destino: string
           empresa_id: string
           enviada_em: string | null
           erro: string | null
+          field_updated_at: Json
           id: string
           os_id: string | null
           status: string
           tentativas: number
           tipo: string
+          updated_at: string
         }
         Insert: {
           agendada_para?: string
@@ -467,15 +491,18 @@ export type Database = {
           canal: string
           corpo: string
           created_at?: string
+          deleted_at?: string | null
           destino: string
           empresa_id?: string
           enviada_em?: string | null
           erro?: string | null
+          field_updated_at?: Json
           id?: string
           os_id?: string | null
           status?: string
           tentativas?: number
           tipo: string
+          updated_at?: string
         }
         Update: {
           agendada_para?: string
@@ -483,15 +510,18 @@ export type Database = {
           canal?: string
           corpo?: string
           created_at?: string
+          deleted_at?: string | null
           destino?: string
           empresa_id?: string
           enviada_em?: string | null
           erro?: string | null
+          field_updated_at?: Json
           id?: string
           os_id?: string | null
           status?: string
           tentativas?: number
           tipo?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -512,33 +542,42 @@ export type Database = {
       }
       os_servicos: {
         Row: {
+          deleted_at: string | null
           descricao: string
+          field_updated_at: Json
           id: string
           ordem: number | null
           os_id: string
           quantidade: number
           tecnico_nome: string | null
           total: number
+          updated_at: string
           valor_unitario: number
         }
         Insert: {
+          deleted_at?: string | null
           descricao?: string
+          field_updated_at?: Json
           id?: string
           ordem?: number | null
           os_id: string
           quantidade?: number
           tecnico_nome?: string | null
           total?: number
+          updated_at?: string
           valor_unitario?: number
         }
         Update: {
+          deleted_at?: string | null
           descricao?: string
+          field_updated_at?: Json
           id?: string
           ordem?: number | null
           os_id?: string
           quantidade?: number
           tecnico_nome?: string | null
           total?: number
+          updated_at?: string
           valor_unitario?: number
         }
         Relationships: [
@@ -639,9 +678,11 @@ export type Database = {
         Row: {
           codigo: string
           created_at: string
+          deleted_at: string | null
           desconto: number
           descricao: string
           endereco_estoque: string | null
+          field_updated_at: Json
           id: string
           lote: string | null
           ordem: number
@@ -655,13 +696,16 @@ export type Database = {
           saldo_estoque: number | null
           total: number
           unidade: string
+          updated_at: string
         }
         Insert: {
           codigo?: string
           created_at?: string
+          deleted_at?: string | null
           desconto?: number
           descricao?: string
           endereco_estoque?: string | null
+          field_updated_at?: Json
           id?: string
           lote?: string | null
           ordem?: number
@@ -675,13 +719,16 @@ export type Database = {
           saldo_estoque?: number | null
           total?: number
           unidade?: string
+          updated_at?: string
         }
         Update: {
           codigo?: string
           created_at?: string
+          deleted_at?: string | null
           desconto?: number
           descricao?: string
           endereco_estoque?: string | null
+          field_updated_at?: Json
           id?: string
           lote?: string | null
           ordem?: number
@@ -695,6 +742,7 @@ export type Database = {
           saldo_estoque?: number | null
           total?: number
           unidade?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -772,30 +820,39 @@ export type Database = {
       pedido_pontos_retirada: {
         Row: {
           created_at: string
+          deleted_at: string | null
           empresa_nome: string
           endereco: string | null
+          field_updated_at: Json
           id: string
           ordem: number
           pedido_id: string
           tipo: Database["public"]["Enums"]["ponto_retirada_tipo"]
+          updated_at: string
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           empresa_nome?: string
           endereco?: string | null
+          field_updated_at?: Json
           id?: string
           ordem?: number
           pedido_id: string
           tipo?: Database["public"]["Enums"]["ponto_retirada_tipo"]
+          updated_at?: string
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           empresa_nome?: string
           endereco?: string | null
+          field_updated_at?: Json
           id?: string
           ordem?: number
           pedido_id?: string
           tipo?: Database["public"]["Enums"]["ponto_retirada_tipo"]
+          updated_at?: string
         }
         Relationships: [
           {
@@ -824,8 +881,10 @@ export type Database = {
           data_emissao: string | null
           data_entrega: string | null
           data_entrega_inicio: string | null
+          deleted_at: string | null
           documento_erp: string | null
           empresa_id: string
+          field_updated_at: Json
           forma_pagamento: string | null
           id: string
           nf_chave: string | null
@@ -858,8 +917,10 @@ export type Database = {
           data_emissao?: string | null
           data_entrega?: string | null
           data_entrega_inicio?: string | null
+          deleted_at?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          field_updated_at?: Json
           forma_pagamento?: string | null
           id?: string
           nf_chave?: string | null
@@ -892,8 +953,10 @@ export type Database = {
           data_emissao?: string | null
           data_entrega?: string | null
           data_entrega_inicio?: string | null
+          deleted_at?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          field_updated_at?: Json
           forma_pagamento?: string | null
           id?: string
           nf_chave?: string | null
@@ -998,6 +1061,14 @@ export type Database = {
       is_platform_admin: { Args: never; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      sync_parent_in_empresa: {
+        Args: { p_empresa: string; p_id: string; p_table: string }
+        Returns: boolean
+      }
+      sync_push_upsert: {
+        Args: { p_row: Json; p_table: string }
+        Returns: Json
+      }
       unaccent: { Args: { "": string }; Returns: string }
     }
     Enums: {
@@ -1150,3 +1221,4 @@ export const Constants = {
     },
   },
 } as const
+

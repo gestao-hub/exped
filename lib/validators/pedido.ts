@@ -11,6 +11,9 @@ const LONG  = 1000;   // endereço, forma_pagto + parcelas
 const TEXT  = 5000;   // observação livre
 
 export const itemSchema = z.object({
+  // PK estável: presente ao editar (UPDATE in-place); ausente ao criar item novo (INSERT).
+  // O form normaliza '' → null no register (setValueAs), então aqui aceitamos null/undefined.
+  id:             z.uuid().nullable().optional(),
   codigo:         z.string().max(SHORT, 'Código muito longo'),
   descricao:      z.string().min(1, 'Descrição obrigatória').max(MID, 'Descrição muito longa'),
   quantidade:     z.number().nonnegative(),
@@ -23,6 +26,7 @@ export const itemSchema = z.object({
 });
 
 export const pontoRetiradaSchema = z.object({
+  id:           z.uuid().nullable().optional(),  // PK estável: presente ao editar; ausente ao criar ponto novo
   tipo:         z.enum(['loja', 'deposito']),
   empresa_nome: z.string().max(MID),
   endereco:     z.string().max(LONG).nullable().optional(),

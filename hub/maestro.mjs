@@ -40,6 +40,7 @@ import { bootstrap } from './bootstrap.mjs';
 import { checkAndUpdate } from './updater.mjs';
 import { makeKeys } from './keys.mjs';
 import { exe } from './platform.mjs';
+import * as sync from './sync.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LS = path.join(ROOT, 'scripts', 'local-stack');
@@ -250,6 +251,7 @@ export async function startMaestro(cfg, opts = {}) {
   let statusServer = null;
   let storageHandle = null;
   let updateTimer = null;
+  let stopSync = null;
   let stopped = false;
 
   // 1. Postgres -------------------------------------------------------------
@@ -310,14 +312,41 @@ export async function startMaestro(cfg, opts = {}) {
     logger.info('app respondeu em /login');
   }
 
+  // 4.5 Cliente de sync (sub-projeto 3) -------------------------------------
+  // Liga só se apiBase E deviceToken presentes; ausentes => modo ilha (sem sync).
+  const cloud = cfg.cloud || {};
+  if (cloud.apiBase && cloud.deviceToken) {
+    const syncDb = opts.syncDb || sync.makePsqlDb(cfg);
+    stopSync = sync.start({
+      db: syncDb,
+      apiBase: cloud.apiBase,
+      deviceToken: cloud.deviceToken,
+      intervalMs: cloud.syncIntervalMs || 10000,
+      log: logger,
+    });
+    logger.info(`sync ligado contra ${cloud.apiBase} (cada ${cloud.syncIntervalMs || 10000}ms)`);
+  } else {
+    logger.info('sync desligado (modo ilha: sem cloud.apiBase/deviceToken)');
+  }
+
   // 6. /status --------------------------------------------------------------
   const statusPort = cfg.ports.status || cfg.ports.app + 1;
   const startedAt = new Date().toISOString();
-  const status = () => ({
-    maestro: { startedAt, manifestUrl: cfg.manifestUrl || null },
-    storage: { name: 'storage', running: !!storageHandle, port: cfg.ports.storage },
-    peers: Object.values(supervisors).map(peerState),
-  });
+  const status = () => {
+    const s = sync.getState();
+    return {
+      maestro: { startedAt, manifestUrl: cfg.manifestUrl || null },
+      storage: { name: 'storage', running: !!storageHandle, port: cfg.ports.storage },
+      peers: Object.values(supervisors).map(peerState),
+      sync: {
+        enabled: !!stopSync,
+        lastSyncOk: s.lastSyncOk,
+        pendingPush: s.pendingPush,
+        lastError: s.lastError,
+        lastSyncAt: s.lastSyncAt,
+      },
+    };
+  };
   statusServer = await startStatusServer(statusPort, status);
   logger.info(`/status em http://127.0.0.1:${statusPort}/status`);
 
@@ -349,6 +378,7 @@ export async function startMaestro(cfg, opts = {}) {
     stopped = true;
     logger.info('parando maestro (ordem inversa)');
     if (updateTimer) clearInterval(updateTimer);
+    if (stopSync) stopSync();
     statusServer?.close();
     supervisors.app?.stop();
     supervisors.gateway?.stop();
