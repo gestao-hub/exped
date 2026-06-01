@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 namespace ExpedAgent;
 
-public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, ILogger<Worker> log)
+public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, RemoteConfigClient remote, ILogger<Worker> log)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -11,17 +11,20 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         int tick = 0;
         while (!ct.IsCancellationRequested)
         {
-            try { await TickAsync(ct); }
+            var rc = await remote.GetAsync(ct);
+            var situacoesVenda = AgentConfig.ParseSituacoes(rc.SituacoesVenda);
+
+            try { await TickAsync(situacoesVenda, ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no ciclo de sync"); }
-            if (cfg.SyncOs)
+            if (rc.SyncOs)
             {
-                try { await TickOsAsync(ct); }
+                try { await TickOsAsync(AgentConfig.ParseSituacoes(rc.SituacoesOs), ct); }
                 catch (Exception ex) { log.LogError(ex, "Erro no ciclo de OS"); }
             }
             await client.HeartbeatAsync(ct);
             if (tick % 120 == 0) await ChecarVersaoAsync(ct); // ~1x/h (120 ticks de 30s)
             tick++;
-            try { await Task.Delay(TimeSpan.FromSeconds(cfg.PollIntervalSeconds), ct); }
+            try { await Task.Delay(TimeSpan.FromSeconds(rc.PollSegundos), ct); }
             catch (TaskCanceledException) { break; }
         }
     }
@@ -46,10 +49,10 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         catch (Exception ex) { log.LogWarning("Não consegui verificar o schema do Hiper: {Msg}", ex.Message); }
     }
 
-    private async Task TickOsAsync(CancellationToken ct)
+    private async Task TickOsAsync(short[] situacoesOs, CancellationToken ct)
     {
         int hwm = state.GetOsHwm();
-        var novas = await repo.NovasOrdensServicoAsync(hwm, cfg.SituacoesOsArray, ct);
+        var novas = await repo.NovasOrdensServicoAsync(hwm, situacoesOs, ct);
         if (novas.Count == 0) return;
         int maxOk = hwm;
         foreach (var h in novas)
@@ -73,10 +76,10 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         if (maxOk > hwm) state.SetOsHwm(maxOk);
     }
 
-    private async Task TickAsync(CancellationToken ct)
+    private async Task TickAsync(short[] situacoesVenda, CancellationToken ct)
     {
         int hwm = state.GetHwm();
-        var novos = await repo.NovosPedidosAsync(hwm, cfg.SituacoesArray, ct);
+        var novos = await repo.NovosPedidosAsync(hwm, situacoesVenda, ct);
         if (novos.Count == 0) return;
 
         int maxOk = hwm;
