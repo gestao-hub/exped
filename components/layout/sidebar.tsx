@@ -22,7 +22,7 @@ import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AppLogo } from '@/components/app-logo';
+import { BrandLogo } from '@/components/layout/brand-logo';
 import { useUser } from '@/components/providers/user-provider';
 import type { UserRole } from '@/lib/types';
 import type { EmpresaAtual } from '@/lib/empresa/current';
@@ -139,21 +139,7 @@ export function Sidebar({ empresa }: { empresa?: EmpresaAtual | null }) {
       {/* Logo — compacto, sem ar extra */}
       <div className="px-3 pt-3 pb-3 flex items-center justify-center border-b border-white/6">
         <Link href="/" className="block text-center transition-opacity hover:opacity-90">
-          {empresa?.logo_url ? (
-            // logo do tenant (white-label); img simples pra aceitar URL externa
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={empresa.logo_url}
-              alt={empresa.nome}
-              className="mx-auto h-16 w-auto object-contain"
-            />
-          ) : empresa && empresa.slug !== 'franzoni' ? (
-            <span className="block px-2 py-3 text-lg font-heading font-bold text-white">
-              {empresa.nome}
-            </span>
-          ) : (
-            <AppLogo size={80} variant="light" />
-          )}
+          <BrandLogo empresa={empresa} size={64} className="mx-auto" />
         </Link>
       </div>
 

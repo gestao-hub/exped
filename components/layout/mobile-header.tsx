@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { AppLogo } from '@/components/app-logo';
+import { BrandLogo } from '@/components/layout/brand-logo';
 import { useUser } from '@/components/providers/user-provider';
 import type { UserRole } from '@/lib/types';
+import type { EmpresaAtual } from '@/lib/empresa/current';
 import {
   LayoutDashboard,
   Package,
@@ -47,7 +48,7 @@ const NAV: Record<UserRole, NavItem[]> = {
   ],
 };
 
-export function MobileHeader() {
+export function MobileHeader({ empresa }: { empresa?: EmpresaAtual | null }) {
   const [open, setOpen] = useState(false);
   const { profile } = useUser();
   const pathname = usePathname();
@@ -57,7 +58,7 @@ export function MobileHeader() {
     <>
       <header className="md:hidden sticky top-0 z-30 sidebar-surface text-white px-3 py-2 flex items-center justify-between border-b border-white/8">
         <Link href="/" className="flex items-center">
-          <AppLogo size={36} variant="light" />
+          <BrandLogo empresa={empresa} size={36} />
         </Link>
         <Button
           variant="ghost"
@@ -78,7 +79,7 @@ export function MobileHeader() {
           />
           <aside className="relative ml-auto w-72 max-w-[85vw] sidebar-surface text-white flex flex-col">
             <div className="px-4 pt-6 pb-4 flex items-center justify-between border-b border-white/8">
-              <AppLogo size={64} variant="light" />
+              <BrandLogo empresa={empresa} size={64} />
               <Button
                 variant="ghost"
                 size="icon"
