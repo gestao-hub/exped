@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
     if (e instanceof PushError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
+    console.error('[sync/push] erro:', e);
     return NextResponse.json({ error: 'Falha no push de sync' }, { status: 500 });
   }
 }

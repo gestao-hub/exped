@@ -1,7 +1,7 @@
 import type { createAdminClient } from '@/lib/supabase/admin';
 import type { Json } from '@/lib/types/database';
 import type { SyncDb, Row } from './engine';
-import { hasDirectEmpresaId, type SyncTable } from './tables';
+import { hasDirectEmpresaId, scopeColumn, type SyncTable } from './tables';
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -48,7 +48,7 @@ export function makeSupabaseSyncDb(supabase: Admin): SyncDb {
       let q = (supabase as any).from(table).select('*').gt('updated_at', cursor);
 
       if (hasDirectEmpresaId(table)) {
-        q = q.eq('empresa_id', empresaId);
+        q = q.eq(scopeColumn(table), empresaId);
       } else if (table === 'pedido_pontos_retirada') {
         const ids = await pedidoIdsDaEmpresa(supabase, empresaId);
         if (ids.length === 0) return [];
@@ -71,7 +71,7 @@ export function makeSupabaseSyncDb(supabase: Admin): SyncDb {
     async findCanonical(table: SyncTable, empresaId, pk) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let q = (supabase as any).from(table.name).select('*').eq(table.pk, pk);
-      if (hasDirectEmpresaId(table.name)) q = q.eq('empresa_id', empresaId);
+      if (hasDirectEmpresaId(table.name)) q = q.eq(scopeColumn(table.name), empresaId);
       const { data, error } = await q.maybeSingle();
       if (error) throw error;
       if (!data) return null;

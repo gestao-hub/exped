@@ -65,3 +65,11 @@ const HAS_DIRECT_EMPRESA_ID = new Set([
 export function hasDirectEmpresaId(name: string): boolean {
   return HAS_DIRECT_EMPRESA_ID.has(name);
 }
+
+/**
+ * Coluna usada pra escopar a tabela na empresa. `empresas` é a própria empresa
+ * (escopo pelo `id`); as demais "diretas" usam `empresa_id`. (Filhas escopam via pai.)
+ */
+export function scopeColumn(name: string): string {
+  return name === 'empresas' ? 'id' : 'empresa_id';
+}

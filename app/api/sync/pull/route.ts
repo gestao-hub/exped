@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { resolveDevice } from '@/lib/sync/auth';
@@ -38,8 +39,9 @@ export async function POST(req: NextRequest) {
     const result = await runPull(db, device.empresaId, parsed.data.cursors);
     return NextResponse.json(result, { status: 200 });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : JSON.stringify(e);
-    console.error('[sync/pull] erro:', msg, e);
-    return NextResponse.json({ error: `pull falhou: ${msg}` }, { status: 500 });
+    // Log completo no servidor; corpo genérico + requestId (não vazar detalhe interno).
+    const requestId = randomUUID().slice(0, 8);
+    console.error(`[sync/pull] erro req=${requestId}:`, e);
+    return NextResponse.json({ error: 'pull falhou', requestId }, { status: 500 });
   }
 }
