@@ -1067,6 +1067,10 @@ export type Database = {
       is_platform_admin: { Args: never; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      sync_auth_users: {
+        Args: { p_cursor: string; p_empresa: string; p_limit: number }
+        Returns: Json[]
+      }
       sync_parent_in_empresa: {
         Args: { p_empresa: string; p_id: string; p_table: string }
         Returns: boolean
