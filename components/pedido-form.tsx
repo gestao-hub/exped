@@ -18,6 +18,11 @@ import { criarPedidoAction, atualizarPedidoAction } from '@/app/(app)/vendas/act
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
+import {
+  FORMAS_PAGAMENTO,
+  FORMAS_COM_PARCELAS,
+  rotuloFormaPagamento,
+} from '@/lib/parser/forma-pagamento';
 
 type ErrorLeaf = { path: string; message: string };
 function collectErrorLeaves(node: unknown, prefix = ''): ErrorLeaf[] {
@@ -306,28 +311,63 @@ export function PedidoForm({
           </CardHeader>
           <CardContent className="space-y-4">
             <Field label="Forma de Pagamento">
-              <Input {...register('forma_pagamento')} placeholder="ENTREGA A RECEBER" />
-            </Field>
-            <label className="flex items-center gap-2 -mt-1.5 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded accent-brand cursor-pointer"
-                checked={(watch('forma_pagamento') ?? '') === 'ENTREGA A RECEBER'}
-                onChange={(e) => {
-                  setValue(
-                    'forma_pagamento',
-                    e.target.checked ? 'ENTREGA A RECEBER' : '',
-                    { shouldDirty: true },
-                  );
-                }}
+              <Controller
+                control={control}
+                name="forma_pagamento"
+                render={({ field }) => (
+                  <select
+                    value={field.value ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const forma = v === '' ? null : (v as (typeof FORMAS_PAGAMENTO)[number]);
+                      field.onChange(forma);
+                      // Forma sem parcelamento → zera parcelas (mantém consistência)
+                      if (!forma || !FORMAS_COM_PARCELAS.has(forma)) {
+                        setValue('parcelas', null, { shouldDirty: true });
+                      }
+                    }}
+                    onBlur={field.onBlur}
+                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  >
+                    <option value="">—</option>
+                    {FORMAS_PAGAMENTO.map((f) => (
+                      <option key={f} value={f}>
+                        {rotuloFormaPagamento(f, null)}
+                      </option>
+                    ))}
+                  </select>
+                )}
               />
-              <span className="text-muted-foreground">
-                Receber na entrega <span className="text-[11px]">(atalho)</span>
-              </span>
-            </label>
+            </Field>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Parcelas">
-                <Input {...register('parcelas')} placeholder="10x" />
+                <Controller
+                  control={control}
+                  name="parcelas"
+                  render={({ field }) => {
+                    const forma = watch('forma_pagamento');
+                    const aceitaParcelas = !!forma && FORMAS_COM_PARCELAS.has(forma);
+                    return (
+                      <select
+                        value={field.value ?? ''}
+                        disabled={!aceitaParcelas}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          field.onChange(v === '' ? null : Number(v));
+                        }}
+                        onBlur={field.onBlur}
+                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <option value="">—</option>
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={n}>
+                            {n}x
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  }}
+                />
               </Field>
               <Field label="Valor Total">
                 <Input
