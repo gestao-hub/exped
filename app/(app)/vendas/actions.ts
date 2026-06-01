@@ -9,6 +9,13 @@ import { reconcileChildren, type ExistingPonto } from '@/lib/pedidos/reconcile';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/types/database';
 
+// O banco já tem o destino 'entrega' (migration 20260601000021) e parcelas smallint
+// (migration 20260601000020), mas os tipos gerados em lib/types/database.ts ainda
+// não foram regerados (Fase 4 da ingestão). Estes aliases fazem a ponte no boundary
+// de escrita até a regeneração dos tipos.
+type PontoTipoDb = Database['public']['Tables']['pedido_pontos_retirada']['Insert']['tipo'];
+type ParcelasDb = Database['public']['Tables']['pedidos']['Update']['parcelas'];
+
 /**
  * Persiste pontos/itens de um pedido IN-PLACE usando reconcileChildren:
  * UPDATE (mantém id) p/ os que continuam, INSERT p/ novos, soft-delete p/ os que
@@ -63,7 +70,7 @@ async function persistirFilhosPedido(
       const { error } = await supabase
         .from('pedido_pontos_retirada')
         .update({
-          tipo: op.data.tipo,
+          tipo: op.data.tipo as PontoTipoDb,
           empresa_nome: op.data.empresa_nome,
           endereco: op.data.endereco ?? null,
           ordem: op.ordem,
@@ -76,7 +83,7 @@ async function persistirFilhosPedido(
         .from('pedido_pontos_retirada')
         .insert({
           pedido_id: pedidoId,
-          tipo: op.data.tipo,
+          tipo: op.data.tipo as PontoTipoDb,
           empresa_nome: op.data.empresa_nome,
           endereco: op.data.endereco ?? null,
           ordem: op.ordem,
@@ -218,7 +225,7 @@ export async function atualizarPedidoAction(
       cliente_telefone: d.cliente_telefone ?? null,
       cliente_endereco_id: d.cliente_endereco_id ?? null,
       forma_pagamento: d.forma_pagamento ?? null,
-      parcelas: d.parcelas ?? null,
+      parcelas: (d.parcelas ?? null) as ParcelasDb,
       valor_total: d.valor_total,
       observacoes: d.observacoes ?? null,
       status,

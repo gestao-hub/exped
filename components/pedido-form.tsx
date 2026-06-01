@@ -62,7 +62,7 @@ export function PedidoForm({
     resolver: zodResolver(pedidoFormSchema),
     defaultValues,
   });
-  const { control, register, handleSubmit, watch, setValue, formState: { errors } } = form;
+  const { control, register, handleSubmit, watch, setValue, getValues, formState: { errors } } = form;
   const cnpjCpfWatch = watch('cliente_cnpj_cpf');
   const enderecoIdWatch = watch('cliente_endereco_id');
   const endValues = {
@@ -80,6 +80,74 @@ export function PedidoForm({
     // o sobrescreveria/removeria no submit. Usamos uma chave própria pra preservar a PK.
     keyName: '_rhfId',
   });
+
+  // Modo de retirada derivado dos pontos atuais (watch p/ refletir mudanças de tipo).
+  const pontosWatch = watch('pontos_retirada');
+  const modoRetirada: 'loja' | 'deposito' | 'hibrido' =
+    pontosWatch?.some((p) => p?.tipo === 'entrega')
+      ? 'hibrido'
+      : pontosWatch?.[0]?.tipo === 'deposito'
+        ? 'deposito'
+        : 'loja';
+  // No modo híbrido, o tipo do ponto de retirada (loja vs depósito) é um sub-seletor.
+  const tipoRetiradaHibrido: 'loja' | 'deposito' =
+    pontosWatch?.find((p) => p?.tipo === 'deposito') ? 'deposito' : 'loja';
+
+  /** Endereço do cliente (default do ponto de entrega no modo híbrido). */
+  function enderecoCliente() {
+    const partes = [
+      getValues('cliente_endereco'),
+      getValues('cliente_bairro'),
+      getValues('cliente_cidade'),
+      getValues('cliente_uf'),
+    ].filter((s): s is string => !!s && s.trim() !== '');
+    return partes.join(', ');
+  }
+
+  /** Junta todos os itens dos pontos atuais num único array. */
+  function todosItens() {
+    return (getValues('pontos_retirada') ?? []).flatMap((p) => p?.itens ?? []);
+  }
+
+  function aplicarModo(novo: 'loja' | 'deposito' | 'hibrido', tipoRetirada?: 'loja' | 'deposito') {
+    const atuais = getValues('pontos_retirada') ?? [];
+    if (novo === 'loja' || novo === 'deposito') {
+      // 1 ponto único com TODOS os itens consolidados; remove extras.
+      const itens = todosItens();
+      const base = atuais[0];
+      setValue('pontos_retirada', [
+        {
+          ...(base ?? { empresa_nome: '', endereco: '' }),
+          id: base?.id ?? null,
+          tipo: novo,
+          empresa_nome: base?.empresa_nome ?? '',
+          endereco: base?.endereco ?? '',
+          itens,
+        },
+      ], { shouldDirty: true });
+      return;
+    }
+    // Híbrido: ponto de retirada (loja/depósito) + ponto de entrega (endereço do cliente).
+    const tr = tipoRetirada ?? tipoRetiradaHibrido;
+    const retiradaExistente = atuais.find((p) => p?.tipo === 'loja' || p?.tipo === 'deposito');
+    const entregaExistente = atuais.find((p) => p?.tipo === 'entrega');
+    setValue('pontos_retirada', [
+      {
+        id: retiradaExistente?.id ?? null,
+        tipo: tr,
+        empresa_nome: retiradaExistente?.empresa_nome ?? '',
+        endereco: retiradaExistente?.endereco ?? '',
+        itens: retiradaExistente?.itens ?? (entregaExistente ? [] : todosItens()),
+      },
+      {
+        id: entregaExistente?.id ?? null,
+        tipo: 'entrega',
+        empresa_nome: entregaExistente?.empresa_nome || getValues('cliente_nome') || '',
+        endereco: entregaExistente?.endereco || enderecoCliente(),
+        itens: entregaExistente?.itens ?? [],
+      },
+    ], { shouldDirty: true });
+  }
 
   function submit(status: 'rascunho' | 'pendente') {
     handleSubmit(
@@ -228,25 +296,41 @@ export function PedidoForm({
 
       {/* Pontos de Retirada */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <CardTitle>Pontos de Retirada</CardTitle>
-          {pontos.length < 2 && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                addPonto({
-                  tipo: pontos[0]?.tipo === 'loja' ? 'deposito' : 'loja',
-                  empresa_nome: '',
-                  endereco: '',
-                  itens: [],
-                })
-              }
-            >
-              <Plus className="h-4 w-4 mr-1" /> Adicionar ponto
-            </Button>
-          )}
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1.5 block">
+                Modo de retirada
+              </Label>
+              <select
+                value={modoRetirada}
+                onChange={(e) => aplicarModo(e.target.value as 'loja' | 'deposito' | 'hibrido')}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="loja">Loja</option>
+                <option value="deposito">Depósito</option>
+                <option value="hibrido">Híbrido (retirada + entrega)</option>
+              </select>
+            </div>
+            {modoRetirada === 'hibrido' && (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1.5 block">
+                  Ponto de retirada
+                </Label>
+                <select
+                  value={tipoRetiradaHibrido}
+                  onChange={(e) =>
+                    aplicarModo('hibrido', e.target.value as 'loja' | 'deposito')
+                  }
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                >
+                  <option value="loja">Loja</option>
+                  <option value="deposito">Depósito</option>
+                </select>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="0" className="w-full">
@@ -274,6 +358,7 @@ export function PedidoForm({
                     >
                       <option value="loja">Loja</option>
                       <option value="deposito">Depósito</option>
+                      <option value="entrega">Entrega</option>
                     </select>
                   </Field>
                   <Field label="Empresa" className="md:col-span-2">
