@@ -194,10 +194,10 @@ Type: filesandordirs; Name: "{localappdata}\ExpedAgent"
 { ============================================================================
   WIZARD CUSTOM — pagina do "Código de instalação"
   ----------------------------------------------------------------------------
-  CodePage tem 3 campos:
-    [0] Código de instalação  (ex.: EXPED-7K4P-2QXM)
-    [1] Token de dispositivo  (modo manual / suporte)
-    [2] URL da nuvem          (modo manual / suporte)
+  CodePage tem 3 campos (indices 0..2):
+    0: Código de instalação  (ex.: EXPED-7K4P-2QXM)
+    1: Token de dispositivo  (modo manual / suporte)
+    2: URL da nuvem          (modo manual / suporte)
   Um checkbox "modo manual (suporte)" alterna entre:
     - desmarcado: usa o campo Código (resgata via /api/provision/redeem)
     - marcado:    usa Token + URL diretos (sem resgate)
@@ -278,7 +278,7 @@ begin
   end;
 end;
 
-{ --- Scripted constants usadas no [Run] ({code:...}) ------------------------ }
+{ --- Scripted constants usadas no [Run] (parametros code:GetCode etc.) ------- }
 function GetCode(Param: String): String;
 begin
   Result := Trim(CodePage.Values[0]);
