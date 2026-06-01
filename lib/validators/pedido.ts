@@ -60,6 +60,22 @@ export const pedidoFormSchema = z.object({
   observacoes:      z.string().max(TEXT).nullable().optional(),
   storage_pdf_path: z.string().max(LONG).nullable().optional(),
   pontos_retirada:  z.array(pontoRetiradaSchema).min(1, 'Adicione ao menos 1 ponto de retirada').max(5),
+}).superRefine((val, ctx) => {
+  // Com mais de 1 ponto (ex.: modo Híbrido), cada ponto precisa ter ao menos 1 item —
+  // senão dá pra salvar um bloco (ex.: Entrega) totalmente vazio. Com 1 ponto só,
+  // não exigimos (rascunho pode ser salvo sem itens ainda).
+  const pontos = val.pontos_retirada ?? [];
+  if (pontos.length > 1) {
+    pontos.forEach((p, i) => {
+      if (!p.itens || p.itens.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['pontos_retirada', i, 'itens'],
+          message: `O ponto "${p.tipo}" está sem itens — adicione ao menos 1 item.`,
+        });
+      }
+    });
+  }
 });
 
 export type PedidoFormInput = z.infer<typeof pedidoFormSchema>;
