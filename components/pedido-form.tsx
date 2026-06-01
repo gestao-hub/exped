@@ -73,7 +73,7 @@ export function PedidoForm({
     cep:      watch('cliente_cep')      ?? null,
     telefone: watch('cliente_telefone') ?? null,
   };
-  const { fields: pontos, append: addPonto, remove: removePonto } = useFieldArray({
+  const { fields: pontos, remove: removePonto } = useFieldArray({
     control,
     name: 'pontos_retirada',
     // keyName padrão é 'id' — colidiria com nosso campo `id` (PK do banco) e o RHF
