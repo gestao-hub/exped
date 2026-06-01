@@ -151,6 +151,7 @@ export type Database = {
           last_seen_at: string | null
           nome: string
           token_hash: string
+          updated_at: string
         }
         Insert: {
           ativo?: boolean
@@ -160,6 +161,7 @@ export type Database = {
           last_seen_at?: string | null
           nome: string
           token_hash: string
+          updated_at?: string
         }
         Update: {
           ativo?: boolean
@@ -169,6 +171,7 @@ export type Database = {
           last_seen_at?: string | null
           nome?: string
           token_hash?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -249,6 +252,7 @@ export type Database = {
           empresa_id: string
           hiper_usuario_id: number
           hiper_usuario_nome: string | null
+          updated_at: string
           vendedor_id: string
         }
         Insert: {
@@ -256,6 +260,7 @@ export type Database = {
           empresa_id: string
           hiper_usuario_id: number
           hiper_usuario_nome?: string | null
+          updated_at?: string
           vendedor_id: string
         }
         Update: {
@@ -263,6 +268,7 @@ export type Database = {
           empresa_id?: string
           hiper_usuario_id?: number
           hiper_usuario_nome?: string | null
+          updated_at?: string
           vendedor_id?: string
         }
         Relationships: [
@@ -1221,4 +1227,3 @@ export const Constants = {
     },
   },
 } as const
-
