@@ -8,16 +8,15 @@ public sealed class AgentConfig
     public int PollIntervalSeconds { get; set; } = 30;
     public string SituacoesGatilho { get; set; } = "2,5,7";
     // CSV -> short[] (ignora vazios/espaços). NÃO inclui 6 (cancelado) no default.
-    public short[] SituacoesArray =>
-        (SituacoesGatilho ?? "")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(short.Parse)
-            .ToArray();
+    public short[] SituacoesArray => ParseSituacoes(SituacoesGatilho);
     // Ordem de Serviço (opcional — liga só pra cliente que usa OS no Hiper)
     public bool SyncOs { get; set; } = false;
     public string SituacoesOsGatilho { get; set; } = ""; // vazio = sem filtro de situação
-    public short[] SituacoesOsArray =>
-        (SituacoesOsGatilho ?? "")
+    public short[] SituacoesOsArray => ParseSituacoes(SituacoesOsGatilho);
+
+    // CSV -> short[] (ignora vazios/espaços). Helper compartilhado (defaults locais e config remota).
+    public static short[] ParseSituacoes(string csv) =>
+        (csv ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(short.Parse)
             .ToArray();
