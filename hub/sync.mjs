@@ -25,6 +25,9 @@
  */
 
 import { execFile } from 'node:child_process';
+import { writeFile, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import process from 'node:process';
 
@@ -236,7 +239,28 @@ export async function syncOnce({ db, apiBase, deviceToken, fetchImpl = globalThi
 
       hasMore = false;
 
-      // Tabelas public.
+      // auth.users PRIMEIRO: profiles.id faz FK para auth.users, então os usuários
+      // precisam existir antes de qualquer tabela public que referencie profiles.
+      const authRows = pulled.auth_users;
+      if (authRows && authRows.length > 0) {
+        try {
+          for (const row of authRows) {
+            await db.upsertAuthUser(row);
+          }
+          const next =
+            (pulled.nextCursors && pulled.nextCursors[AUTH_USERS_KEY]) ||
+            maxUpdatedAt(authRows, cursorsReq[AUTH_USERS_KEY]);
+          cursorsReq[AUTH_USERS_KEY] = next;
+          await db.setCursor(AUTH_USERS_KEY, { pull_at: next });
+          if (authRows.length >= SYNC_LIMIT) hasMore = true;
+        } catch (e) {
+          ok = false;
+          firstError ??= e?.message || String(e);
+          logger.error(`sync pull apply auth.users: ${e?.message}`);
+        }
+      }
+
+      // Tabelas public (SYNC_TABLES já ordenadas: down antes de two-way).
       if (pulled.tables) {
         for (const t of SYNC_TABLES) {
           const rows = pulled.tables[t.name];
@@ -262,26 +286,6 @@ export async function syncOnce({ db, apiBase, deviceToken, fetchImpl = globalThi
             logger.error(`sync pull apply ${t.name}: ${e?.message}`);
             // cursor desta tabela NÃO avança.
           }
-        }
-      }
-
-      // auth.users (login offline): upsert em auth.users LOCAL, cursor próprio.
-      const authRows = pulled.auth_users;
-      if (authRows && authRows.length > 0) {
-        try {
-          for (const row of authRows) {
-            await db.upsertAuthUser(row);
-          }
-          const next =
-            (pulled.nextCursors && pulled.nextCursors[AUTH_USERS_KEY]) ||
-            maxUpdatedAt(authRows, cursorsReq[AUTH_USERS_KEY]);
-          cursorsReq[AUTH_USERS_KEY] = next;
-          await db.setCursor(AUTH_USERS_KEY, { pull_at: next });
-          if (authRows.length >= SYNC_LIMIT) hasMore = true;
-        } catch (e) {
-          ok = false;
-          firstError ??= e?.message || String(e);
-          logger.error(`sync pull apply auth.users: ${e?.message}`);
         }
       }
     }
@@ -371,11 +375,19 @@ async function psqlCmd(cfg, sql) {
  */
 async function psqlSyncWrite(cfg, sql) {
   const body = `begin; set local exped.sync = 'on'; ${sql}; commit;`;
-  await execFileAsync(
-    'psql',
-    [...psqlArgs(cfg), '-v', 'ON_ERROR_STOP=1', '-c', body],
-    { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 32 },
-  );
+  // Escreve em arquivo temp UTF-8 e usa -f: elimina interferência de codepage
+  // do Windows quando caracteres não-ASCII são passados via argumento -c.
+  const tmpFile = join(tmpdir(), `exped-sync-${Date.now()}-${Math.random().toString(36).slice(2)}.sql`);
+  try {
+    await writeFile(tmpFile, body, 'utf8');
+    await execFileAsync(
+      'psql',
+      [...psqlArgs(cfg), '-v', 'ON_ERROR_STOP=1', '-f', tmpFile],
+      { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 32 },
+    );
+  } finally {
+    await unlink(tmpFile).catch(() => {});
+  }
 }
 
 /** roda uma query que retorna JSON agregado (uma linha, uma coluna) e parseia. */
@@ -453,21 +465,24 @@ export function makePsqlDb(cfg) {
     async upsert(table, pk, row) {
       // Insert/update via jsonb_populate_record: o JSON da linha vira um record
       // do tipo da tabela; ON CONFLICT (pk) atualiza todas as colunas.
+      // pk pode ser string ('id') ou array (['empresa_id', 'hiper_usuario_id']).
       const json = JSON.stringify(row).replace(/'/g, "''");
-      // monta a lista de colunas a partir das chaves do row (todas vêm da nuvem).
       const cols = Object.keys(row).map((c) => `"${c.replace(/"/g, '""')}"`);
+      const pkCols = Array.isArray(pk) ? pk.map((c) => `"${c}"`) : [`"${pk}"`];
+      const pkSet = new Set(pkCols);
       const updates = cols
-        .filter((c) => c !== `"${pk}"`)
+        .filter((c) => !pkSet.has(c))
         .map((c) => `${c} = excluded.${c}`)
         .join(', ');
       const colList = cols.join(', ');
+      const conflictTarget = pkCols.join(', ');
       const setClause = updates ? `do update set ${updates}` : 'do nothing';
       // Escrita com a flag exped.sync ligada (bypass do trigger local — ver psqlSyncWrite).
       await psqlSyncWrite(
         cfg,
         `insert into public.${table} (${colList}) ` +
           `select ${colList} from jsonb_populate_record(null::public.${table}, '${json}'::jsonb) ` +
-          `on conflict ("${pk}") ${setClause}`,
+          `on conflict (${conflictTarget}) ${setClause}`,
       );
     },
 
@@ -475,8 +490,14 @@ export function makePsqlDb(cfg) {
       // Upsert em auth.users LOCAL (login offline via GoTrue local). auth.users NÃO tem
       // o trigger stamp_sync (só tabelas public têm), mas usamos transação mesmo
       // (consistência + futura-prova). PK = id.
-      const json = JSON.stringify(row).replace(/'/g, "''");
-      const cols = Object.keys(row).map((c) => `"${c.replace(/"/g, '""')}"`);
+      // confirmed_at é coluna gerada (calculada de email_confirmed_at + phone_confirmed_at)
+      // e não pode ser inserida explicitamente — filtramos aqui.
+      const AUTH_GENERATED_COLS = new Set(['confirmed_at']);
+      const filteredRow = Object.fromEntries(
+        Object.entries(row).filter(([k]) => !AUTH_GENERATED_COLS.has(k)),
+      );
+      const json = JSON.stringify(filteredRow).replace(/'/g, "''");
+      const cols = Object.keys(filteredRow).map((c) => `"${c.replace(/"/g, '""')}"`);
       const updates = cols
         .filter((c) => c !== '"id"')
         .map((c) => `${c} = excluded.${c}`)

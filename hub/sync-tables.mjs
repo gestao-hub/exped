@@ -15,6 +15,12 @@
 
 /** @type {SyncTable[]} */
 export const SYNC_TABLES = [
+  // Tabelas de configuração/referência: descem primeiro (sem dependências locais).
+  { name: 'empresas', pk: 'id', dir: 'down' },
+  { name: 'profiles', pk: 'id', dir: 'down' },
+  { name: 'hiper_vendedor_map', pk: ['empresa_id', 'hiper_usuario_id'], dir: 'down' },
+  { name: 'dispositivos', pk: 'id', dir: 'down' },
+  // Tabelas two-way: dependem de empresas/profiles já presentes.
   { name: 'clientes', pk: 'id', dir: 'two-way' },
   { name: 'pedidos', pk: 'id', dir: 'two-way' },
   { name: 'pedido_pontos_retirada', pk: 'id', dir: 'two-way', parent: { table: 'pedidos', fk: 'pedido_id' } },
@@ -23,10 +29,6 @@ export const SYNC_TABLES = [
   { name: 'os_itens', pk: 'id', dir: 'two-way', parent: { table: 'ordens_servico', fk: 'os_id' } },
   { name: 'os_servicos', pk: 'id', dir: 'two-way', parent: { table: 'ordens_servico', fk: 'os_id' } },
   { name: 'os_notificacoes', pk: 'id', dir: 'two-way' },
-  { name: 'empresas', pk: 'id', dir: 'down' },
-  { name: 'profiles', pk: 'id', dir: 'down' },
-  { name: 'hiper_vendedor_map', pk: 'id', dir: 'down' },
-  { name: 'dispositivos', pk: 'id', dir: 'down' },
 ];
 
 /** Tabelas que o hub envia (local→nuvem). */
