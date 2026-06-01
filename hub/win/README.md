@@ -13,6 +13,63 @@ servindo o app pra outros PCs em `http://<ip>:3000`.
 
 ---
 
+## Onboarding por Código de Instalação (instalador unificado `exped-setup.iss`)
+
+Há **dois instaladores** neste diretório:
+
+| Instalador | O que entrega | Configuração da nuvem |
+|---|---|---|
+| `exped-hub.iss` → `ExpedHubSetup.exe` | **Só o hub** (serviço `ExpedHub`). | Manual (editar `config.json`). |
+| `exped-setup.iss` → `ExpedSetup.exe` | **Hub + agente** num único `.exe`, com **wizard do código**. | **Automática por código** (recomendado). |
+
+### Fluxo recomendado (por código)
+
+1. **[Operador, no painel]** Abra a plataforma, selecione a empresa do cliente e clique
+   em **"Gerar código de instalação"**. O painel mostra um código no formato
+   `EXPED-XXXX-XXXX` (uso único, expira em **24h**). Copie e envie ao cliente.
+2. **[Cliente, no Windows]** Rode `ExpedSetup.exe` **como Administrador**. No wizard,
+   na tela **"Código de instalação"**, cole o código e clique em Avançar.
+3. O instalador: copia o hub pra `C:\Exped`, gera o `jwtSecret`, baixa os binários,
+   registra o serviço `ExpedHub`, copia o **agente** pra `%LOCALAPPDATA%\ExpedAgent`
+   (com autostart no logon via `.vbs`), e por fim roda **`provision.ps1`** com o código:
+   ele chama `POST /api/provision/redeem` (que **gera o token de dispositivo só no
+   resgate**) e escreve os **2 configs** automaticamente:
+   - `C:\Exped\config.json` → injeta `cloud.apiBase` + `cloud.deviceToken`
+     (preservando `jwtSecret`/portas já gerados);
+   - `%LOCALAPPDATA%\ExpedAgent\appsettings.json` → `Agent.ApiBaseUrl =
+     http://127.0.0.1:3000` (o agente fala com o **hub local**) + `Agent.DeviceToken`.
+
+   **Não é mais preciso editar JSON à mão** — a tela do código substitui esse passo.
+
+### Modo manual (fallback de suporte)
+
+No mesmo wizard há um checkbox **"Modo manual (suporte)"**. Marcado, ele esconde o
+campo do código e revela **Token de dispositivo** + **URL da nuvem**. Use quando a
+máquina do cliente **não tem internet pra resgatar** o código, ou pra recuperar uma
+instalação. Nesse modo o `provision.ps1` é chamado com `-DeviceToken`/`-CloudApi` e
+**pula o resgate**, escrevendo os 2 configs com os valores informados. (É o substituto
+controlado da antiga edição manual de `config.json`.)
+
+### Pré-requisito extra do `exped-setup.iss`: publish do agente
+
+Além do `payload\` do hub (Fase 1.3 abaixo), o instalador unificado empacota o
+**publish self-contained do agente**. Gere-o **antes de compilar** (a partir de
+`agent\installer\`):
+
+```bash
+dotnet publish ..\ExpedAgent -c Release -o publish   # cria agent\installer\publish\
+```
+
+O `exped-setup.iss` referencia `..\..\agent\installer\publish\*` e
+`..\..\agent\installer\start.cmd` por caminho **relativo a `hub\win\`**. Sem esse
+publish a compilação do `ExpedSetup.exe` falha (Source inexistente). Compile com:
+
+```bat
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" hub\win\exped-setup.iss
+```
+
+---
+
 ## Convenção de pastas no Windows
 
 Tudo vive sob `C:\Exped\`:
@@ -266,7 +323,9 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
 | `download-binaries.ps1` | Baixa PostgreSQL + PostgREST + Node + NSSM pra `C:\Exped\bin`. |
 | `install-service.ps1` | Lê `config.json`, registra o serviço `ExpedHub` (NSSM) com as env `EXPED_*`, abre firewall, inicia. Idempotente. |
 | `uninstall-service.ps1` | Para+remove o serviço e a regra de firewall. Preserva `data\` (a menos de `-RemoveData $true`). |
-| `exped-hub.iss` | Script Inno Setup 6 — empacota `payload\` + scripts e orquestra `[Run]`/`[UninstallRun]`. |
+| `exped-hub.iss` | Script Inno Setup 6 — empacota `payload\` + scripts e orquestra `[Run]`/`[UninstallRun]`. (Só o hub.) |
+| `exped-setup.iss` | Script Inno Setup 6 **unificado** (hub + agente) com wizard do **código de instalação** (e modo manual de suporte). Gera `ExpedSetup.exe`. |
+| `provision.ps1` | Resgata o código (`POST /api/provision/redeem`) ou aplica Token+URL diretos (modo manual) e escreve `config.json` (`cloud.apiBase`/`deviceToken`) + `appsettings.json` do agente. Chamado no `[Run]` do `exped-setup.iss`. |
 | `config.example.json` | Modelo do `config.json` (portas, paths Windows, jwtSecret placeholder, manifestUrl). |
 | `gotrue-windows.patch` | Patch de portabilidade Windows do `supabase/auth` (reproduz o `auth.exe`). |
 
