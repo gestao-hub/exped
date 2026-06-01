@@ -20,6 +20,8 @@ export default async function ImprimirPage({
       .from('pedido_pontos_retirada')
       .select('*, itens:pedido_itens(*)')
       .eq('pedido_id', id)
+      .is('deleted_at', null)
+      .is('itens.deleted_at', null)
       .order('ordem'),
     supabase.from('pedido_logistica').select('*').eq('pedido_id', id).maybeSingle(),
   ]);

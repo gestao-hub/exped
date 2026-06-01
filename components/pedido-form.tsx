@@ -71,6 +71,9 @@ export function PedidoForm({
   const { fields: pontos, append: addPonto, remove: removePonto } = useFieldArray({
     control,
     name: 'pontos_retirada',
+    // keyName padrão é 'id' — colidiria com nosso campo `id` (PK do banco) e o RHF
+    // o sobrescreveria/removeria no submit. Usamos uma chave própria pra preservar a PK.
+    keyName: '_rhfId',
   });
 
   function submit(status: 'rascunho' | 'pendente') {
@@ -244,13 +247,20 @@ export function PedidoForm({
           <Tabs defaultValue="0" className="w-full">
             <TabsList>
               {pontos.map((p, i) => (
-                <TabsTrigger key={p.id} value={String(i)} className="capitalize">
+                <TabsTrigger key={p._rhfId} value={String(i)} className="capitalize">
                   {watch(`pontos_retirada.${i}.tipo`) ?? p.tipo}
                 </TabsTrigger>
               ))}
             </TabsList>
             {pontos.map((p, i) => (
-              <TabsContent key={p.id} value={String(i)} className="space-y-4 pt-4">
+              <TabsContent key={p._rhfId} value={String(i)} className="space-y-4 pt-4">
+                {/* PK estável do ponto (presente ao editar; ausente ao criar novo) */}
+                <input
+                  type="hidden"
+                  {...register(`pontos_retirada.${i}.id`, {
+                    setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
+                  })}
+                />
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <Field label="Tipo">
                     <select
@@ -422,6 +432,7 @@ function ItensEditor({
   const { fields, append, remove } = useFieldArray({
     control,
     name: `pontos_retirada.${pontoIndex}.itens`,
+    keyName: '_rhfId', // preserva `id` (PK do banco) — ver comentário em PedidoForm
   });
 
   return (
@@ -469,8 +480,15 @@ function ItensEditor({
             </thead>
             <tbody>
               {fields.map((f, i) => (
-                <tr key={f.id} className="border-t">
+                <tr key={f._rhfId} className="border-t">
                   <td className="px-1 py-1">
+                    {/* PK estável do item (presente ao editar; ausente ao criar novo) */}
+                    <input
+                      type="hidden"
+                      {...register(`pontos_retirada.${pontoIndex}.itens.${i}.id`, {
+                        setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
+                      })}
+                    />
                     <Input {...register(`pontos_retirada.${pontoIndex}.itens.${i}.codigo`)} className="h-8" />
                   </td>
                   <td className="px-1 py-1">

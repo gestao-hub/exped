@@ -9,12 +9,12 @@ type PedidoRow = {
   valor_total: number; observacoes: string | null; storage_pdf_path: string | null;
 };
 type ItemRow = {
-  codigo: string; descricao: string; quantidade: number; unidade: string;
+  id: string; codigo: string; descricao: string; quantidade: number; unidade: string;
   preco_unitario: number; desconto: number; total: number; referencia: string | null;
   saldo_estoque: number | null; ordem: number | null;
 };
 type PontoRow = {
-  tipo: 'loja' | 'deposito'; empresa_nome: string; endereco: string | null; ordem: number | null;
+  id: string; tipo: 'loja' | 'deposito'; empresa_nome: string; endereco: string | null; ordem: number | null;
   itens: ItemRow[];
 };
 
@@ -42,12 +42,14 @@ export function pedidoRowsToFormInput(pedido: PedidoRow, pontos: PontoRow[]): Pe
     pontos_retirada: [...pontos]
       .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
       .map((p) => ({
+        id: p.id,
         tipo: p.tipo,
         empresa_nome: p.empresa_nome,
         endereco: p.endereco,
         itens: [...(p.itens ?? [])]
           .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
           .map((it) => ({
+            id: it.id,
             codigo: it.codigo, descricao: it.descricao, quantidade: it.quantidade,
             unidade: it.unidade, preco_unitario: it.preco_unitario, desconto: it.desconto,
             total: it.total, referencia: it.referencia, saldo_estoque: it.saldo_estoque,
