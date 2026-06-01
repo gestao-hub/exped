@@ -8,6 +8,7 @@ builder.Services.AddSingleton(cfg);
 builder.Services.AddSingleton(new HiperRepository(cfg.SqlConnectionString));
 builder.Services.AddSingleton(new StateStore());
 builder.Services.AddHttpClient<IngestClient>();
+builder.Services.AddHttpClient<RemoteConfigClient>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
