@@ -14,7 +14,7 @@ export default async function PlataformaPage() {
   const [{ data: empresas }, { data: dispositivos }, { data: mapeamentos }, { data: profiles }] =
     await Promise.all([
       supabase.from('empresas')
-        .select('id, nome, slug, ativo, usa_os, logo_url, cor_primaria, notif_whatsapp_ativo, uazapi_url, uazapi_token, uazapi_instancia, notif_email_ativo, email_remetente, manutencao_lembrete_dias, os_situacao_autorizacao, os_situacao_pronto')
+        .select('id, nome, slug, ativo, usa_os, logo_url, cor_primaria, notif_whatsapp_ativo, uazapi_url, uazapi_token, uazapi_instancia, notif_email_ativo, email_remetente, manutencao_lembrete_dias, os_situacao_autorizacao, os_situacao_pronto, agente_situacoes_venda, agente_sync_os, agente_situacoes_os, agente_poll_segundos')
         .order('nome'),
       supabase.from('dispositivos')
         .select('id, empresa_id, nome, ativo, last_seen_at, created_at')

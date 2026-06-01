@@ -15,6 +15,8 @@ import {
 import { criarEmpresaComAdminAction, salvarNotifConfigAction, salvarEmpresaConfigAction, type NotifConfigInput, type EmpresaConfigInput } from '@/lib/empresa/actions';
 import { criarDispositivoAction, setDispositivoAtivoAction } from '@/lib/empresa/devices-actions';
 import { salvarVendedorMapAction } from '@/lib/empresa/vendedor-map-actions';
+import { criarCodigoInstalacaoAction } from '@/lib/provisioning/actions';
+import { salvarAgenteConfigAction, type AgenteConfig } from '@/lib/empresa/agente-config-actions';
 
 type Empresa = {
   id: string; nome: string; slug: string; ativo: boolean; usa_os: boolean;
@@ -22,6 +24,8 @@ type Empresa = {
   notif_whatsapp_ativo: boolean; uazapi_url: string | null; uazapi_token: string | null;
   uazapi_instancia: string | null; notif_email_ativo: boolean; email_remetente: string | null;
   manutencao_lembrete_dias: number; os_situacao_autorizacao: number | null; os_situacao_pronto: number | null;
+  agente_situacoes_venda: string; agente_sync_os: boolean;
+  agente_situacoes_os: string; agente_poll_segundos: number;
 };
 type Dispositivo = { id: string; empresa_id: string; nome: string; ativo: boolean; last_seen_at: string | null; created_at: string };
 type Mapeamento = { empresa_id: string; hiper_usuario_id: number; hiper_usuario_nome: string | null; vendedor_id: string };
@@ -38,6 +42,7 @@ export function PlataformaClient({
   empresas: Empresa[]; dispositivos: Dispositivo[]; mapeamentos: Mapeamento[]; profiles: Profile[];
 }) {
   const [tokenRevelado, setTokenRevelado] = useState<string | null>(null);
+  const [codigoRevelado, setCodigoRevelado] = useState<string | null>(null);
 
   return (
     <>
@@ -53,6 +58,7 @@ export function PlataformaClient({
           mapeamentos={mapeamentos.filter((m) => m.empresa_id === e.id)}
           vendedores={profiles.filter((p) => p.empresa_id === e.id)}
           onTokenGerado={setTokenRevelado}
+          onCodigoGerado={setCodigoRevelado}
         />
       ))}
 
@@ -80,6 +86,33 @@ export function PlataformaClient({
           </div>
           <DialogFooter>
             <Button onClick={() => setTokenRevelado(null)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!codigoRevelado} onOpenChange={(o) => !o && setCodigoRevelado(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Código de instalação</DialogTitle>
+            <DialogDescription>
+              Vale 1 instalação. Expira em 24h. Informe ao cliente para digitar no instalador.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <Input readOnly value={codigoRevelado ?? ''} className="font-mono text-xs" />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                navigator.clipboard.writeText(codigoRevelado ?? '');
+                toast.success('Código copiado');
+              }}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setCodigoRevelado(null)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -133,10 +166,10 @@ function NovaEmpresa() {
 // ---------------------------------------------------------------------------
 
 function EmpresaCard({
-  empresa, dispositivos, mapeamentos, vendedores, onTokenGerado,
+  empresa, dispositivos, mapeamentos, vendedores, onTokenGerado, onCodigoGerado,
 }: {
   empresa: Empresa; dispositivos: Dispositivo[]; mapeamentos: Mapeamento[];
-  vendedores: Profile[]; onTokenGerado: (t: string) => void;
+  vendedores: Profile[]; onTokenGerado: (t: string) => void; onCodigoGerado: (c: string) => void;
 }) {
   return (
     <Card>
@@ -145,7 +178,8 @@ function EmpresaCard({
       </CardHeader>
       <CardContent className="space-y-6">
         <EmpresaConfigSection empresa={empresa} />
-        <DispositivosSection empresaId={empresa.id} dispositivos={dispositivos} onTokenGerado={onTokenGerado} />
+        <DispositivosSection empresaId={empresa.id} dispositivos={dispositivos} onTokenGerado={onTokenGerado} onCodigoGerado={onCodigoGerado} />
+        <AgenteConfigSection empresa={empresa} />
         <VendedoresSection empresaId={empresa.id} mapeamentos={mapeamentos} vendedores={vendedores} />
         {empresa.usa_os && <NotificacoesSection empresa={empresa} />}
       </CardContent>
@@ -293,9 +327,62 @@ function EmpresaConfigSection({ empresa }: { empresa: Empresa }) {
   );
 }
 
+function AgenteConfigSection({ empresa }: { empresa: Empresa }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [f, setF] = useState<AgenteConfig>({
+    agente_situacoes_venda: empresa.agente_situacoes_venda ?? '2,5,7',
+    agente_sync_os: empresa.agente_sync_os ?? false,
+    agente_situacoes_os: empresa.agente_situacoes_os ?? '',
+    agente_poll_segundos: empresa.agente_poll_segundos ?? 30,
+  });
+  const set = <K extends keyof AgenteConfig>(k: K, v: AgenteConfig[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  function salvar() {
+    start(async () => {
+      const r = await salvarAgenteConfigAction(empresa.id, f);
+      if ('error' in r) toast.error(r.error);
+      else { toast.success('Configuração do agente salva.'); router.refresh(); }
+    });
+  }
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold flex items-center gap-2 mb-3">
+        <Cpu className="h-4 w-4" /> Configuração do agente
+      </h3>
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+          <div>
+            <Label className="text-[11px]">Situações de venda (gatilho)</Label>
+            <Input placeholder="ex.: 2,5,7" value={f.agente_situacoes_venda}
+              onChange={(e) => set('agente_situacoes_venda', e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-[11px]">Intervalo de leitura (s)</Label>
+            <Input type="number" value={f.agente_poll_segundos}
+              onChange={(e) => set('agente_poll_segundos', Number(e.target.value))} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={f.agente_sync_os}
+            onChange={(e) => set('agente_sync_os', e.target.checked)} />
+          Sincronizar OS
+        </label>
+        <div>
+          <Label className="text-[11px]">Situações de OS (gatilho)</Label>
+          <Input placeholder="ex.: 10,20" value={f.agente_situacoes_os} disabled={!f.agente_sync_os}
+            onChange={(e) => set('agente_situacoes_os', e.target.value)} />
+        </div>
+        <Button size="sm" onClick={salvar} disabled={pending}>Salvar</Button>
+      </div>
+    </section>
+  );
+}
+
 function DispositivosSection({
-  empresaId, dispositivos, onTokenGerado,
-}: { empresaId: string; dispositivos: Dispositivo[]; onTokenGerado: (t: string) => void }) {
+  empresaId, dispositivos, onTokenGerado, onCodigoGerado,
+}: { empresaId: string; dispositivos: Dispositivo[]; onTokenGerado: (t: string) => void; onCodigoGerado: (c: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [nome, setNome] = useState('');
@@ -307,6 +394,14 @@ function DispositivosSection({
       if ('error' in r) { toast.error(r.error); return; }
       onTokenGerado(r.token);
       setNome('');
+      router.refresh();
+    });
+  }
+  function gerarCodigo() {
+    start(async () => {
+      const r = await criarCodigoInstalacaoAction(empresaId);
+      if ('error' in r) { toast.error(r.error); return; }
+      onCodigoGerado(r.codigo);
       router.refresh();
     });
   }
@@ -325,6 +420,7 @@ function DispositivosSection({
       <div className="flex gap-2">
         <Input value={nome} placeholder="Nome do agente (ex.: PDV Loja Centro)" onChange={(e) => setNome(e.target.value)} className="max-w-xs" />
         <Button size="sm" onClick={gerar} disabled={pending}><Plus className="h-4 w-4 mr-1" /> Gerar token</Button>
+        <Button size="sm" variant="secondary" onClick={gerarCodigo} disabled={pending}>Gerar código de instalação</Button>
       </div>
       {dispositivos.length > 0 && (
         <ul className="text-sm divide-y border rounded-md">
