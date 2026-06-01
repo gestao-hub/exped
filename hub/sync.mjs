@@ -334,7 +334,9 @@ export function start({ db, apiBase, deviceToken, fetchImpl, intervalMs = 10000,
 // makePsqlDb — implementação real sobre o Postgres local via `psql`.
 // MESMO padrão do bootstrap.mjs (execFile do psql, -tAc, ON_ERROR_STOP).
 // --------------------------------------------------------------------------
-const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '' };
+// PGCLIENTENCODING=UTF8: o SQL vem do Node em UTF-8; sem isso, no Windows o psql interpreta
+// os bytes pelo codepage do console (ex.: WIN1252) e corrompe acentos (vira byte UTF-8 invalido).
+const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '', PGCLIENTENCODING: 'UTF8' };
 
 function psqlArgs(cfg) {
   return [

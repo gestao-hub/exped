@@ -41,7 +41,9 @@ function psqlArgs(cfg, { db, dbOverride } = {}) {
   ];
 }
 
-const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '' };
+// PGCLIENTENCODING=UTF8: garante que o psql leia o SQL (UTF-8 vindo do Node) corretamente,
+// inclusive no Windows (onde o codepage do console corromperia acentos).
+const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '', PGCLIENTENCODING: 'UTF8' };
 
 /** roda psql -c (uma instrução), retorna stdout trimado */
 async function psqlCmd(cfg, sql, { dbOverride } = {}) {
