@@ -11,6 +11,7 @@ let deviceRow: { id: string; empresa_id: string; ativo: boolean } | null = null;
 const fakeDb = {
   selectChanges: vi.fn(),
   findCanonical: vi.fn(),
+  findCanonicalGlobal: vi.fn(async (): Promise<Record<string, unknown> | null> => null),
   parentBelongsToEmpresa: vi.fn(),
   upsertRaw: vi.fn(),
   setSyncReplica: vi.fn(async () => {}),
@@ -61,6 +62,7 @@ function req(body: unknown, token?: string): Request {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  fakeDb.findCanonicalGlobal.mockResolvedValue(null);
   deviceRow = { id: 'D1', empresa_id: 'E1', ativo: true };
 });
 
@@ -118,6 +120,16 @@ describe('POST /api/sync/push', () => {
     const [, written] = fakeDb.upsertRaw.mock.calls[0];
     expect(written.empresa_id).toBe('E1'); // forçado, ignora HACK
     expect(written.updated_at).toBe('2026-03-01T00:00:00Z');
+  });
+
+  it('SEGURANÇA: PK existente em outra empresa → 403 propaga na rota (sem upsert)', async () => {
+    fakeDb.findCanonical.mockResolvedValue(null); // não enxerga (escopado em E1)
+    fakeDb.findCanonicalGlobal.mockResolvedValue({ id: 'c1', empresa_id: 'E2', nome: 'B' }); // existe global, da E2
+    const res = await pushPOST(
+      req({ rows: { clientes: [{ id: 'c1', nome: 'HACK', field_updated_at: { nome: '2026-09-01T00:00:00Z' } }] } }, 'tok') as never,
+    );
+    expect(res.status).toBe(403);
+    expect(fakeDb.upsertRaw).not.toHaveBeenCalled();
   });
 
   it('linha existente com field_updated_at mais novo em 1 coluna → merge aplica essa coluna', async () => {

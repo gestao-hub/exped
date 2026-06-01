@@ -35,7 +35,17 @@ function makeDb(seed: Record<string, Row[]> = {}) {
       const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
       if (!found) return null;
       if (found.empresa_id !== undefined && found.empresa_id !== empresaId) return null;
+      // Filha: confere o ancestral (espelha a impl supabase).
+      if (found.empresa_id === undefined && table.parent) {
+        const parentEmp = parentEmpresa[table.parent.table]?.[String(found[table.parent.fk])];
+        if (parentEmp !== empresaId) return null;
+      }
       return { ...found };
+    },
+    async findCanonicalGlobal(table: SyncTable, pk) {
+      // Existência GLOBAL por PK, SEM filtro de empresa.
+      const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
+      return found ? { ...found } : null;
     },
     async parentBelongsToEmpresa(parentTable, parentId, empresaId) {
       return parentEmpresa[parentTable]?.[String(parentId)] === empresaId;
@@ -43,8 +53,21 @@ function makeDb(seed: Record<string, Row[]> = {}) {
     async upsertRaw(table, row) {
       store[table] = store[table] ?? [];
       const idx = store[table].findIndex((r) => r.id === row.id);
-      if (idx >= 0) store[table][idx] = { ...row };
-      else store[table].push({ ...row });
+      if (idx >= 0) {
+        // Espelha a guarda `where empresa_id` do RPC: se a linha EXISTENTE for de
+        // outra empresa, o UPDATE afeta 0 linhas → RETURNING vazio (null).
+        const existing = store[table][idx];
+        if (
+          existing.empresa_id !== undefined &&
+          row.empresa_id !== undefined &&
+          existing.empresa_id !== row.empresa_id
+        ) {
+          return null;
+        }
+        store[table][idx] = { ...row };
+      } else {
+        store[table].push({ ...row });
+      }
       return { ...row };
     },
     async setSyncReplica(on) {
@@ -189,6 +212,82 @@ describe('runPush', () => {
       }),
     ).rejects.toBeInstanceOf(PushError);
     expect(replicaCalls[replicaCalls.length - 1]).toBe(false);
+  });
+
+  it('SEGURANÇA: PK existente em OUTRA empresa → 403 (não INSERT, não sobrescreve)', async () => {
+    const { db, store } = makeDb({
+      clientes: [
+        {
+          id: 'c1',
+          empresa_id: 'E2', // pertence à empresa B
+          nome: 'DA EMPRESA B',
+          updated_at: '2026-01-01T00:00:00Z',
+          field_updated_at: { nome: '2026-01-01T00:00:00Z' },
+        },
+      ],
+    });
+    // Dispositivo da empresa E1 tenta mandar uma linha com a PK da E2.
+    await expect(
+      runPush(db, 'E1', {
+        clientes: [{ id: 'c1', nome: 'SEQUESTRO', field_updated_at: { nome: '2026-09-01T00:00:00Z' } }],
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    // A linha da empresa B continua intacta.
+    expect(store.clientes).toHaveLength(1);
+    expect(store.clientes[0].empresa_id).toBe('E2');
+    expect(store.clientes[0].nome).toBe('DA EMPRESA B');
+  });
+
+  it('SEGURANÇA filha: PK existente cujo pai é de OUTRA empresa → 403', async () => {
+    const { db, store } = makeDb({
+      pedidos: [
+        { id: 'p2', empresa_id: 'E2', updated_at: '2026-01-01T00:00:00Z' },
+        { id: 'p1', empresa_id: 'E1', updated_at: '2026-01-01T00:00:00Z' },
+      ],
+      pedido_pontos_retirada: [
+        { id: 'pp1', pedido_id: 'p2', tipo: 'B', updated_at: '2026-01-01T00:00:00Z', field_updated_at: { tipo: '2026-01-01T00:00:00Z' } },
+      ],
+    });
+    // E1 tenta reescrever pp1 (cujo pai p2 é da E2), inclusive trocando o pai pra um seu.
+    await expect(
+      runPush(db, 'E1', {
+        pedido_pontos_retirada: [
+          { id: 'pp1', pedido_id: 'p1', tipo: 'SEQUESTRO', field_updated_at: { tipo: '2026-09-01T00:00:00Z' } },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(store.pedido_pontos_retirada[0].pedido_id).toBe('p2'); // intacto
+    expect(store.pedido_pontos_retirada[0].tipo).toBe('B');
+  });
+
+  it('SEGURANÇA: PK inexistente em lugar nenhum → INSERT normal', async () => {
+    const { db, store } = makeDb({
+      clientes: [{ id: 'cX', empresa_id: 'E2', nome: 'outra', updated_at: '2026-01-01T00:00:00Z' }],
+    });
+    await runPush(db, 'E1', {
+      clientes: [{ id: 'c1', nome: 'Novo', field_updated_at: { nome: '2026-03-01T00:00:00Z' } }],
+    });
+    expect(store.clientes.find((r) => r.id === 'c1')?.empresa_id).toBe('E1');
+    expect(store.clientes.find((r) => r.id === 'c1')?.nome).toBe('Novo');
+  });
+
+  it('allowlist: chave estranha no payload não quebra o push (filtrada no RPC por information_schema)', async () => {
+    // O descarte real de colunas inexistentes acontece no RPC sync_push_upsert
+    // (allowlist via information_schema) — validado contra o Postgres. No engine,
+    // a chave estranha apenas trafega sem causar erro.
+    const { db, store } = makeDb();
+    await runPush(db, 'E1', {
+      clientes: [
+        {
+          id: 'c1',
+          nome: 'Novo',
+          coluna_inexistente_maliciosa: 'DROP',
+          field_updated_at: { nome: '2026-03-01T00:00:00Z' },
+        },
+      ],
+    });
+    expect(store.clientes).toHaveLength(1);
+    expect(store.clientes[0].nome).toBe('Novo');
   });
 
   it('rejeita lote acima do limite', async () => {

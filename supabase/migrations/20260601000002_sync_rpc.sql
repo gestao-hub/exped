@@ -25,10 +25,10 @@ security definer
 set search_path = public
 as $$
 declare
-  v_cols text;
-  v_vals text;
   v_set  text;
   v_pk   text := 'id';
+  v_has_empresa boolean;
+  v_guard text := '';
   v_result jsonb;
 begin
   if p_table not in (
@@ -42,21 +42,40 @@ begin
   -- do merge). GUC custom, escopo da transação — não exige superuser.
   set local exped.sync = 'on';
 
-  select string_agg(quote_ident(key), ', '),
-         string_agg(format('($1->>%L)', key) || '::text', ', ')
-    into v_cols, v_vals
-  from jsonb_object_keys(p_row) as key;
-
-  select string_agg(format('%I = excluded.%I', key, key), ', ')
+  -- SEGURANÇA — allowlist anti mass-assignment: só entram no UPDATE SET as chaves de
+  -- p_row que SÃO colunas reais da tabela (information_schema), exceto a PK. Chaves
+  -- forjadas pelo atacante que não existam como coluna são silenciosamente ignoradas.
+  select string_agg(format('%I = excluded.%I', c.column_name, c.column_name), ', ')
     into v_set
-  from jsonb_object_keys(p_row) as key
-  where key <> v_pk;
+  from information_schema.columns c
+  where c.table_schema = 'public'
+    and c.table_name = p_table
+    and c.column_name <> v_pk
+    and c.column_name in (select jsonb_object_keys(p_row));
+
+  -- Detecta se a tabela tem empresa_id direto (guarda de escopo no conflito).
+  select exists(
+    select 1 from information_schema.columns c
+    where c.table_schema = 'public' and c.table_name = p_table
+      and c.column_name = 'empresa_id'
+  ) into v_has_empresa;
+
+  -- SEGURANÇA — guarda cross-tenant (defesa em profundidade, camada banco): em tabelas
+  -- com empresa_id, o UPDATE do ON CONFLICT só acontece se a linha EXISTENTE pertencer
+  -- à mesma empresa do payload (que o app já forçou ao escopo). Se for de outra empresa,
+  -- 0 linhas afetadas → RETURNING vazio → o app trata como takeover bloqueado (403).
+  if v_has_empresa then
+    v_guard := format(
+      ' where public.%I.empresa_id = ($1->>%L)::uuid',
+      p_table, 'empresa_id'
+    );
+  end if;
 
   -- Insere/atualiza usando jsonb_populate_record pra casting correto por coluna.
   execute format(
     'insert into public.%I select * from jsonb_populate_record(null::public.%I, $1) ' ||
-    'on conflict (%I) do update set %s returning to_jsonb(public.%I.*)',
-    p_table, p_table, v_pk, v_set, p_table
+    'on conflict (%I) do update set %s%s returning to_jsonb(public.%I.*)',
+    p_table, p_table, v_pk, v_set, v_guard, p_table
   )
   using p_row
   into v_result;

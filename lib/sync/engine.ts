@@ -29,10 +29,19 @@ export type SyncDb = {
   selectChanges(table: string, empresaId: string, cursor: string, limit: number): Promise<Row[]>;
   /** Busca a linha canônica por PK, já garantindo que pertence à empresa. */
   findCanonical(table: SyncTable, empresaId: string, pk: unknown): Promise<Row | null>;
+  /**
+   * Busca a linha por PK SEM filtro de empresa (checagem global de existência).
+   * Usado pra detectar colisão de PK cross-tenant antes de decidir INSERT.
+   */
+  findCanonicalGlobal(table: SyncTable, pk: unknown): Promise<Row | null>;
   /** Verifica se um id de pai pertence à empresa (validação de filhas no push). */
   parentBelongsToEmpresa(parentTable: string, parentId: unknown, empresaId: string): Promise<boolean>;
-  /** Grava (insert/update) a linha exatamente como passada (sem trigger sobrescrever). */
-  upsertRaw(table: string, row: Row): Promise<Row>;
+  /**
+   * Grava (insert/update) a linha exatamente como passada (sem trigger sobrescrever).
+   * Retorna `null` quando o ON CONFLICT não afetou linha alguma (guarda de empresa no
+   * RPC bloqueou um takeover cross-tenant) — o engine traduz isso em 403.
+   */
+  upsertRaw(table: string, row: Row): Promise<Row | null>;
   /** Liga/desliga o trigger de stamp pra escrever field_updated_at/updated_at mergeados. */
   setSyncReplica(on: boolean): Promise<void>;
 };
@@ -141,12 +150,44 @@ export async function runPush(
           merged.updated_at = maxTimestamp(merged.field_updated_at as Record<string, string>);
           toWrite = merged as Row;
         } else {
+          // SEGURANÇA (defesa em profundidade, camada app): antes de tratar como
+          // INSERT, cheque a existência GLOBAL da PK (sem filtro de empresa). Se a PK
+          // já existe mas NÃO pertence ao escopo do requisitante, é tentativa de
+          // takeover cross-tenant — rejeita com 403 em vez de deixar o ON CONFLICT
+          // sobrescrever a linha da outra empresa.
+          if (pkVal != null) {
+            const global = await db.findCanonicalGlobal(t, pkVal);
+            if (global) {
+              let belongs: boolean;
+              if (hasDirectEmpresaId(t.name)) {
+                belongs = global.empresa_id === empresaId;
+              } else if (t.parent) {
+                // Filha: resolve o pai da linha EXISTENTE e cheque se está na empresa.
+                const existingParentId = global[t.parent.fk];
+                belongs =
+                  existingParentId != null &&
+                  (await db.parentBelongsToEmpresa(t.parent.table, existingParentId, empresaId));
+              } else {
+                belongs = false;
+              }
+              if (!belongs) {
+                throw new PushError(403, `${name}: PK ${String(pkVal)} fora do escopo`);
+              }
+            }
+          }
           // INSERT: respeita os carimbos vindos do hub; deriva updated_at do field_updated_at.
           row.updated_at = maxTimestamp(row.field_updated_at as Record<string, string>);
           toWrite = row;
         }
 
         const saved = await db.upsertRaw(t.name, toWrite);
+        // SEGURANÇA (camada banco): o RPC sync_push_upsert tem guarda
+        // `where empresa_id = <escopo>` no ON CONFLICT pra tabelas com empresa_id.
+        // Se a linha existente for de outra empresa, o UPDATE afeta 0 linhas e o
+        // RETURNING vem vazio (null) — tratamos como takeover bloqueado (403).
+        if (saved == null) {
+          throw new PushError(403, `${name}: PK ${String(row[t.pk])} fora do escopo`);
+        }
         result.push(saved);
       }
 

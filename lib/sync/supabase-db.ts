@@ -87,6 +87,20 @@ export function makeSupabaseSyncDb(supabase: Admin): SyncDb {
       return data as Row;
     },
 
+    async findCanonicalGlobal(table: SyncTable, pk) {
+      // Existência GLOBAL por PK, SEM filtro de empresa (detecção de colisão
+      // cross-tenant). service_role ignora RLS, então enxerga linhas de qualquer
+      // empresa de propósito aqui.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from(table.name)
+        .select('*')
+        .eq(table.pk, pk)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as Row | null;
+    },
+
     async parentBelongsToEmpresa(parentTable, parentId, empresaId) {
       const { data, error } = await supabase.rpc('sync_parent_in_empresa', {
         p_table: parentTable,
@@ -103,7 +117,9 @@ export function makeSupabaseSyncDb(supabase: Admin): SyncDb {
         p_row: row as Json,
       });
       if (error) throw error;
-      return data as Row;
+      // RETURNING vazio (null) = guarda `where empresa_id` no RPC bloqueou um UPDATE
+      // de linha de outra empresa (takeover cross-tenant). O engine traduz em 403.
+      return (data ?? null) as Row | null;
     },
 
     async setSyncReplica() {
