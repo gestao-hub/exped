@@ -46,3 +46,23 @@ export const ingestPedidoSchema = z.object({
 });
 
 export type IngestPedidoInput = z.infer<typeof ingestPedidoSchema>;
+
+/**
+ * Payload do re-sync de NF/pagamento (endpoint /api/ingest/pedido/nf).
+ * documento_erp identifica o pedido já existente; o resto preenche só o que falta.
+ */
+export const ingestNfSchema = z.object({
+  documento_erp: z
+    .string()
+    .min(1)
+    .max(80)
+    .regex(/^[A-Za-z0-9._-]+$/, 'documento_erp com caracteres inválidos'),
+  nf_numero: z.string().max(80).nullable().optional(),
+  nf_chave: z.string().max(80).nullable().optional(),
+  nf_emitida_em: z.string().max(80).nullable().optional(),
+  nf_valor: z.number().nonnegative().nullable().optional(),
+  forma_pagamento: z.string().max(1000).nullable().optional(),
+  parcelas: z.string().max(80).nullable().optional(),
+});
+
+export type IngestNfInput = z.infer<typeof ingestNfSchema>;
