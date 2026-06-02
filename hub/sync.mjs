@@ -533,6 +533,12 @@ export function makePsqlDb(cfg) {
           .filter(([k]) => !AUTH_GENERATED_COLS.has(k))
           .map(([k, v]) => [k, AUTH_TOKEN_COLS.has(k) && v === null ? '' : v]),
       );
+      // GoTrue v2 não aceita NULL nesses campos string. Garante '' mesmo quando a nuvem
+      // NÃO retorna a coluna (ausente do payload) — senão o INSERT a omite e ela fica
+      // NULL (default), e o GoTrue dá 500 "Database error querying schema" em todo login.
+      for (const col of AUTH_TOKEN_COLS) {
+        if (filteredRow[col] == null) filteredRow[col] = '';
+      }
       const json = JSON.stringify(filteredRow).replace(/'/g, "''");
       const cols = Object.keys(filteredRow).map((c) => `"${c.replace(/"/g, '""')}"`);
       const updates = cols

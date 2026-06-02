@@ -106,6 +106,12 @@ Source: "{#Payload}\supabase\migrations\*"; DestDir: "{app}\supabase\migrations"
 Source: "{#Payload}\bin\auth.exe";          DestDir: "{app}\bin";   Flags: ignoreversion
 Source: "{#Payload}\bin\migrations\*";      DestDir: "{app}\bin\migrations"; Flags: recursesubdirs createallsubdirs ignoreversion
 
+; --- NSSM pre-empacotado (robustez) -----------------------------------------
+; nssm.cc e instavel (503/timeout) e derrubava o install zero-toque. Se houver
+; payload\bin\nssm.exe, o instalador o copia e o download-binaries.ps1 pula o NSSM.
+; skipifsourcedoesntexist: se NAO empacotar, o passo e ignorado e o NSSM e baixado.
+Source: "{#Payload}\bin\nssm.exe";          DestDir: "{app}\bin";   Flags: ignoreversion skipifsourcedoesntexist
+
 ; --- Scripts de servico/download/provision (ficam em C:\Exped\hub\win) -------
 Source: "download-binaries.ps1";            DestDir: "{app}\hub\win"; Flags: ignoreversion
 Source: "install-service.ps1";              DestDir: "{app}\hub\win"; Flags: ignoreversion

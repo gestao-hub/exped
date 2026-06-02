@@ -162,27 +162,39 @@ Write-Host "    OK: $nodeExe"
 # NOTA: nssm.cc responde 503 a requisicoes HEAD (anti-bot), mas serve o GET
 # normalmente (validado com `curl -r 0-0` -> HTTP 206). Invoke-WebRequest usa GET,
 # entao o download funciona. Se cair, ha mirrors (ver README, secao troubleshooting).
-$nssmUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
-$nssmZip = Join-Path $tmp "nssm.zip"
-Write-Step "Baixando NSSM $NssmVersion ..."
-Write-Host "    $nssmUrl"
-Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip
-
-Write-Step "Extraindo NSSM (nssm.exe win64) para $InstallDir ..."
-$nssmExtract = Join-Path $tmp "nssm-extract"
-if (Test-Path -LiteralPath $nssmExtract) { Remove-Item -LiteralPath $nssmExtract -Recurse -Force }
-Expand-Archive -LiteralPath $nssmZip -DestinationPath $nssmExtract -Force
-# O zip do NSSM tem layout: nssm-2.24\win64\nssm.exe e nssm-2.24\win32\nssm.exe.
-# Pegamos o win64.
-$nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter 'nssm.exe' |
-    Where-Object { $_.FullName -match '\\win64\\' } |
-    Select-Object -First 1
-if (-not $nssmSrc) {
-    throw "nssm.exe (win64) nao encontrado no zip extraido em $nssmExtract."
-}
-Copy-Item -LiteralPath $nssmSrc.FullName -Destination (Join-Path $InstallDir 'nssm.exe') -Force
 $nssmExe = Join-Path $InstallDir 'nssm.exe'
-Write-Host "    OK: $nssmExe"
+if (Test-Path -LiteralPath $nssmExe) {
+    # Pre-empacotado (o instalador copiou payload\bin\nssm.exe). nssm.cc e instavel
+    # (503/timeout); ter o nssm.exe no payload e o caminho robusto pra producao.
+    Write-Step "NSSM ja presente em $nssmExe (pre-empacotado) - pulando download."
+} else {
+    $nssmUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
+    $nssmZip = Join-Path $tmp "nssm.zip"
+    Write-Step "Baixando NSSM $NssmVersion ..."
+    Write-Host "    $nssmUrl"
+    # nssm.cc cai com frequencia (503/timeout). Tenta 3x antes de desistir.
+    $nssmOk = $false
+    for ($i = 1; $i -le 3 -and -not $nssmOk; $i++) {
+        try { Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -TimeoutSec 30; $nssmOk = $true }
+        catch { Write-Host "    tentativa $i de NSSM falhou: $($_.Exception.Message)"; Start-Sleep -Seconds 3 }
+    }
+    if (-not $nssmOk) {
+        throw "Falha ao baixar NSSM (nssm.cc) apos 3 tentativas. Solucao robusta: pre-empacote o nssm.exe (win64) em payload\bin\nssm.exe — o instalador o copia e este download e pulado. (Ou copie um nssm.exe para $InstallDir e rode de novo.)"
+    }
+    Write-Step "Extraindo NSSM (nssm.exe win64) para $InstallDir ..."
+    $nssmExtract = Join-Path $tmp "nssm-extract"
+    if (Test-Path -LiteralPath $nssmExtract) { Remove-Item -LiteralPath $nssmExtract -Recurse -Force }
+    Expand-Archive -LiteralPath $nssmZip -DestinationPath $nssmExtract -Force
+    # O zip do NSSM tem layout: nssm-2.24\win64\nssm.exe e nssm-2.24\win32\nssm.exe. Pegamos o win64.
+    $nssmSrc = Get-ChildItem -Path $nssmExtract -Recurse -Filter 'nssm.exe' |
+        Where-Object { $_.FullName -match '\\win64\\' } |
+        Select-Object -First 1
+    if (-not $nssmSrc) {
+        throw "nssm.exe (win64) nao encontrado no zip extraido em $nssmExtract."
+    }
+    Copy-Item -LiteralPath $nssmSrc.FullName -Destination $nssmExe -Force
+    Write-Host "    OK: $nssmExe"
+}
 
 # ---------------------------------------------------------------------------
 # 5. GoTrue / auth.exe  (NAO baixado - vem do pacote do hub)
