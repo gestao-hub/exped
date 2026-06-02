@@ -27,7 +27,7 @@
       - PostgreSQL : HTTP 200  (get.enterprisedb.com)
       - PostgREST  : HTTP 200  (github.com/PostgREST/postgrest releases)
       - Node       : HTTP 200  (nodejs.org/dist/v20.18.0/node-v20.18.0-win-x64.zip)
-      - NSSM       : HTTP 206  (nssm.cc bloqueia HEAD com 503, mas serve o GET — ver README)
+      - NSSM       : HTTP 206  (nssm.cc bloqueia HEAD com 503, mas serve o GET - ver README)
     Se uma versao sair do ar, ajuste os parametros de versao abaixo.
 #>
 
@@ -57,7 +57,7 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 Write-Step "Criando diretorio de instalacao: $InstallDir"
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 # Diretorio de trabalho FIXO sob $InstallDir (ex.: C:\Exped\bin\_tmp), evitando o
-# $env:TEMP — que no Win11 pode conter ESPACO (ex.: C:\Users\Joao Silva\AppData\...),
+# $env:TEMP - que no Win11 pode conter ESPACO (ex.: C:\Users\Joao Silva\AppData\...),
 # o que quebra Move-Item/Expand-Archive sem -LiteralPath. Aqui o caminho e controlado.
 $tmp = Join-Path $InstallDir "_tmp"
 if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
@@ -118,7 +118,7 @@ Write-Host "    Copiado para $lsBin (postgrest.exe + postgrest)"
 # 3. Node.js portatil (zip oficial nodejs.org)
 # ---------------------------------------------------------------------------
 # O serviço ExpedHub roda `C:\Exped\bin\node.exe C:\Exped\hub\maestro.mjs`.
-# Usamos a distribuicao portatil (zip) — nao precisa de instalador/MSI.
+# Usamos a distribuicao portatil (zip) - nao precisa de instalador/MSI.
 $nodeDirName = "node-$NodeVersion-win-x64"
 $nodeUrl     = "https://nodejs.org/dist/$NodeVersion/$nodeDirName.zip"
 $nodeZip     = Join-Path $tmp "node.zip"
@@ -157,7 +157,7 @@ if (-not (Test-Path $nodeExe)) {
 Write-Host "    OK: $nodeExe"
 
 # ---------------------------------------------------------------------------
-# 4. NSSM (Non-Sucking Service Manager) — registra o maestro como serviço Windows
+# 4. NSSM (Non-Sucking Service Manager) - registra o maestro como serviço Windows
 # ---------------------------------------------------------------------------
 # NOTA: nssm.cc responde 503 a requisicoes HEAD (anti-bot), mas serve o GET
 # normalmente (validado com `curl -r 0-0` -> HTTP 206). Invoke-WebRequest usa GET,
@@ -185,7 +185,7 @@ $nssmExe = Join-Path $InstallDir 'nssm.exe'
 Write-Host "    OK: $nssmExe"
 
 # ---------------------------------------------------------------------------
-# 5. GoTrue / auth.exe  (NAO baixado — vem do pacote do hub)
+# 5. GoTrue / auth.exe  (NAO baixado - vem do pacote do hub)
 # ---------------------------------------------------------------------------
 Write-Step "GoTrue (auth.exe + migrations\): NAO baixado por este script."
 Write-Host  "    O auth.exe win-x64 e a pasta migrations\ sao cross-compilados a partir"

@@ -38,11 +38,11 @@ if (Test-Path $Nssm) {
         Write-Step "Removendo serviço $ServiceName"
         & $Nssm remove $ServiceName confirm | Out-Null
     } else {
-        Write-Host "    Serviço $ServiceName nao registrado — nada a remover."
+        Write-Host "    Serviço $ServiceName nao registrado - nada a remover."
     }
 } else {
     # Fallback se o nssm.exe ja foi apagado: usa sc.exe.
-    Write-Step "nssm.exe ausente — tentando remover via sc.exe"
+    Write-Step "nssm.exe ausente - tentando remover via sc.exe"
     sc.exe stop   $ServiceName | Out-Null
     Start-Sleep -Seconds 2
     sc.exe delete $ServiceName | Out-Null
@@ -58,7 +58,7 @@ netsh advfirewall firewall delete rule name="ExpedHub" | Out-Null
 # 3. Dados (opcional)
 # ---------------------------------------------------------------------------
 if ($RemoveData) {
-    Write-Step "RemoveData=true — apagando $DataDir"
+    Write-Step "RemoveData=true - apagando $DataDir"
     if (Test-Path $DataDir) { Remove-Item -Recurse -Force $DataDir }
 } else {
     Write-Host "==> Dados PRESERVADOS em $DataDir (use -RemoveData `$true para apagar)." -ForegroundColor Yellow

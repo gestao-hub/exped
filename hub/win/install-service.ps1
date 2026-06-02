@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Registra o maestro do hub Exped como servico Windows (auto-start) via NSSM,
     e abre as portas do app + gateway no firewall para a LAN. Idempotente.
@@ -117,8 +117,16 @@ $gatewayPort = if ($envMap['EXPED_GATEWAY_PORT']) { $envMap['EXPED_GATEWAY_PORT'
 # ---------------------------------------------------------------------------
 # 2. (Re)criar o servico com NSSM - idempotente
 # ---------------------------------------------------------------------------
-$existing = & $Nssm status $ServiceName 2>$null
-if ($LASTEXITCODE -eq 0) {
+# Verificar se o servico ja existe. Usamos 'Continue' aqui porque em PS 5.1
+# o stderr de um processo nativo com exit!=0 gera NativeCommandError que com
+# 'Stop' aborta o script - mesmo com 2>$null (o redirect suprime a saida mas
+# nao o ErrorRecord). Queremos apenas inspecionar o exit code.
+$prevEAP2 = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$null = & $Nssm status $ServiceName 2>$null
+$svcExists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevEAP2
+if ($svcExists) {
     Write-Step "Servico $ServiceName ja existe - parando e removendo (recriar)"
     # Tolerante a erro: 'nssm stop' num servico ja STOPPED/inexistente lanca
     # excecao e abortaria o script ($ErrorActionPreference='Stop' global). Aqui

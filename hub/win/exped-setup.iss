@@ -223,6 +223,9 @@ end;
 
 procedure InitializeWizard;
 begin
+  { Em modo silencioso o código vem via /code= na linha de comando; sem wizard. }
+  if WizardSilent() then Exit;
+
   { Pagina apos a de boas-vindas. }
   CodePage := CreateInputQueryPage(wpWelcome,
     'Código de instalação',
@@ -252,7 +255,7 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = CodePage.ID then
+  if Assigned(CodePage) and (CurPageID = CodePage.ID) then
   begin
     if ManualCheck.Checked then
     begin
@@ -281,29 +284,44 @@ end;
 { --- Scripted constants usadas no [Run] (parametros code:GetCode etc.) ------- }
 function GetCode(Param: String): String;
 begin
-  Result := Trim(CodePage.Values[0]);
+  if WizardSilent() then
+    Result := Trim(ExpandConstant('{param:code}'))
+  else
+    Result := Trim(CodePage.Values[0]);
 end;
 
 function GetManualToken(Param: String): String;
 begin
-  Result := Trim(CodePage.Values[1]);
+  if WizardSilent() then
+    Result := Trim(ExpandConstant('{param:token}'))
+  else
+    Result := Trim(CodePage.Values[1]);
 end;
 
 function GetManualUrl(Param: String): String;
 begin
-  Result := Trim(CodePage.Values[2]);
+  if WizardSilent() then
+    Result := Trim(ExpandConstant('{param:cloudapi}'))
+  else
+    Result := Trim(CodePage.Values[2]);
 end;
 
 { --- Check functions do [Run] (decidem qual provisionamento roda) ----------- }
 function IsCodeMode: Boolean;
 begin
-  { Roda o provisionamento por código se NAO estiver em modo manual. }
-  Result := not ManualCheck.Checked;
+  if WizardSilent() then
+    Result := (Trim(ExpandConstant('{param:code}')) <> '')
+  else
+    { Roda o provisionamento por código se NAO estiver em modo manual. }
+    Result := not ManualCheck.Checked;
 end;
 
 function IsManualMode: Boolean;
 begin
-  Result := ManualCheck.Checked;
+  if WizardSilent() then
+    Result := (Trim(ExpandConstant('{param:token}')) <> '')
+  else
+    Result := ManualCheck.Checked;
 end;
 
 { ============================================================================

@@ -1,8 +1,8 @@
-# provision.ps1 — resgata o código de instalação e escreve os 2 configs.
+# provision.ps1 - resgata o código de instalação e escreve os 2 configs.
 # Uso (modo código):  provision.ps1 -Code "EXPED-7K4P-2QXM" [-CloudApi "https://app-exped.vercel.app"]
 # Uso (modo manual):  provision.ps1 -DeviceToken "hpr_..." -CloudApi "https://app-exped.vercel.app"
 #   No modo manual (suporte) NÃO há resgate: o token e a URL são informados direto.
-# -AgentDir: caminho do ExpedAgent (o Inno passa {localappdata}\ExpedAgent — sob install
+# -AgentDir: caminho do ExpedAgent (o Inno passa {localappdata}\ExpedAgent - sob install
 #   elevado, $env:LOCALAPPDATA apontaria pro perfil do admin, então recebemos explícito).
 param(
   [string]$Code,
@@ -39,7 +39,7 @@ try {
     Log "Resgatando código em $CloudApi/api/provision/redeem ..."
     $resp = Invoke-RestMethod -Method Post -Uri "$CloudApi/api/provision/redeem" `
               -ContentType "application/json" -Body $body -TimeoutSec 30
-    if (-not $resp.deviceToken) { throw "Resgate sem token — código inválido ou expirado." }
+    if (-not $resp.deviceToken) { throw "Resgate sem token - codigo invalido ou expirado." }
     $token = $resp.deviceToken
     $cloud = $resp.cloudApiUrl
     Log "Resgate OK. empresa=$($resp.empresaNome)"
@@ -63,7 +63,7 @@ try {
       [System.IO.File]::WriteAllText($appPath, ($app | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding $false))
       Log "appsettings.json do agente escrito: $appPath"
     } else {
-      Log "AVISO: appsettings.json sem o nó 'Agent' em $appPath — não atualizei o token."
+      Log "AVISO: appsettings.json sem o no 'Agent' em $appPath - nao atualizei o token."
     }
   } else {
     Log "AVISO: appsettings.json não encontrado em $appPath (agente instalado em outro perfil?)."
