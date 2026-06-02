@@ -148,9 +148,9 @@ GROUP BY se.id_produto;";
 
     /// <summary>
     /// #3 NF-e (best-effort): última NF ligada ao pedido. Chamado em try/catch no Worker.
-    /// Cadeia confirmada no raio-x: pedido_venda → pedido_venda_operacao_pdv → operacao_pdv.id_nota_fiscal → nota_fiscal.
-    /// As CHAVES de junção (id_operacao_pdv, id_nota_fiscal) são inferidas — se divergirem, o catch no Worker
-    /// só deixa a NF em branco; o pedido sincroniza normalmente.
+    /// Cadeia: pedido_venda → pedido_venda_operacao_pdv → operacao_pdv.id_nota_fiscal → nota_fiscal.
+    /// VALIDADO no Hiper real Franzoni (2026-06-02): a chave de junção é op.id_operacao = pvo.id_operacao
+    /// (NÃO id_operacao_pdv). Se divergir noutro Hiper, o catch no Worker só deixa a NF em branco.
     /// </summary>
     public async Task<(string? Numero, string? Chave, DateTime? Emitida, decimal? Valor)?> NfDoPedidoAsync(int idPedido, CancellationToken ct)
     {
@@ -158,7 +158,7 @@ GROUP BY se.id_produto;";
         const string sql = @"
 SELECT TOP 1 nf.numero_documento_fiscal, nf.chave_documento_fiscal, nf.data_hora_emissao, nf.valor_total
 FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
-JOIN operacao_pdv op WITH (NOLOCK) ON op.id_operacao_pdv = pvo.id_operacao_pdv
+JOIN operacao_pdv op WITH (NOLOCK) ON op.id_operacao = pvo.id_operacao
 JOIN nota_fiscal nf WITH (NOLOCK) ON nf.id_nota_fiscal = op.id_nota_fiscal
 WHERE pvo.id_pedido_venda = @id
 ORDER BY nf.data_hora_emissao DESC;";
@@ -180,21 +180,20 @@ ORDER BY nf.data_hora_emissao DESC;";
     /// #2 PAGAMENTO ao finalizar (best-effort): forma + parcelas estruturadas do Hiper.
     /// Confirmado no raio-x: negociacao_finalizador(id_finalizador, numero_parcelas, valor_parcelas)
     /// → finalizador_pdv (catálogo: Dinheiro/Cheque/Cartão/Pix/...). SÓ existe em pedido FINALIZADO.
-    /// ⚠️ INFERIDO (validar no Hiper real — degrada gracioso no catch do Worker, cai pro PDF):
-    ///    negociacao.id_operacao_pdv, negociacao.id_negociacao (PK),
-    ///    negociacao_finalizador.id_negociacao (FK), finalizador_pdv.id_finalizador (PK) + .nome.
-    /// Pega o finalizador dominante (maior valor) quando há pagamento dividido.
+    /// VALIDADO no Hiper real Franzoni (2026-06-02): negociacao tem id_pedido_venda DIRETO
+    ///    (n.id_pedido_venda = @id) — não passa por operacao_pdv. Cadeia: negociacao →
+    ///    negociacao_finalizador(id_negociacao, id_finalizador, numero_parcelas, valor_parcelas) → finalizador_pdv.nome.
+    /// Pega o finalizador dominante (maior valor) quando há pagamento dividido. Degrada gracioso no catch.
     /// </summary>
     public async Task<(string? Forma, string? Parcelas)?> PagamentoDoPedidoAsync(int idPedido, CancellationToken ct)
     {
         if (!await PdvOperacaoExisteAsync(ct)) return null; // Hiper antigo: sem essa tabela, sem pagamento estruturado
         const string sql = @"
 SELECT TOP 1 fp.nome, nfin.numero_parcelas
-FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
-JOIN negociacao n WITH (NOLOCK) ON n.id_operacao_pdv = pvo.id_operacao_pdv
+FROM negociacao n WITH (NOLOCK)
 JOIN negociacao_finalizador nfin WITH (NOLOCK) ON nfin.id_negociacao = n.id_negociacao
 JOIN finalizador_pdv fp WITH (NOLOCK) ON fp.id_finalizador = nfin.id_finalizador
-WHERE pvo.id_pedido_venda = @id
+WHERE n.id_pedido_venda = @id
 ORDER BY nfin.valor_parcelas DESC;";
         await using var cn = new SqlConnection(_cs);
         await cn.OpenAsync(ct);
