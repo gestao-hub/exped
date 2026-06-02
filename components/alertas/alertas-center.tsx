@@ -1,66 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Bell, BellRing } from 'lucide-react';
-import { useUser } from '@/components/providers/user-provider';
-import type { Pedido } from '@/lib/types';
-import {
-  carregar,
-  salvar,
-  PREFERENCIAS_PADRAO,
-  type PreferenciasAviso,
-  type SomId,
-} from '@/lib/alertas/preferencias';
+import { type SomId } from '@/lib/alertas/preferencias';
 import { SONS_LABEL } from '@/lib/alertas/som';
-import { useAlertasPedido } from './use-alertas-pedido';
-
-function linkDoPedido(role: string, p: Pedido): string {
-  if (p.id === 'teste') return '#';
-  return role === 'vendedor' ? `/vendas/${p.id}` : `/logistica/${p.id}`;
-}
+import { useAlertas } from './alertas-provider';
 
 export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
-  const { profile } = useUser();
-  const router = useRouter();
+  const { prefs, atualizar, naoVistos, reconhecer, dispararTeste, desbloquear, seguro, pronto } =
+    useAlertas();
   const [aberto, setAberto] = useState(false);
-  const [estado, setEstado] = useState<{
-    prefs: PreferenciasAviso;
-    seguro: boolean;
-    pronto: boolean;
-  }>({
-    prefs: PREFERENCIAS_PADRAO,
-    seguro: true,
-    pronto: false,
-  });
-
-  // Inicialização client-only (localStorage + isSecureContext); o gate !pronto
-  // evita mismatch de hidratação. setState no mount é intencional aqui.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEstado({
-      prefs: carregar(profile.id),
-      seguro: typeof window !== 'undefined' ? window.isSecureContext : true,
-      pronto: true,
-    });
-  }, [profile.id]);
-
-  const { naoVistos, dispararTeste, desbloquear, reconhecer } = useAlertasPedido({
-    userId: profile.id,
-    prefs: estado.prefs,
-    linkDoPedido: (p) => linkDoPedido(profile.role, p),
-    navegar: (href) => {
-      if (href !== '#') router.push(href);
-    },
-  });
-
-  function atualizar(patch: Partial<PreferenciasAviso>) {
-    setEstado((prev) => {
-      const novo = { ...prev.prefs, ...patch };
-      salvar(profile.id, novo);
-      return { ...prev, prefs: novo };
-    });
-  }
 
   /** Liga o master: gesto do usuário → desbloqueia áudio + pede permissão de notificação. */
   async function ativar() {
@@ -80,14 +29,11 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
     dispararTeste();
   }
 
-  if (!estado.pronto) return null;
+  if (!pronto) return null;
 
-  const Icone = estado.prefs.ativado && naoVistos > 0 ? BellRing : Bell;
-
-  const btnClass =
-    tom === 'escuro'
-      ? 'relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-white hover:bg-white/10'
-      : 'relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#667085] hover:bg-[#F2F4F7]';
+  const Icone = prefs.ativado && naoVistos > 0 ? BellRing : Bell;
+  const corBotao =
+    tom === 'escuro' ? 'text-white hover:bg-white/10' : 'text-[#667085] hover:bg-[#F2F4F7]';
 
   return (
     <div className="relative">
@@ -99,7 +45,7 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
             return !v;
           });
         }}
-        className={btnClass}
+        className={`relative inline-flex h-9 w-9 items-center justify-center rounded-lg ${corBotao}`}
         aria-label="Avisos de pedido"
       >
         <Icone className="h-5 w-5" />
@@ -116,7 +62,7 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
           <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-[#EAECF0] bg-white p-3 shadow-lg">
             <p className="mb-2 text-sm font-semibold text-[#1D2939]">Avisos de pedido novo</p>
 
-            {!estado.prefs.ativado ? (
+            {!prefs.ativado ? (
               <button
                 type="button"
                 onClick={ativar}
@@ -128,18 +74,18 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
               <p className="mb-2 text-xs text-[#039855]">✅ Avisos ativos</p>
             )}
 
-            {!estado.seguro && (
+            {!seguro && (
               <p className="mb-2 rounded-md bg-[#FFFAEB] p-2 text-[11px] text-[#B54708]">
                 ⚠️ Para a notificação do Windows, abra o Exped por{' '}
                 <strong>http://localhost:3000</strong> neste PC. Som e piscar funcionam mesmo assim.
               </p>
             )}
 
-            <Linha label="Tocar som" checked={estado.prefs.som} onChange={(v) => atualizar({ som: v })} />
+            <Linha label="Tocar som" checked={prefs.som} onChange={(v) => atualizar({ som: v })} />
             <div className="my-2 flex items-center justify-between">
               <span className="text-sm text-[#344054]">Som</span>
               <select
-                value={estado.prefs.somId}
+                value={prefs.somId}
                 onChange={(e) => atualizar({ somId: e.target.value as SomId })}
                 className="rounded-md border border-[#D0D5DD] px-2 py-1 text-sm"
               >
@@ -152,12 +98,12 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
             </div>
             <Linha
               label="Repetir som até eu ver"
-              checked={estado.prefs.repetir}
+              checked={prefs.repetir}
               onChange={(v) => atualizar({ repetir: v })}
             />
             <Linha
               label="Notificação do Windows"
-              checked={estado.prefs.notificacao}
+              checked={prefs.notificacao}
               onChange={(v) => atualizar({ notificacao: v })}
             />
 
