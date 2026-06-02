@@ -97,12 +97,14 @@ const RX = {
   cep:        /CEP\s*:?\s*(\d{5}-?\d{3})\s*-\s*([^-\n]+?)\s*-\s*([A-Z]{2})\b/i,
   telefone:   /Telefone\s*:?\s*(\(?\d{2}\)?\s*\d{4,5}[-\s]?\d{4})/i,
   total:      /(?:^|\s)Total\s+([\d.]+,\d{2})(?=\s+Forma\s+de\s+Pagamento|\s*$|\s*\n)/i,
+  // Hiper novo: rodapé "Totais  <qtd>  <desconto>  <valor>" — pega o último (valor total).
+  totais:     /Totais\s+[\d.,]+\s+[\d.]+,\d{2}\s+([\d.]+,\d{2})/i,
   // *? (não +?) pra aceitar Forma de Pagamento VAZIA — senão o lazy pula pro
   // próximo anchor e engole "Observação: ..."
   formaPagto: /Forma\s+de\s+Pagamento\s*:?\s*([\s\S]*?)(?=\s*(?:Observa[cç][aã]o\s*:|É\s+vedada|$))/i,
   observacao: /Observa[cç][aã]o\s*:?\s*([\s\S]+?)(?=\s*(?:É\s+vedada|$))/i,
-  // item: cód + descrição + " - " + qtd + unidade + 3 valores monetários
-  item:       /^(\d{3,})\s+(.+?)\s+-\s+(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/gm,
+  // item: cód + descrição + (opcional " - ") + qtd + unidade + 3 valores monetários
+  item:       /^(\d{3,})\s+(.+?)(?:\s+-)?\s+(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/gm,
   refDiversos:/^\s*(Diversos\s*\([^)]*\))\s*$/im,
 };
 
@@ -163,8 +165,11 @@ function parseItens(text: string): ItemParsed[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // grupos: 1=código 2=descrição 3=ref inline (opcional) 4=qtd 5=un 6=preço 7=desc 8=total
+    // O " - " antes da qtd é OPCIONAL: Hiper antigo usa "<desc> - <qtd> UN ...";
+    // Hiper novo cola a qtd direto ("<desc> <qtd> UN ...") e usa " - " só DENTRO do
+    // nome (ex.: "VASSOURA ... - DTOOLS 1 PC ..."). Ancoramos no bloco numérico final.
     const m = line.match(
-      /^(\d{3,})\s+(.+?)\s+-\s+(?:Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\)\s+)?(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/,
+      /^(\d{3,})\s+(.+?)(?:\s+-(?:\s+Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\))?)?\s+(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/,
     );
     if (!m) continue;
 
@@ -292,7 +297,9 @@ export function parseHiperErp(text: string): PedidoParsed {
 
   const itens = parseItens(normalized);
 
-  const valor_total = brNumber(firstMatch(normalized, RX.total)?.[1]);
+  const valor_total =
+    brNumber(firstMatch(normalized, RX.total)?.[1]) ||
+    brNumber(firstMatch(normalized, RX.totais)?.[1]);
 
   const { forma_pagamento, parcelas } = parseFormaPagamento(normalized);
 

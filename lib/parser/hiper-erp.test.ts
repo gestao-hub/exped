@@ -152,3 +152,46 @@ describe('parseHiperErp — fixture pedido L4079 (variações do ERP real)', () 
     expect(r.valor_total).toBe(8.52);
   });
 });
+
+// Hiper NOVO (Franzoni go-live, doc L001000001013). Layout diferente que zerava itens:
+//  - linha de item SEM " - " antes da qtd ("<desc> <qtd> UN ...") — antes exigia o " - "
+//  - " - " aparece DENTRO do nome ("VASSOURA ... - DTOOLS 1 PC ...") — não é separador
+//  - rodapé "Totais <qtd> <desc> <valor>" em vez de "Total <valor>"
+//  - sem linha "Forma de Pagamento:" (vem embutida na Observação)
+const fixtureHiperNovo = readFileSync(
+  resolve(__dirname, '../../tests/fixtures/pedido-L001000001013-hiper-novo.txt'),
+  'utf-8',
+);
+
+describe('parseHiperErp — fixture Hiper novo (L001000001013)', () => {
+  const r = parseHiperErp(fixtureHiperNovo);
+
+  it('extrai os 3 itens mesmo sem " - " antes da qtd', () => {
+    const itens = r.pontos_retirada[0].itens;
+    expect(itens).toHaveLength(3);
+
+    expect(itens[0].codigo).toBe('1301');
+    expect(itens[0].descricao).toBe('TELHA 4MM 2,44X0,50 ETERNIT');
+    expect(itens[0].quantidade).toBe(2);
+    expect(itens[0].unidade).toBe('UN');
+    expect(itens[0].total).toBe(41.8);
+
+    // " - DTOOLS" é parte do NOME, não separador → fica na descrição
+    expect(itens[1].codigo).toBe('23632');
+    expect(itens[1].descricao).toBe('VASSOURA GARI 28CM FIO LONGO - DTOOLS');
+    expect(itens[1].unidade).toBe('PC');
+
+    expect(itens[2].codigo).toBe('4504');
+    expect(itens[2].quantidade).toBe(2);
+    expect(itens[2].total).toBe(85);
+  });
+
+  it('valor total vem do rodapé "Totais"', () => {
+    expect(r.valor_total).toBe(195.9);
+  });
+
+  it('documento e cliente', () => {
+    expect(r.documento_erp).toBe('L001000001013');
+    expect(r.cliente.nome).toBe('CLIENTE EXEMPLO LTDA');
+  });
+});
