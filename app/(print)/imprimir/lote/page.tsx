@@ -14,9 +14,10 @@ export const dynamic = 'force-dynamic';
 export default async function ImprimirLotePage({
   searchParams,
 }: {
-  searchParams: Promise<{ ids?: string }>;
+  searchParams: Promise<{ ids?: string; guia?: string }>;
 }) {
   const sp = await searchParams;
+  const guiaCliente = sp.guia !== '0'; // padrão: com guia do cliente (2 vias)
   const ids = (sp.ids ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -85,7 +86,7 @@ export default async function ImprimirLotePage({
   return (
     <>
       <AutoPrint />
-      <PrintControls />
+      <PrintControls defaultGuia={guiaCliente} />
       {ordered.length === 0 ? (
         <p className="p-8 text-sm">Nenhum pedido encontrado.</p>
       ) : (

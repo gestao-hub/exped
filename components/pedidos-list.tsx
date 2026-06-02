@@ -791,6 +791,7 @@ function BulkActionBar({
   onClear: () => void;
 }) {
   const [pending, start] = useTransition();
+  const [guiaCliente, setGuiaCliente] = useState(true);
   const router = useRouter();
 
   function iniciar() {
@@ -824,7 +825,10 @@ function BulkActionBar({
   }
 
   function imprimir() {
-    window.open(`/imprimir/lote?ids=${ids.join(',')}`, '_blank');
+    window.open(
+      `/imprimir/lote?ids=${ids.join(',')}&guia=${guiaCliente ? 1 : 0}`,
+      '_blank',
+    );
   }
 
   return (
@@ -864,6 +868,15 @@ function BulkActionBar({
             Finalizar
           </Button>
         )}
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer select-none whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={guiaCliente}
+            onChange={(e) => setGuiaCliente(e.target.checked)}
+            className="h-4 w-4 accent-franzoni-navy"
+          />
+          Guia do cliente
+        </label>
         <Button size="sm" variant="outline" onClick={imprimir} disabled={pending}>
           <Printer className="h-3.5 w-3.5 mr-1" />
           Imprimir {ids.length}
