@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace ExpedAgent;
 
 public enum IngestResult { Created, Duplicate, Unauthorized, Invalid, Error }
+public enum NfSyncResult { Ok, NotFound, Error }
 
 public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<IngestClient> log)
 {
@@ -89,4 +90,45 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     }
 
     private IngestResult Log(IngestResult r, string msg) { log.LogWarning("Ingest {Result}: {Msg}", r, msg); return r; }
+    private NfSyncResult Log(NfSyncResult r, string msg) { log.LogWarning("Ingest NF {Result}: {Msg}", r, msg); return r; }
+
+    /// <summary>
+    /// Re-sync de NF/pagamento de um pedido já ingerido. POST JSON em /api/ingest/pedido/nf.
+    /// 200 → Ok (preencheu ou nada a fazer); 404 → NotFound (pedido sumiu/cancelado);
+    /// outros → Error (tenta no próximo poll).
+    /// </summary>
+    public async Task<NfSyncResult> EnviarNfAsync(
+        string documentoErp,
+        (string? Numero, string? Chave, DateTime? Emitida, decimal? Valor) nf,
+        (string? Forma, string? Parcelas)? pg,
+        CancellationToken ct)
+    {
+        var payload = new IngestNfPayload
+        {
+            DocumentoErp = documentoErp,
+            NfNumero = nf.Numero,
+            NfChave = nf.Chave,
+            NfEmitidaEm = nf.Emitida?.ToString("yyyy-MM-dd HH:mm:ss"),
+            NfValor = nf.Valor,
+            FormaPagamento = pg?.Forma,
+            Parcelas = pg?.Parcelas,
+        };
+        var json = JsonSerializer.Serialize(payload);
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/pedido/nf")
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.DeviceToken);
+        try
+        {
+            using var res = await http.SendAsync(req, ct);
+            return res.StatusCode switch
+            {
+                HttpStatusCode.OK => NfSyncResult.Ok,
+                HttpStatusCode.NotFound => NfSyncResult.NotFound,
+                _ => Log(NfSyncResult.Error, $"{(int)res.StatusCode}"),
+            };
+        }
+        catch (Exception ex) { return Log(NfSyncResult.Error, ex.Message); }
+    }
 }

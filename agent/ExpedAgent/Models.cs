@@ -154,3 +154,14 @@ public sealed class IngestPayload
     [JsonPropertyName("observacoes")] public string? Observacoes { get; set; }
     [JsonPropertyName("pontos_retirada")] public List<IngestPonto> PontosRetirada { get; set; } = new();
 }
+
+public sealed class IngestNfPayload
+{
+    [JsonPropertyName("documento_erp")] public string DocumentoErp { get; set; } = "";
+    [JsonPropertyName("nf_numero")] public string? NfNumero { get; set; }
+    [JsonPropertyName("nf_chave")] public string? NfChave { get; set; }
+    [JsonPropertyName("nf_emitida_em")] public string? NfEmitidaEm { get; set; }
+    [JsonPropertyName("nf_valor")] public decimal? NfValor { get; set; }
+    [JsonPropertyName("forma_pagamento")] public string? FormaPagamento { get; set; }
+    [JsonPropertyName("parcelas")] public string? Parcelas { get; set; }
+}
