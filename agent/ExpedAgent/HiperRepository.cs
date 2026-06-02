@@ -6,6 +6,22 @@ namespace ExpedAgent;
 public sealed class HiperRepository(string connectionString)
 {
     private readonly string _cs = connectionString;
+    // As queries de NF/Pagamento dependem da tabela pedido_venda_operacao_pdv, que so
+    // existe em versoes mais novas do Hiper. Cacheamos a existencia pra pular essas
+    // queries em silencio em versoes antigas (ex.: Franzoni) — sem logar "Invalid column".
+    private bool? _pdvOpExists;
+
+    /// <summary>Checa (1x, cacheado) se a tabela pedido_venda_operacao_pdv existe.</summary>
+    private async Task<bool> PdvOperacaoExisteAsync(CancellationToken ct)
+    {
+        if (_pdvOpExists.HasValue) return _pdvOpExists.Value;
+        const string sql = "select 1 from INFORMATION_SCHEMA.TABLES where TABLE_NAME = 'pedido_venda_operacao_pdv'";
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, cn);
+        _pdvOpExists = (await cmd.ExecuteScalarAsync(ct)) != null;
+        return _pdvOpExists.Value;
+    }
 
     public async Task<List<PedidoHeader>> NovosPedidosAsync(int hwm, short[] situacoes, CancellationToken ct)
     {
@@ -138,6 +154,7 @@ GROUP BY se.id_produto;";
     /// </summary>
     public async Task<(string? Numero, string? Chave, DateTime? Emitida, decimal? Valor)?> NfDoPedidoAsync(int idPedido, CancellationToken ct)
     {
+        if (!await PdvOperacaoExisteAsync(ct)) return null; // Hiper antigo: sem essa tabela, sem NF
         const string sql = @"
 SELECT TOP 1 nf.numero_documento_fiscal, nf.chave_documento_fiscal, nf.data_hora_emissao, nf.valor_total
 FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
@@ -170,6 +187,7 @@ ORDER BY nf.data_hora_emissao DESC;";
     /// </summary>
     public async Task<(string? Forma, string? Parcelas)?> PagamentoDoPedidoAsync(int idPedido, CancellationToken ct)
     {
+        if (!await PdvOperacaoExisteAsync(ct)) return null; // Hiper antigo: sem essa tabela, sem pagamento estruturado
         const string sql = @"
 SELECT TOP 1 fp.nome, nfin.numero_parcelas
 FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
