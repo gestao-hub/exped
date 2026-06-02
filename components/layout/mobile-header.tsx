@@ -62,7 +62,7 @@ export function MobileHeader({ empresa }: { empresa?: EmpresaAtual | null }) {
           <BrandLogo empresa={empresa} size={36} />
         </Link>
         <div className="flex items-center gap-1">
-          <AlertasCenter />
+          <AlertasCenter tom="escuro" />
           <Button
             variant="ghost"
             size="icon"

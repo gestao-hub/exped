@@ -20,24 +20,34 @@ function linkDoPedido(role: string, p: Pedido): string {
   return role === 'vendedor' ? `/vendas/${p.id}` : `/logistica/${p.id}`;
 }
 
-export function AlertasCenter() {
+export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
   const { profile } = useUser();
   const router = useRouter();
   const [aberto, setAberto] = useState(false);
-  const [prefs, setPrefs] = useState<PreferenciasAviso>(PREFERENCIAS_PADRAO);
-  const [pronto, setPronto] = useState(false);
-  const [seguro, setSeguro] = useState(true);
+  const [estado, setEstado] = useState<{
+    prefs: PreferenciasAviso;
+    seguro: boolean;
+    pronto: boolean;
+  }>({
+    prefs: PREFERENCIAS_PADRAO,
+    seguro: true,
+    pronto: false,
+  });
 
-  // carrega prefs do localStorage no mount (cliente)
+  // Inicialização client-only (localStorage + isSecureContext); o gate !pronto
+  // evita mismatch de hidratação. setState no mount é intencional aqui.
   useEffect(() => {
-    setPrefs(carregar(profile.id));
-    setSeguro(typeof window !== 'undefined' ? window.isSecureContext : true);
-    setPronto(true);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEstado({
+      prefs: carregar(profile.id),
+      seguro: typeof window !== 'undefined' ? window.isSecureContext : true,
+      pronto: true,
+    });
   }, [profile.id]);
 
-  const { naoVistos, dispararTeste, desbloquear } = useAlertasPedido({
+  const { naoVistos, dispararTeste, desbloquear, reconhecer } = useAlertasPedido({
     userId: profile.id,
-    prefs,
+    prefs: estado.prefs,
     linkDoPedido: (p) => linkDoPedido(profile.role, p),
     navegar: (href) => {
       if (href !== '#') router.push(href);
@@ -45,10 +55,10 @@ export function AlertasCenter() {
   });
 
   function atualizar(patch: Partial<PreferenciasAviso>) {
-    setPrefs((prev) => {
-      const novo = { ...prev, ...patch };
+    setEstado((prev) => {
+      const novo = { ...prev.prefs, ...patch };
       salvar(profile.id, novo);
-      return novo;
+      return { ...prev, prefs: novo };
     });
   }
 
@@ -70,16 +80,26 @@ export function AlertasCenter() {
     dispararTeste();
   }
 
-  if (!pronto) return null;
+  if (!estado.pronto) return null;
 
-  const Icone = prefs.ativado && naoVistos > 0 ? BellRing : Bell;
+  const Icone = estado.prefs.ativado && naoVistos > 0 ? BellRing : Bell;
+
+  const btnClass =
+    tom === 'escuro'
+      ? 'relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-white hover:bg-white/10'
+      : 'relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#667085] hover:bg-[#F2F4F7]';
 
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={() => setAberto((v) => !v)}
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#667085] hover:bg-[#F2F4F7]"
+        onClick={() => {
+          setAberto((v) => {
+            if (!v) reconhecer();
+            return !v;
+          });
+        }}
+        className={btnClass}
         aria-label="Avisos de pedido"
       >
         <Icone className="h-5 w-5" />
@@ -96,7 +116,7 @@ export function AlertasCenter() {
           <div className="absolute right-0 z-50 mt-2 w-72 rounded-xl border border-[#EAECF0] bg-white p-3 shadow-lg">
             <p className="mb-2 text-sm font-semibold text-[#1D2939]">Avisos de pedido novo</p>
 
-            {!prefs.ativado ? (
+            {!estado.prefs.ativado ? (
               <button
                 type="button"
                 onClick={ativar}
@@ -108,18 +128,18 @@ export function AlertasCenter() {
               <p className="mb-2 text-xs text-[#039855]">✅ Avisos ativos</p>
             )}
 
-            {!seguro && (
+            {!estado.seguro && (
               <p className="mb-2 rounded-md bg-[#FFFAEB] p-2 text-[11px] text-[#B54708]">
                 ⚠️ Para a notificação do Windows, abra o Exped por{' '}
                 <strong>http://localhost:3000</strong> neste PC. Som e piscar funcionam mesmo assim.
               </p>
             )}
 
-            <Linha label="Tocar som" checked={prefs.som} onChange={(v) => atualizar({ som: v })} />
+            <Linha label="Tocar som" checked={estado.prefs.som} onChange={(v) => atualizar({ som: v })} />
             <div className="my-2 flex items-center justify-between">
               <span className="text-sm text-[#344054]">Som</span>
               <select
-                value={prefs.somId}
+                value={estado.prefs.somId}
                 onChange={(e) => atualizar({ somId: e.target.value as SomId })}
                 className="rounded-md border border-[#D0D5DD] px-2 py-1 text-sm"
               >
@@ -132,12 +152,12 @@ export function AlertasCenter() {
             </div>
             <Linha
               label="Repetir som até eu ver"
-              checked={prefs.repetir}
+              checked={estado.prefs.repetir}
               onChange={(v) => atualizar({ repetir: v })}
             />
             <Linha
               label="Notificação do Windows"
-              checked={prefs.notificacao}
+              checked={estado.prefs.notificacao}
               onChange={(v) => atualizar({ notificacao: v })}
             />
 
