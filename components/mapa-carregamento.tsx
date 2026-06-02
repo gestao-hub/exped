@@ -58,7 +58,7 @@ export function MapaCarregamento({
     <div
       className={
         isPrint
-          ? 'bg-white text-black print-avoid-break'
+          ? 'bg-white text-black'
           : 'bg-white text-foreground border rounded-lg overflow-hidden'
       }
     >
@@ -286,10 +286,11 @@ export function MapaCarregamento({
   if (isPrint) {
     return (
       <div className="bg-white text-black text-[10pt] mx-auto max-w-[210mm]">
-        {via('1ª via · Loja')}
+        {/* Cada via ocupa metade da folha A4 (altura fixa via .via-bloco no print). */}
+        <div className="via-bloco">{via('1ª via · Loja')}</div>
         {/* 2ª via destacável — controlada pelo check "Guia do cliente" (classe .via-cliente) */}
-        <div className="via-cliente">
-          <div className="relative border-t-2 border-dashed border-black/50 my-2 print-avoid-break">
+        <div className="via-bloco via-cliente">
+          <div className="relative border-t-2 border-dashed border-black/50 mb-2 print-avoid-break">
             <span className="absolute -top-1.5 left-1/2 -translate-x-1/2 bg-white px-2 text-[8px] font-bold uppercase tracking-widest text-black/50">
               Recorte aqui · via do cliente
             </span>

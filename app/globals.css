@@ -301,6 +301,12 @@
   .print-break-before { break-before: page; }
   .print-avoid-break  { break-inside: avoid; }
 
+  /* 2 vias por folha: cada via ocupa metade da A4 (≈13,85cm; deixo folga p/ caber
+   * as duas + cabeçalho/rodapé do navegador). Recorte fica exatamente no meio. */
+  .via-bloco { height: 13.5cm; overflow: hidden; }
+  /* Guia do cliente INATIVA: sai 1 via só, usando a altura natural da folha. */
+  body.sem-via-cliente .via-bloco { height: auto; overflow: visible; }
+
   /* Remove sombras/efeitos */
   * { box-shadow: none !important; text-shadow: none !important; }
 }
