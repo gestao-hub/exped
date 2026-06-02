@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { Printer, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import { PageHeader } from '@/components/layout/page-header';
 import { MapaCarregamento, type PontoComItens } from '@/components/mapa-carregamento';
+import { ImprimirPedidoButton } from '@/components/imprimir-pedido-button';
 import { PedidoComentarios } from '@/components/pedido-comentarios';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
@@ -86,13 +87,7 @@ export default async function HistoricoDetail({
             >
               <ArrowLeft className="h-4 w-4 mr-1" /> Histórico
             </Link>
-            <Link
-              href={`/imprimir/${id}`}
-              target="_blank"
-              className={cn(buttonVariants({ variant: 'outline' }))}
-            >
-              <Printer className="h-4 w-4 mr-1" /> Imprimir
-            </Link>
+            <ImprimirPedidoButton id={id} />
           </>
         }
       />

@@ -14,10 +14,11 @@ export function AutoPrint() {
   return null;
 }
 
-export function PrintControls() {
-  // Guia do cliente = 2ª via destacável. Ativo por padrão (repete a folha).
+export function PrintControls({ defaultGuia = true }: { defaultGuia?: boolean }) {
+  // Guia do cliente = 2ª via destacável. A escolha já vem da tela do pedido
+  // (?guia=1|0); aqui dá pra trocar e reimprimir se precisar.
   // Inativo → adiciona .sem-via-cliente no body e a 2ª via não é impressa.
-  const [guiaCliente, setGuiaCliente] = useState(true);
+  const [guiaCliente, setGuiaCliente] = useState(defaultGuia);
 
   useEffect(() => {
     document.body.classList.toggle('sem-via-cliente', !guiaCliente);

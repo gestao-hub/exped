@@ -8,10 +8,14 @@ export const dynamic = 'force-dynamic';
 
 export default async function ImprimirPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ guia?: string }>;
 }) {
   const { id } = await params;
+  const { guia } = await searchParams;
+  const guiaCliente = guia !== '0'; // padrão: com guia do cliente (2 vias)
   const supabase = await createClient();
 
   const [{ data: pedido }, { data: pontosRaw }, { data: logistica }] = await Promise.all([
@@ -48,7 +52,7 @@ export default async function ImprimirPage({
   return (
     <>
       <AutoPrint />
-      <PrintControls />
+      <PrintControls defaultGuia={guiaCliente} />
       <MapaCarregamento
         pedido={pedido}
         pontos={pontos}
