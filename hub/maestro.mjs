@@ -28,7 +28,7 @@ import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { createWriteStream, existsSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
@@ -87,17 +87,29 @@ export function needsInitdb(pgDataDir) {
 }
 
 /**
- * Resolve o entrypoint do app Next testando, em ordem:
- *   1. <root>/app/server.js              (layout do instalador Windows)
- *   2. <root>/.next/standalone/server.js (layout dev/CI standalone)
- * Devolve o primeiro que existir; senão o layout dev (default histórico), pra
- * mensagem de erro do spawn apontar pro caminho esperado.
+ * Resolve o entrypoint do app testando, em ordem:
+ *   1. <releasesDir>/<pointer>/server.js  (release adotada pelo auto-update)
+ *   2. <root>/app/server.js               (base instalada)
+ *   3. <root>/.next/standalone/server.js  (dev)
  */
-export function resolveAppEntrypoint(root, exists = existsSync) {
+export function resolveAppEntrypoint(root, releasesDir, pointer, exists = existsSync) {
+  if (pointer && releasesDir) {
+    const rel = path.join(releasesDir, pointer, 'server.js');
+    if (exists(rel)) return rel;
+  }
   const installer = path.join(root, 'app', 'server.js');
   const dev = path.join(root, '.next', 'standalone', 'server.js');
   if (exists(installer)) return installer;
   return dev;
+}
+
+/** Lê o ponteiro `current` (versão adotada). Ausente/vazio → null. Síncrono. */
+export function readPointerSync(ptrPath, read = readFileSync) {
+  try {
+    return String(read(ptrPath, 'utf8')).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -188,12 +200,14 @@ function gatewaySupervisor(cfg, logDir) {
 
 function appSupervisor(cfg, logDir, keys) {
   const gatewayUrl = `http://127.0.0.1:${cfg.ports.gateway}`;
+  const releasesDir = cfg.paths.releasesDir || path.join(ROOT, 'releases');
+  const ptrPath = cfg.paths.releasesPtr || path.join(releasesDir, 'current');
   return new Supervisor({
     name: 'app',
     cmd: process.execPath,
-    // Entrypoint resolvido: app/server.js (instalador) ou .next/standalone/server.js
-    // (dev). Remove a necessidade do junction usado como workaround no Windows.
-    args: [resolveAppEntrypoint(ROOT)],
+    // Entrypoint: a release apontada por `current` (auto-update) > app/server.js > dev.
+    // Lido a cada start, então o restart pós-update já sobe a versão nova.
+    args: [resolveAppEntrypoint(ROOT, releasesDir, readPointerSync(ptrPath))],
     cwd: ROOT,
     env: {
       PORT: String(cfg.ports.app),
