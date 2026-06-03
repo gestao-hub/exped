@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { exe } from './platform.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -101,7 +102,7 @@ function loadGotrueEnv(cfg) {
 
 /** roda o GoTrue migrate, apontando para o DB alvo desta bootstrap */
 async function gotrueMigrate(cfg, targetDb) {
-  const authBin = resolveRoot(cfg.paths.authBin);
+  const authBin = exe(resolveRoot(cfg.paths.authBin));
   const gtEnv = loadGotrueEnv(cfg);
   // garante driver e DATABASE_URL coerentes com a cfg/DB alvo (override do env do spike)
   gtEnv.GOTRUE_DB_DRIVER = gtEnv.GOTRUE_DB_DRIVER || 'postgres';
