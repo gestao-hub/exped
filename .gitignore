@@ -58,3 +58,6 @@ hub/win/bin/
 hub/win/payload/
 # saida do compilador Inno Setup
 hub/win/Output/
+
+# artefatos de release gerados localmente (scripts/release-hub.mjs)
+/releases/

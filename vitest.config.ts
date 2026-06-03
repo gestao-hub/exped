@@ -8,7 +8,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: false,
-    include: ['lib/**/*.test.ts', 'tests/**/*.test.ts', 'app/**/*.test.ts', 'hub/**/*.test.mjs'],
+    include: ['lib/**/*.test.ts', 'tests/**/*.test.ts', 'app/**/*.test.ts', 'hub/**/*.test.mjs', 'scripts/**/*.test.mjs'],
   },
   resolve: {
     alias: {
