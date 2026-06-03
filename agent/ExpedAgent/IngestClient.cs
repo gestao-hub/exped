@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 namespace ExpedAgent;
@@ -12,16 +13,25 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     public async Task<IngestResult> EnviarAsync(IngestPayload payload, string? pdfPath, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(payload);
-        using var form = new MultipartFormDataContent();
-        form.Add(new StringContent(json), "dados");
+        HttpContent content;
         if (pdfPath is not null && File.Exists(pdfPath))
         {
+            // Com PDF: multipart (campo "dados" + "file").
+            var form = new MultipartFormDataContent();
+            form.Add(new StringContent(json, Encoding.UTF8, "application/json"), "dados");
             var bytes = await File.ReadAllBytesAsync(pdfPath, ct);
             var pdf = new ByteArrayContent(bytes);
             pdf.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
             form.Add(pdf, "file", Path.GetFileName(pdfPath));
+            content = form;
         }
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/pedido") { Content = form };
+        else
+        {
+            // Sem PDF: JSON direto (o corpo É o objeto de dados). Evita o multipart,
+            // que o req.formData() do Next sob Node 20 rejeitava (boundary/stream do .NET).
+            content = new StringContent(json, Encoding.UTF8, "application/json");
+        }
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/pedido") { Content = content };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.DeviceToken);
         try
         {
@@ -69,9 +79,11 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     public async Task<IngestResult> EnviarOsAsync(IngestOsPayload payload, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(payload);
-        using var form = new MultipartFormDataContent();
-        form.Add(new StringContent(json), "dados");
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/os") { Content = form };
+        // OS nunca tem arquivo no ingest → JSON direto (evita multipart).
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/os")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", cfg.DeviceToken);
         try
         {

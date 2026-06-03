@@ -4,6 +4,7 @@ import { hashToken } from '@/lib/crypto/token';
 import { ingestOsSchema } from '@/lib/validators/ingest-os';
 import { inserirOrdemServico } from '@/lib/os/inserir';
 import { enfileirarNotificacao, type TipoNotificacao } from '@/lib/os/notificacoes';
+import { parseIngestRequest } from '@/lib/ingest/parse-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -26,16 +27,10 @@ export async function POST(req: NextRequest) {
   const empresaId = dispositivo.empresa_id as string;
   await supabase.from('dispositivos').update({ last_seen_at: new Date().toISOString() }).eq('id', dispositivo.id);
 
-  let form: FormData;
-  try { form = await req.formData(); }
-  catch { return NextResponse.json({ error: 'Esperado multipart/form-data' }, { status: 400 }); }
-  const file = form.get('file');
-  const dadosRaw = form.get('dados');
-  if (typeof dadosRaw !== 'string') return NextResponse.json({ error: 'Campo "dados" ausente' }, { status: 400 });
-  let parsedJson: unknown;
-  try { parsedJson = JSON.parse(dadosRaw); }
-  catch { return NextResponse.json({ error: '"dados" não é JSON válido' }, { status: 400 }); }
-  const dados = ingestOsSchema.safeParse(parsedJson);
+  const parsed = await parseIngestRequest(req);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  const file = parsed.file;
+  const dados = ingestOsSchema.safeParse(parsed.dadosJson);
   if (!dados.success) {
     return NextResponse.json({ error: dados.error.issues[0]?.message ?? 'dados inválidos' }, { status: 422 });
   }

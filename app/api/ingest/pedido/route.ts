@@ -6,6 +6,7 @@ import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido'
 import { extrairPagamentoDoPdfText } from '@/lib/parser/extrair-pagamento';
 import { mapFormaPagamento, parseParcelas, isReceberNaEntrega } from '@/lib/parser/forma-pagamento';
 import { inserirPedido } from '@/lib/pedidos/inserir';
+import { parseIngestRequest } from '@/lib/ingest/parse-request';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -46,33 +47,10 @@ export async function POST(req: NextRequest) {
   // 2) Aceita DOIS formatos (compat. entre versões do agente):
   //    - application/json: o corpo É o objeto de dados (agente sem PDF).
   //    - multipart/form-data: campo "dados" (JSON) + "file" (PDF opcional).
-  const contentType = req.headers.get('content-type') ?? '';
-  let dadosJson: unknown;
-  let file: FormDataEntryValue | null = null;
-  if (contentType.includes('application/json')) {
-    try {
-      dadosJson = await req.json();
-    } catch {
-      return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
-    }
-  } else {
-    let form: FormData;
-    try {
-      form = await req.formData();
-    } catch {
-      return NextResponse.json({ error: 'Esperado application/json ou multipart/form-data' }, { status: 400 });
-    }
-    file = form.get('file');
-    const dadosRaw = form.get('dados');
-    if (typeof dadosRaw !== 'string') {
-      return NextResponse.json({ error: 'Campo "dados" (JSON) ausente' }, { status: 400 });
-    }
-    try {
-      dadosJson = JSON.parse(dadosRaw);
-    } catch {
-      return NextResponse.json({ error: '"dados" não é JSON válido' }, { status: 400 });
-    }
-  }
+  const parsed = await parseIngestRequest(req);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
+  const dadosJson = parsed.dadosJson;
+  const file: File | null = parsed.file;
   const dados = ingestPedidoSchema.safeParse(dadosJson);
   if (!dados.success) {
     return NextResponse.json(
