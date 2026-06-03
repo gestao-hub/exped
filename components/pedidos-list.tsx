@@ -17,6 +17,7 @@ import { Search, Plus, Inbox, X, Play, CheckCircle2, Printer, Loader2 } from 'lu
 import { toast } from 'sonner';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { calcularPaginacao, PAGE_SIZE } from '@/lib/pedidos/paginacao';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -122,6 +123,9 @@ export function PedidosList({
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [tick, setTick] = useState(0);
   const [itensParciais, setItensParciais] = useState<Record<string, ParcialItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -150,11 +154,14 @@ export function PedidosList({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
 
+    const pageFrom = (Math.max(1, page) - 1) * PAGE_SIZE;
+    const pageTo = pageFrom + PAGE_SIZE - 1;
     let query = supabase
       .from('pedidos')
-      .select('*')
+      .select('*', { count: 'exact' })
       .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
-      .limit(200);
+      .order('id', { ascending: true })
+      .range(pageFrom, pageTo);
 
     if (status !== 'todos') query = query.eq('status', status);
     if (search.trim()) {
@@ -170,15 +177,22 @@ export function PedidosList({
         .lte('data_entrega', format(range.to,   'yyyy-MM-dd'));
     }
 
-    query.then(({ data, error }) => {
+    query.then(({ data, count, error }) => {
       if (cancel) return;
       if (error) toast.error(error.message);
       setPedidos((data ?? []) as Pedido[]);
+      setTotal(count ?? 0);
       setLoading(false);
     });
 
     return () => { cancel = true; };
-  }, [supabase, status, search, sortBy, sortDir, dateRange, customFrom, customTo]);
+  }, [supabase, status, search, sortBy, sortDir, dateRange, customFrom, customTo, page, tick]);
+
+  // Volta pra página 1 quando muda filtro/busca/ordenação (evita ficar numa página vazia).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [status, search, sortBy, sortDir, dateRange, customFrom, customTo]);
 
   // Busca itens dos pedidos parcialmente entregues (mostra inline na linha)
   useEffect(() => {
@@ -249,20 +263,10 @@ export function PedidosList({
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'pedidos' },
-          (payload) => {
-            if (payload.eventType === 'INSERT') {
-              const novo = payload.new as Pedido;
-              setPedidos((prev) => {
-                if (prev.some((p) => p.id === novo.id)) return prev;
-                return [novo, ...prev];
-              });
-            } else if (payload.eventType === 'UPDATE') {
-              setPedidos((prev) =>
-                prev.map((p) => (p.id === (payload.new as Pedido).id ? (payload.new as Pedido) : p)),
-              );
-            } else if (payload.eventType === 'DELETE') {
-              setPedidos((prev) => prev.filter((p) => p.id !== (payload.old as Pedido).id));
-            }
+          () => {
+            // Com paginação, qualquer mudança → refetch da página atual (o array
+            // local tem só a página corrente; splicear ficaria inconsistente).
+            setTick((t) => t + 1);
           },
         )
         .subscribe();
@@ -650,6 +654,34 @@ export function PedidosList({
             </TableBody>
           </Table>
         </div>
+        {(() => {
+          const { totalPages, hasPrev, hasNext } = calcularPaginacao(page, total);
+          return (
+            <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted-foreground border-t shrink-0">
+              <span>
+                {total} {total === 1 ? 'pedido' : 'pedidos'} · página {Math.min(page, totalPages)} de {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!hasPrev}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-md border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted/60 transition-colors"
+                >
+                  ‹ Anterior
+                </button>
+                <button
+                  type="button"
+                  disabled={!hasNext}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="px-3 py-1.5 rounded-md border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted/60 transition-colors"
+                >
+                  Próxima ›
+                </button>
+              </div>
+            </div>
+          );
+        })()}
       </ContentCard>
 
       {selectable && selected.size > 0 && (
