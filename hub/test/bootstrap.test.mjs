@@ -22,6 +22,18 @@ const cfg = loadConfig({
 
 const PSQL_BASE = ['-p', '54329', '-h', '/tmp/exped-pg', '-U', 'postgres'];
 
+/** Checa (1x) se há um Postgres acessível pros testes de integração. Sem ele, pulamos (CI). */
+async function psqlDisponivel() {
+  try {
+    await execFileAsync('psql', [...PSQL_BASE, '-d', 'postgres', '-c', 'select 1'], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const TEM_PSQL = await psqlDisponivel();
+if (!TEM_PSQL) console.warn('[bootstrap.test] psql indisponível — pulando testes de integração.');
+
 async function psqlPostgres(sql) {
   const { stdout } = await execFileAsync(
     'psql',
@@ -54,7 +66,7 @@ async function tableExists(table) {
   return stdout.trim() === 't';
 }
 
-describe('bootstrap (Node, ordem do spike)', () => {
+describe.skipIf(!TEM_PSQL)('bootstrap (Node, ordem do spike)', () => {
   beforeAll(async () => {
     await dropTestDb();
   }, 60_000);
