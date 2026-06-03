@@ -88,6 +88,7 @@ export function loadConfig(overrides = {}) {
   if (process.env.EXPED_DB_USER) paths.user = process.env.EXPED_DB_USER;
 
   if (process.env.EXPED_MANIFEST_URL) env.manifestUrl = process.env.EXPED_MANIFEST_URL;
+  if (process.env.EXPED_VERSION) env.version = process.env.EXPED_VERSION;
 
   // Sync com a nuvem (sub-projeto 3).
   const cloud = {};

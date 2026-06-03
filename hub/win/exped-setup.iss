@@ -38,7 +38,9 @@
 ; ============================================================================
 
 #define MyAppName "Exped"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
 #define MyAppPublisher "Exped"
 ; Raiz fixa C:\Exped (convencao do hub; maestro.mjs resolve paths a partir dela).
 #define InstallRoot "C:\Exped"

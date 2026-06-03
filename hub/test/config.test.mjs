@@ -100,3 +100,17 @@ describe('config — defaults de release', () => {
     expect(cfg.paths.releasesPtr).toBeTruthy();
   });
 });
+
+describe('config — versão por env', () => {
+  it('EXPED_VERSION sobrescreve cfg.version', () => {
+    const orig = process.env.EXPED_VERSION;
+    process.env.EXPED_VERSION = '1.4.2';
+    try {
+      const cfg = loadConfig({ jwtSecret: 'x'.repeat(40) });
+      expect(cfg.version).toBe('1.4.2');
+    } finally {
+      if (orig === undefined) delete process.env.EXPED_VERSION;
+      else process.env.EXPED_VERSION = orig;
+    }
+  });
+});

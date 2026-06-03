@@ -101,6 +101,7 @@ if (Test-Path $ConfigPath) {
     }
     if ($cfg.jwtSecret)   { $envMap['EXPED_JWT_SECRET']  = "$($cfg.jwtSecret)" }
     if ($cfg.manifestUrl) { $envMap['EXPED_MANIFEST_URL'] = "$($cfg.manifestUrl)" }
+    if ($cfg.version)     { $envMap['EXPED_VERSION']      = "$($cfg.version)" }
     if ($cfg.cloud) {
         if ($cfg.cloud.apiBase)       { $envMap['EXPED_CLOUD_API']          = "$($cfg.cloud.apiBase)" }
         if ($cfg.cloud.deviceToken)   { $envMap['EXPED_DEVICE_TOKEN']       = "$($cfg.cloud.deviceToken)" }

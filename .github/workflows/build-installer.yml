@@ -1,0 +1,75 @@
+name: build-installer
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Versao
+        id: ver
+        shell: bash
+        run: echo "ver=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Build app (standalone)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish agente (win-x64, self-contained)
+        run: dotnet publish agent/ExpedAgent -c Release -o agent/installer/publish
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Cache auth.exe (GoTrue)
+        id: cache-auth
+        uses: actions/cache@v4
+        with:
+          path: gotrue-build
+          key: authexe-v2.189.0-${{ hashFiles('hub/win/gotrue-windows.patch') }}
+      - name: Build GoTrue auth.exe
+        if: steps.cache-auth.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -e
+          git clone --depth 1 --branch v2.189.0 https://github.com/supabase/auth /tmp/auth
+          cd /tmp/auth
+          git apply --ignore-whitespace "$GITHUB_WORKSPACE/hub/win/gotrue-windows.patch"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X github.com/supabase/auth/internal/utilities.Version=v2.189.0" -o auth.exe .
+          mkdir -p "$GITHUB_WORKSPACE/gotrue-build"
+          cp auth.exe "$GITHUB_WORKSPACE/gotrue-build/auth.exe"
+          cp -r migrations "$GITHUB_WORKSPACE/gotrue-build/migrations"
+
+      - name: Montar payload
+        shell: bash
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+        run: node scripts/montar-payload.mjs --auth gotrue-build/auth.exe --auth-migrations gotrue-build/migrations --version "$VER"
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer (ISCC)
+        shell: cmd
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-setup.iss'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ExpedSetup-${{ steps.ver.outputs.ver }}
+          path: hub/win/Output/ExpedSetup.exe
+          if-no-files-found: error
