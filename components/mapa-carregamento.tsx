@@ -52,6 +52,13 @@ export function MapaCarregamento({
       ? Number(logistica.peso_liquido_total)
       : allItens.reduce((s: number, i: PedidoItem) => s + (Number(i.peso_liquido) || 0), 0);
 
+  // valor_total vem do Hiper como SOMA DOS ITENS (sem frete); valor_frete é separado.
+  // O total que o cliente paga é itens + frete — exibido como "Total" em destaque.
+  const subtotalItens = Number(pedido.valor_total) || 0;
+  const valorFrete = Number(pedido.valor_frete) || 0;
+  const totalComFrete = subtotalItens + valorFrete;
+  const temFrete = valorFrete > 0;
+
   // Corpo do documento como função reutilizável: na impressão geramos 2 vias
   // idênticas na mesma folha (Loja em cima, Cliente embaixo, recorte no meio).
   const via = (viaLabel: string | null) => (
@@ -233,7 +240,8 @@ export function MapaCarregamento({
         <Grid cols={3}>
           <KV label="Peso Bruto Total" value={pesoBruto > 0 ? `${pesoBruto.toFixed(2)} kg` : '—'} />
           <KV label="Peso Líquido Total" value={pesoLiquido > 0 ? `${pesoLiquido.toFixed(2)} kg` : '—'} />
-          <KV label="Frete" value={Number(pedido.valor_frete) > 0 ? fmtMoney(Number(pedido.valor_frete)) : '—'} />
+          {temFrete && <KV label="Subtotal (itens)" value={fmtMoney(subtotalItens)} />}
+          <KV label="Frete" value={temFrete ? fmtMoney(valorFrete) : '—'} />
           {pedido.nf_numero && (
             <KV
               label="Nota Fiscal"
@@ -242,8 +250,8 @@ export function MapaCarregamento({
             />
           )}
           <KV
-            label="Valor Total"
-            value={fmtMoney(Number(pedido.valor_total))}
+            label={temFrete ? 'Total (com frete)' : 'Valor Total'}
+            value={fmtMoney(totalComFrete)}
             className="[&_.kv-value]:text-lg [&_.kv-value]:font-bold [&_.kv-value]:text-franzoni-navy"
           />
         </Grid>
