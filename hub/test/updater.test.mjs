@@ -159,3 +159,55 @@ describe('updater.checkAndUpdate', () => {
     expect(restarts).toBe(2);
   });
 });
+
+describe('updater.checkAndUpdate migrate', () => {
+  const baseDeps = {
+    fetchManifest: async () => ({ versao: '1.1.0', url: 'http://x/a.zip', sha256: 'ok' }),
+    download: async () => {},
+    verifySha: async () => 'ok',
+    extract: async () => {},
+  };
+  it('chama migrate(releaseDir) depois de extrair e antes de restart; sucesso', async () => {
+    const order = [];
+    let pointer = '1.0.0';
+    const res = await checkAndUpdate(
+      { manifestUrl: 'http://x/m.json', paths: { releasesDir: '/r' } },
+      {
+        getCurrentVersion: () => '1.0.0',
+        migrate: async (dir) => { order.push(`migrate:${dir}`); },
+        restart: async () => { order.push('restart'); },
+        health: async () => {},
+        logger: { info() {}, error() {} },
+      },
+      {
+        ...baseDeps,
+        extract: async () => { order.push('extract'); },
+        setPointer: async (v) => { pointer = v; },
+        getPointer: async () => pointer,
+      },
+    );
+    expect(res).toEqual({ updated: true, versao: '1.1.0' });
+    const iMig = order.findIndex((s) => s.startsWith('migrate:'));
+    const iRes = order.indexOf('restart');
+    expect(iMig).toBeGreaterThan(order.indexOf('extract'));
+    expect(iMig).toBeLessThan(iRes);
+    expect(order[iMig]).toBe('migrate:/r/1.1.0');
+  });
+  it('rollback no health-fail NÃO chama migrate de novo', async () => {
+    let migrates = 0;
+    let pointer = '1.0.0';
+    const res = await checkAndUpdate(
+      { manifestUrl: 'http://x/m.json', paths: { releasesDir: '/r' } },
+      {
+        getCurrentVersion: () => '1.0.0',
+        migrate: async () => { migrates++; },
+        restart: async () => {},
+        health: async () => { throw new Error('health falhou'); },
+        logger: { info() {}, error() {} },
+      },
+      { ...baseDeps, setPointer: async (v) => { pointer = v; }, getPointer: async () => pointer },
+    );
+    expect(res).toEqual({ updated: false, rolledBack: true });
+    expect(migrates).toBe(1); // só na ida, não no rollback
+  });
+});

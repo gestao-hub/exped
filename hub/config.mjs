@@ -24,7 +24,10 @@ const DEFAULTS = {
     migrationsDir: 'supabase/migrations',
     sqlDir: 'scripts/local-stack',
     authBin: 'scripts/local-stack/bin/auth',
+    releasesDir: 'releases',
+    releasesPtr: 'releases/current',
   },
+  version: '0.0.0', // versão base instalada; o instalador carimba a real (de package.json) no config.json
   manifestUrl: null,
   // Sync com a nuvem (sub-projeto 3). Se apiBase E deviceToken presentes, o
   // maestro liga o cliente de sync; ausentes => modo ilha (hub roda sem sync,

@@ -120,9 +120,8 @@ async function gotrueMigrate(cfg, targetDb) {
   });
 }
 
-/** lista as migrations do app em ordem alfabética (= cronológica) */
-function listMigrations(cfg) {
-  const dir = resolveRoot(cfg.paths.migrationsDir);
+/** lista as migrations (.sql) de um diretório, em ordem alfabética (= cronológica) */
+export function listMigrations(dir) {
   return readdirSync(dir)
     .filter((f) => f.endsWith('.sql'))
     .sort()
@@ -153,11 +152,14 @@ async function recordMigration(cfg, targetDb, name) {
   );
 }
 
-/** aplica as migrations do app ainda não registradas e registra cada uma */
-async function applyPendingMigrations(cfg, targetDb) {
+/**
+ * Aplica as migrations do app ainda não registradas (em `_hub_migrations`) e registra cada uma.
+ * `migrationsDir` default = o dir do install (cfg.paths.migrationsDir); o auto-update passa o dir da release.
+ */
+export async function applyPendingMigrations(cfg, targetDb, migrationsDir = resolveRoot(cfg.paths.migrationsDir)) {
   await ensureHubMigrationsTable(cfg, targetDb);
   const done = await appliedMigrations(cfg, targetDb);
-  for (const m of listMigrations(cfg)) {
+  for (const m of listMigrations(migrationsDir)) {
     if (done.has(m.name)) continue;
     await psqlFile(cfg, m.file, { dbOverride: targetDb });
     await recordMigration(cfg, targetDb, m.name);

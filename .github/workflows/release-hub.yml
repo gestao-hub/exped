@@ -1,0 +1,30 @@
+name: release-hub
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Guard tag == package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          test "$TAG" = "$PKG" || { echo "tag $TAG != package.json $PKG"; exit 1; }
+      - run: npm run typecheck
+      - run: npm run test
+      - name: Build app (standalone)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      - name: Publish release
+        run: node scripts/release-hub.mjs
+        env:
+          SR: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}

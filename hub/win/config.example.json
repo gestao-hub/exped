@@ -22,6 +22,6 @@
   "_comment_jwtSecret": "PLACEHOLDER. O instalador gera um segredo aleatorio (>=32 chars) e grava o config.json real com ele. As chaves anon/service_role do app derivam deste segredo (HS256) em runtime.",
   "jwtSecret": "TROCAR-no-install-por-segredo-aleatorio-min-32-chars",
 
-  "_comment_manifestUrl": "URL do manifesto de auto-update { versao, url, sha256 }. null desliga o auto-update. Ex.: https://releases.exped.example/hub/manifest.json",
-  "manifestUrl": null
+  "_comment_manifestUrl": "URL do manifesto de auto-update { versao, url, sha256 } no bucket publico hub-releases. null desliga. O hub baixa, valida sha256, aplica migrations aditivas e reinicia o app (com rollback).",
+  "manifestUrl": "https://louaguxcohfeicxxqggw.supabase.co/storage/v1/object/public/hub-releases/manifest.json"
 }

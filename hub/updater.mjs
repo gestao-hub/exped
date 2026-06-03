@@ -129,11 +129,12 @@ function makePointerIO(ptrPath) {
 
 /**
  * Verifica o manifesto e, se houver versão mais nova, baixa/valida/extrai,
- * troca o ponteiro `current`, reinicia e roda health. Se o health falhar,
- * reverte o ponteiro e reinicia (rollback).
+ * aplica migrations da release (aditivas/idempotentes), troca o ponteiro
+ * `current`, reinicia e roda health. Se o health falhar, reverte o ponteiro
+ * e reinicia (rollback) — sem chamar migrate novamente.
  *
  * @param {object} cfg                 config do hub (usa manifestUrl + paths.releasesPtr/releasesDir)
- * @param {object} cb                  { getCurrentVersion, restart, health, logger }
+ * @param {object} cb                  { getCurrentVersion, restart, health, logger, migrate?(releaseDir) }
  * @param {object} [deps]              I/O injetável (defaults reais)
  */
 export async function checkAndUpdate(cfg, cb, deps = {}) {
@@ -184,9 +185,11 @@ export async function checkAndUpdate(cfg, cb, deps = {}) {
     return { updated: false, reason: 'sha mismatch' };
   }
 
-  // (5) extrai + troca ponteiro
+  // (5) extrai + (migrate aditivo) + troca ponteiro + restart
   const previous = await getPointer();
-  await extract(zipPath, path.join(releasesDir, versao));
+  const releaseDir = path.join(releasesDir, versao);
+  await extract(zipPath, releaseDir);
+  if (cb.migrate) await cb.migrate(releaseDir); // migrations da release (aditivas, idempotentes)
   await setPointer(versao);
   await restart();
 
