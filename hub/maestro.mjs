@@ -112,6 +112,11 @@ export function readPointerSync(ptrPath, read = readFileSync) {
   }
 }
 
+/** Versão atual do app: ponteiro adotado > cfg.version baked no install > 0.0.0. */
+export function currentAppVersion(pointer, cfgVersion) {
+  return pointer || cfgVersion || '0.0.0';
+}
+
 // --------------------------------------------------------------------------
 // Construtores das peças (Supervisors). Funções pequenas, uma por serviço.
 // --------------------------------------------------------------------------
@@ -374,9 +379,11 @@ export async function startMaestro(cfg, opts = {}) {
     const health = async () => {
       await waitForHttp(`http://127.0.0.1:${cfg.ports.app}/login`, 60000);
     };
+    const releasesDir = cfg.paths.releasesDir || path.join(ROOT, 'releases');
+    const ptrPath = cfg.paths.releasesPtr || path.join(releasesDir, 'current');
     updateTimer = setInterval(() => {
       checkAndUpdate(cfg, {
-        getCurrentVersion: () => cfg.version || '0.0.0',
+        getCurrentVersion: () => currentAppVersion(readPointerSync(ptrPath), cfg.version),
         restart,
         health,
         logger,

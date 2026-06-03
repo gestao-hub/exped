@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { needsInitdb, resolveAppEntrypoint, readPointerSync } from '../maestro.mjs';
+import { needsInitdb, resolveAppEntrypoint, readPointerSync, currentAppVersion } from '../maestro.mjs';
 
 describe('needsInitdb', () => {
   const dirs = [];
@@ -82,5 +82,13 @@ describe('readPointerSync', () => {
     expect(readPointerSync('/x', () => '  1.2.0\n')).toBe('1.2.0');
     expect(readPointerSync('/x', () => { throw new Error('enoent'); })).toBe(null);
     expect(readPointerSync('/x', () => '   ')).toBe(null);
+  });
+});
+
+describe('currentAppVersion', () => {
+  it('ponteiro tem precedência; senão cfg.version; senão 0.0.0', () => {
+    expect(currentAppVersion('1.3.0', '1.0.0')).toBe('1.3.0');
+    expect(currentAppVersion(null, '1.0.0')).toBe('1.0.0');
+    expect(currentAppVersion(null, undefined)).toBe('0.0.0');
   });
 });

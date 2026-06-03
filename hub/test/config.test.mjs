@@ -91,3 +91,12 @@ describe('config.loadConfig — pgData vs pgHost (Bug 2 portabilidade Windows)',
     expect(cfg.paths.pgHost).toBe('/over/host');
   });
 });
+
+describe('config — defaults de release', () => {
+  it('tem version, releasesDir e releasesPtr', () => {
+    const cfg = loadConfig({ jwtSecret: 'x'.repeat(40) });
+    expect(typeof cfg.version).toBe('string');
+    expect(cfg.paths.releasesDir).toBeTruthy();
+    expect(cfg.paths.releasesPtr).toBeTruthy();
+  });
+});
