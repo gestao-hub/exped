@@ -54,7 +54,7 @@ function main() {
     const de = path.join(ROOT, c.de);
     const para = path.join(PAYLOAD, c.para);
     if (c.tipo === 'dir-opcional' && !existsSync(de)) continue;
-    if (c.tipo === 'dir') {
+    if (c.tipo === 'dir' || c.tipo === 'dir-opcional') {
       mkdirSync(path.dirname(para), { recursive: true });
       cpSync(de, para, { recursive: true });
     } else if (c.tipo === 'mjs') {
