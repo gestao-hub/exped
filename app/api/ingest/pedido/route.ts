@@ -145,10 +145,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 7) Insere como rascunho (empresa explícita — service_role ignora RLS/DEFAULT)
+  // 7) Insere já como 'pendente' → cai direto na Fila de Logística (o pedido nasce
+  //    no Hiper; não há etapa de rascunho/revisão no Exped). empresa explícita (service_role).
   const r = await inserirPedido(supabase, valid.data, {
     vendedorId,
-    status: 'rascunho',
+    status: 'pendente',
     empresaId,
   });
   if ('error' in r) return NextResponse.json(r, { status: 500 });
