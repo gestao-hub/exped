@@ -24,8 +24,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  // Avaliado por-request (runtime), não no módulo carregado, para que o resolvedor
-  // leia window.__SUPABASE_URL__ / variáveis de env injetadas em runtime.
+  // Avaliado por-request (runtime do servidor), não na carga do módulo, para que o
+  // resolvedor leia SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL no momento da chamada
+  // (Turbopack não assa NEXT_PUBLIC_* nos chunks). O resultado é injetado em
+  // window.__SUPABASE_* para o cliente do browser (lib/supabase/client.ts).
   const supabaseConfig = {
     url: supabaseUrl(),
     anonKey: supabaseAnonKey(),
