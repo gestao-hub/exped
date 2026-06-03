@@ -3,7 +3,8 @@ import type { Database } from '@/lib/types/database';
 
 /**
  * Cliente Supabase para uso em Client Components e código que roda no browser.
- * Lê NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY.
+ * Resolve a URL/chave de window.__SUPABASE_* (injetado em runtime pelo layout) e,
+ * como fallback, de NEXT_PUBLIC_SUPABASE_URL/ANON_KEY.
  */
 export function createClient() {
   // window.__SUPABASE_* é injetado pelo layout a partir do runtime do servidor (gateway local /

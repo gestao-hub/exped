@@ -218,6 +218,8 @@ function appSupervisor(cfg, logDir, keys) {
       PORT: String(cfg.ports.app),
       HOSTNAME: '127.0.0.1',
       NODE_ENV: 'production',
+      // SUPABASE_* (não-públicas) são lidas pelo server em runtime (não assadas no build);
+      // NEXT_PUBLIC_* ficam como fallback do cliente do browser. Mesmos valores de propósito.
       SUPABASE_URL: gatewayUrl,
       SUPABASE_ANON_KEY: keys.anon,
       SUPABASE_SERVICE_ROLE_KEY: keys.service,
