@@ -178,9 +178,9 @@ function gotrueSupervisor(cfg, logDir) {
       GOTRUE_JWT_ADMIN_ROLES: 'service_role',
       GOTRUE_JWT_AUD: 'authenticated',
       GOTRUE_SITE_URL: `http://127.0.0.1:${cfg.ports.app}`,
-      // Hub usa login por senha (sem magic link/redirect externo). Allow-list aberta evita
-      // rejeição de redirect quando o acesso vem da origem da LAN (https://<ip>) via porteiro.
-      GOTRUE_URI_ALLOW_LIST: '*',
+      // NÃO setamos GOTRUE_URI_ALLOW_LIST: o hub usa login por SENHA (sem magic link/OAuth/
+      // recovery → sem redirect_to), então a allow-list não é usada. Um '*' seria open-redirect
+      // à toa. Se algum fluxo com redirect surgir, restringir à origem exata do porteiro.
       GOTRUE_DISABLE_SIGNUP: 'false',
       GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true',
       GOTRUE_MAILER_AUTOCONFIRM: 'true',
