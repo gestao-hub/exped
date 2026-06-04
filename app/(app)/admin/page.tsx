@@ -28,8 +28,8 @@ export default async function AdminDashboard() {
     { data: ultimos30 },
     { data: finalizados },
     { data: todosPedidos },
-    // Tempo médio (status_change pra finalizado)
-    { data: eventosFinalizado },
+    // Tempo médio pendente→finalizado (agregado no banco)
+    { data: tempoMedioRaw },
   ] = await Promise.all([
     supabase.from('pedidos').select('id', { count: 'exact', head: true }),
     supabase.from('pedidos').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
@@ -60,12 +60,8 @@ export default async function AdminDashboard() {
     // Top bairros (todos) — agregado no banco
     supabase.rpc('admin_top_bairros', { p_limit: 10 }),
 
-    // Eventos status_change pra finalizado
-    supabase
-      .from('pedido_eventos')
-      .select('pedido_id, created_at, payload')
-      .eq('tipo', 'status_change')
-      .limit(5000),
+    // Tempo médio pendente→finalizado (RPC agregada no banco)
+    supabase.rpc('admin_tempo_medio_horas'),
   ]);
 
   // ---------- Cálculos ----------
@@ -94,29 +90,8 @@ export default async function AdminDashboard() {
     pedidos: Number(b.pedidos ?? 0),
   }));
 
-  // 4. Tempo médio "pendente → finalizado" (em horas)
-  // Pega eventos com payload.to='finalizado' e os created_at do pedido
-  type EvFin = { pedido_id: string; created_at: string; payload: { to?: string } | null };
-  const finalizedEvents = ((eventosFinalizado ?? []) as EvFin[]).filter(
-    (e) => e.payload?.to === 'finalizado',
-  );
-  let tempoMedioHoras: number | null = null;
-  if (finalizedEvents.length > 0) {
-    const pedidoIds = finalizedEvents.map((e) => e.pedido_id);
-    const { data: criados } = await supabase
-      .from('pedidos')
-      .select('id, created_at')
-      .in('id', pedidoIds);
-    const createdMap = new Map((criados ?? []).map((c) => [c.id as string, c.created_at as string]));
-    const horas: number[] = [];
-    for (const e of finalizedEvents) {
-      const cs = createdMap.get(e.pedido_id);
-      if (!cs) continue;
-      const diffMs = new Date(e.created_at).getTime() - new Date(cs).getTime();
-      if (diffMs > 0) horas.push(diffMs / 3600_000);
-    }
-    if (horas.length) tempoMedioHoras = horas.reduce((a, b) => a + b, 0) / horas.length;
-  }
+  // 4. Tempo médio "pendente → finalizado" (em horas) — agregado no banco (RPC).
+  const tempoMedioHoras = tempoMedioRaw == null ? null : Number(tempoMedioRaw);
 
   // ---------- Stats e shortcuts ----------
   const stats = [
