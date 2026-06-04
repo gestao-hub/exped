@@ -166,12 +166,14 @@ $envMap.GetEnumerator() | ForEach-Object {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Firewall - liberar app + gateway pra LAN (inbound TCP)
+# 3. Firewall - liberar o porteiro (443) + app/gateway pra LAN (inbound TCP)
 # ---------------------------------------------------------------------------
+# O porteiro (frontdoor) na 443 e a unica peca que escuta em 0.0.0.0; as 5 maquinas
+# acessam por ele. app/gateway ficam na regra por retrocompat (bind 127.0.0.1 ja barra).
 # Idempotente: remove uma regra "ExpedHub" antiga (se houver) e recria.
-Write-Step "Configurando firewall (inbound TCP $appPort,$gatewayPort)"
+Write-Step "Configurando firewall (inbound TCP 443,$appPort,$gatewayPort)"
 netsh advfirewall firewall delete rule name="ExpedHub" | Out-Null
-netsh advfirewall firewall add rule name="ExpedHub" dir=in action=allow protocol=TCP localport="$appPort,$gatewayPort" | Out-Null
+netsh advfirewall firewall add rule name="ExpedHub" dir=in action=allow protocol=TCP localport="443,$appPort,$gatewayPort" | Out-Null
 
 # ---------------------------------------------------------------------------
 # 4. Iniciar o servico
