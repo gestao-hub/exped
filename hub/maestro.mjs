@@ -218,6 +218,9 @@ function appSupervisor(cfg, logDir, keys) {
       PORT: String(cfg.ports.app),
       HOSTNAME: '127.0.0.1',
       NODE_ENV: 'production',
+      // Marca explícita de que o app roda no hub (gestão de identidade fica read-only;
+      // a detecção por URL localhost já cobre, isto é robustez/override).
+      EXPED_HUB: '1',
       // SUPABASE_* (não-públicas) são lidas pelo server em runtime (não assadas no build);
       // NEXT_PUBLIC_* ficam como fallback do cliente do browser. Mesmos valores de propósito.
       SUPABASE_URL: gatewayUrl,
