@@ -50,6 +50,36 @@ describe('startFrontdoor (proxy)', () => {
     fd.close(); app.close(); gw.close(); ev.close();
   });
 
+  it('SSE: faz streaming sem buffer E propaga a desconexão do cliente ao upstream', async () => {
+    let upstreamReqClosed = false;
+    const sse = http
+      .createServer((req, res) => {
+        req.on('close', () => { upstreamReqClosed = true; });
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        res.write(': open\n\n');
+        const iv = setInterval(() => { try { res.write('event: changed\ndata: x\n\n'); } catch { /* fechou */ } }, 30);
+        req.on('close', () => clearInterval(iv));
+      })
+      .listen(0);
+    const app = upstream('APP');
+    const ports = { app: app.address().port, gateway: 1, events: sse.address().port };
+    const fd = startFrontdoor({ port: 0, ports, certDir: '' });
+    await new Promise((r) => fd.on('listening', r));
+    const port = fd.address().port;
+
+    const chunks = [];
+    const req = http.get({ host: '127.0.0.1', port, path: '/avisos?empresa=E1' }, (r) => {
+      r.on('data', (d) => chunks.push(d.toString()));
+    });
+    await new Promise((r) => setTimeout(r, 160)); // chega vários chunks (não bufferizado)
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    req.destroy(); // cliente desconecta
+    await new Promise((r) => setTimeout(r, 160));
+    expect(upstreamReqClosed).toBe(true); // cleanup propagado ao upstream (sem fantasma)
+
+    fd.close(); sse.close(); app.close();
+  });
+
   it('com cert no certDir → termina TLS (https) e proxia', async () => {
     const app = upstream('APP');
     const ports = { app: app.address().port, gateway: 1, events: 1 };

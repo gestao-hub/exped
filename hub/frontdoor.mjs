@@ -12,6 +12,7 @@
 
 import http from 'node:http';
 import https from 'node:https';
+import { createSecureContext as tlsCreateSecureContext } from 'node:tls';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -43,34 +44,66 @@ function makeHandler(ports) {
         // Repassa status+headers crus e faz pipe (inclui SSE: stream aberto, sem buffer).
         res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
         proxyRes.pipe(res);
+        proxyRes.on('error', () => res.destroy());
       },
     );
     proxyReq.on('error', (err) => {
       if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: `frontdoor: ${target.name} indisponivel: ${err.message}` }));
     });
+    // CRÍTICO p/ SSE: se o cliente (browser) desconecta — fecha aba, recarrega, rede cai —
+    // derruba a conexão upstream também. Sem isto, o socket frontdoor→events fica aberto pra
+    // sempre, o events nunca remove o cliente-fantasma e segue escrevendo/heartbeat num morto.
+    res.on('close', () => proxyReq.destroy());
     req.pipe(proxyReq);
   };
 }
 
-/** cert: lê server.key/server.crt do certDir. Ausente => null (roda HTTP, Fase A). */
+/**
+ * cert: lê server.key/server.crt do certDir. Ausente OU inválido/corrompido => null
+ * (roda HTTP). Half-write do mkcert / disco cheio / antivírus não pode brickar o porteiro.
+ */
 function loadCert(certDir) {
   if (!certDir) return null;
   const key = path.join(certDir, 'server.key');
   const crt = path.join(certDir, 'server.crt');
-  if (existsSync(key) && existsSync(crt)) return { key: readFileSync(key), cert: readFileSync(crt) };
-  return null;
+  if (!existsSync(key) || !existsSync(crt)) return null;
+  try {
+    const tls = { key: readFileSync(key), cert: readFileSync(crt) };
+    // valida cedo: createSecureContext lança em PEM inválido — aqui cai p/ HTTP, não crasha.
+    tlsCreateSecureContext(tls);
+    return tls;
+  } catch (e) {
+    console.error(`[frontdoor] cert invalido/ilegivel (${e.message}) — caindo p/ HTTP`);
+    return null;
+  }
 }
 
-/** Sobe o porteiro em 0.0.0.0:port. HTTPS se há cert no certDir; senão HTTP. */
-export function startFrontdoor({ port, ports, certDir }) {
+/** Sobe o porteiro em 0.0.0.0:port. HTTPS se há cert válido; senão HTTP. Em EADDRINUSE,
+ * tenta a porta de fallback uma vez. NUNCA deixa um erro de bind virar crash não-tratado. */
+export function startFrontdoor({ port, ports, certDir, fallbackPort = null }) {
   const tls = loadCert(certDir);
   const h = makeHandler(ports);
   const server = tls ? https.createServer(tls, h) : http.createServer(h);
-  server.listen(port, '0.0.0.0', () => {
-    const p = server.address().port;
-    console.log(`[frontdoor] ${tls ? 'https' : 'http'} 0.0.0.0:${p} -> app:${ports.app} gw:${ports.gateway} events:${ports.events}`);
+  const isHttps = !!tls;
+  let triedFallback = false;
+
+  const bind = (p) => {
+    server.listen(p, '0.0.0.0', () => {
+      console.log(`[frontdoor] ${isHttps ? 'https' : 'http'} 0.0.0.0:${server.address().port} -> app:${ports.app} gw:${ports.gateway} events:${ports.events}`);
+    });
+  };
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && fallbackPort && !triedFallback && port !== fallbackPort) {
+      triedFallback = true;
+      console.error(`[frontdoor] porta ${port} ocupada (EADDRINUSE) — tentando fallback ${fallbackPort}`);
+      setTimeout(() => bind(fallbackPort), 300);
+    } else {
+      // Erro tratado (sem crash não-tratado → sem loop de respawn apertado). Operador vê o log.
+      console.error(`[frontdoor] erro de bind na porta ${port}: ${err.message}`);
+    }
   });
+  bind(port);
   return server;
 }
 
@@ -85,6 +118,7 @@ const isMain = (() => {
 if (isMain) {
   startFrontdoor({
     port: Number(process.env.FRONTDOOR_PORT || 443),
+    fallbackPort: Number(process.env.FRONTDOOR_FALLBACK_PORT || 8443),
     ports: {
       app: Number(process.env.APP_PORT || 3000),
       gateway: Number(process.env.GATEWAY_PORT || 54320),

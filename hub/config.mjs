@@ -12,6 +12,7 @@ const DEFAULTS = {
     storage: 5402,
     app: 3000,
     frontdoor: 443, // porteiro de rede (LAN): única peça em 0.0.0.0
+    frontdoorFallback: 8443, // se a 443 estiver ocupada/sem permissão
     events: 54350, // SSE do tempo-real (127.0.0.1)
   },
   paths: {

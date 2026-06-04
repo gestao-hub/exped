@@ -151,6 +151,9 @@ function postgrestSupervisor(cfg, logDir) {
     args: [path.join(LS, 'postgrest.conf')],
     cwd: ROOT,
     env: {
+      // Bind LOOPBACK explícito: o default do PostgREST é "!4" (todas as interfaces IPv4 =
+      // 0.0.0.0), o que o exporia na LAN pulando o porteiro/TLS. Só o frontdoor fica em 0.0.0.0.
+      PGRST_SERVER_HOST: '127.0.0.1',
       PGRST_SERVER_PORT: String(cfg.ports.postgrest),
       PGRST_DB_URI: `postgres://authenticator:authpass@${pgTcpHost(cfg)}:${cfg.ports.pg}/${cfg.paths.db}`,
       PGRST_JWT_SECRET: cfg.jwtSecret,
@@ -232,6 +235,7 @@ function frontdoorSupervisor(cfg, logDir) {
     cwd: ROOT,
     env: {
       FRONTDOOR_PORT: String(cfg.ports.frontdoor),
+      FRONTDOOR_FALLBACK_PORT: String(cfg.ports.frontdoorFallback || 8443),
       APP_PORT: String(cfg.ports.app),
       GATEWAY_PORT: String(cfg.ports.gateway),
       EVENTS_PORT: String(cfg.ports.events),
