@@ -53,11 +53,15 @@ jobs:
           cp auth.exe "$GITHUB_WORKSPACE/gotrue-build/auth.exe"
           cp -r migrations "$GITHUB_WORKSPACE/gotrue-build/migrations"
 
+      - name: Baixar mkcert.exe (HTTPS na LAN)
+        shell: bash
+        run: curl -L -o mkcert.exe https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe
+
       - name: Montar payload
         shell: bash
         env:
           VER: ${{ steps.ver.outputs.ver }}
-        run: node scripts/montar-payload.mjs --auth gotrue-build/auth.exe --auth-migrations gotrue-build/migrations --version "$VER"
+        run: node scripts/montar-payload.mjs --auth gotrue-build/auth.exe --auth-migrations gotrue-build/migrations --mkcert mkcert.exe --version "$VER"
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress

@@ -75,6 +75,15 @@ function main() {
     cpSync(authMig, path.join(dir, 'migrations'), { recursive: true });
   }
 
+  // mkcert.exe (HTTPS na LAN) — opcional. O install-service.ps1 le de bin\mkcert.exe.
+  // Ausente => hub sobe em HTTP (sem notificacao); presente => gera CA+cert e habilita HTTPS.
+  const mkcertExe = arg('--mkcert');
+  if (mkcertExe && existsSync(mkcertExe)) {
+    const binDir = path.join(PAYLOAD, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    cpSync(mkcertExe, path.join(binDir, 'mkcert.exe'));
+  }
+
   // config.json de config.example.json, com a versao carimbada (base do auto-update).
   const cfg = JSON.parse(readFileSync(path.join(ROOT, 'hub', 'win', 'config.example.json'), 'utf8'));
   cfg.version = versao;
