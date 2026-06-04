@@ -9,13 +9,14 @@ import { criarPiscaTitulo } from '@/lib/alertas/titulo';
 
 interface Opts {
   userId: string;
+  empresaId: string | null;
   prefs: PreferenciasAviso;
   /** Para onde navegar ao clicar na notificação. */
   linkDoPedido: (p: Pedido) => string;
   navegar: (href: string) => void;
 }
 
-export function useAlertasPedido({ prefs, linkDoPedido, navegar }: Opts) {
+export function useAlertasPedido({ prefs, linkDoPedido, navegar, empresaId }: Opts) {
   const supabase = useMemo(() => createClient(), []);
   const [naoVistos, setNaoVistos] = useState(0);
 
@@ -101,12 +102,12 @@ export function useAlertasPedido({ prefs, linkDoPedido, navegar }: Opts) {
 
   // Assinatura realtime — só quando avisos ativados
   useEffect(() => {
-    if (!prefs.ativado) return;
+    if (!prefs.ativado || !empresaId) return;
     const channel = supabase
-      .channel('pedidos-alertas')
+      .channel(`pedidos-alertas:${empresaId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'pedidos' },
+        { event: 'INSERT', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
         (payload) => {
           const p = payload.new as Pedido;
           // só pedidos vindos do Hiper (têm documento_erp)
@@ -118,7 +119,7 @@ export function useAlertasPedido({ prefs, linkDoPedido, navegar }: Opts) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, prefs.ativado, disparar]);
+  }, [supabase, prefs.ativado, disparar, empresaId]);
 
   return { naoVistos, reconhecer, dispararTeste, desbloquear };
 }

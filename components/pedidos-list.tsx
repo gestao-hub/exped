@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { calcularPaginacao, PAGE_SIZE } from '@/lib/pedidos/paginacao';
+import { useUser } from '@/components/providers/user-provider';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -121,6 +122,8 @@ export function PedidosList({
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const { profile } = useUser();
+  const empresaId = profile.empresa_id;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [page, setPage] = useState(1);
@@ -201,11 +204,17 @@ export function PedidosList({
     return () => clearTimeout(id);
   }, [searchInput]);
 
+  // Chave estável dos parciais — o efeito abaixo só re-roda quando o CONJUNTO de parciais muda,
+  // não a cada mutação do array `pedidos` (ex.: um refetch do realtime que não mexe nos parciais).
+  const idsParciais = pedidos
+    .filter((p) => p.status === 'parcialmente_entregue')
+    .map((p) => p.id)
+    .sort()
+    .join(',');
+
   // Busca itens dos pedidos parcialmente entregues (mostra inline na linha)
   useEffect(() => {
-    const ids = pedidos
-      .filter((p) => p.status === 'parcialmente_entregue')
-      .map((p) => p.id);
+    const ids = idsParciais ? idsParciais.split(',') : [];
     if (ids.length === 0) {
       setItensParciais({});
       return;
@@ -255,25 +264,29 @@ export function PedidosList({
     })();
 
     return () => { cancel = true; };
-  }, [supabase, pedidos]);
+  }, [supabase, idsParciais]);
 
   useEffect(() => {
+    if (!empresaId) return;
     // Defer a subscription pra depois do primeiro paint — assim networkidle
     // resolve mais rápido e a página fica interativa antes do realtime
     // entrar em cena. Usa requestIdleCallback quando disponível.
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let handle: number | NodeJS.Timeout | null = null;
+    let deb: ReturnType<typeof setTimeout> | null = null;
 
     const subscribe = () => {
+      // Canal POR EMPRESA (nome + filter) — em multi-tenant, evita que mudança de pedido de
+      // outra loja faça fan-out + refetch pra todos os usuários (RLS não filtra o stream WAL).
       channel = supabase
-        .channel('pedidos-list')
+        .channel(`pedidos-list:${empresaId}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'pedidos' },
+          { event: '*', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
           () => {
-            // Com paginação, qualquer mudança → refetch da página atual (o array
-            // local tem só a página corrente; splicear ficaria inconsistente).
-            setTick((t) => t + 1);
+            // Debounce: um lote do sync dispara vários eventos seguidos → refetch 1x após ~500ms.
+            if (deb) clearTimeout(deb);
+            deb = setTimeout(() => setTick((t) => t + 1), 500);
           },
         )
         .subscribe();
@@ -288,6 +301,7 @@ export function PedidosList({
     }
 
     return () => {
+      if (deb) clearTimeout(deb);
       if (handle != null) {
         if (typeof handle === 'number' && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
           (window as Window & typeof globalThis).cancelIdleCallback(handle);
@@ -297,7 +311,7 @@ export function PedidosList({
       }
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, mode]);
+  }, [supabase, mode, empresaId]);
 
   return (
     <div className={cn('space-y-3', bounded && 'flex flex-col flex-1 min-h-0')}>

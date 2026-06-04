@@ -53,6 +53,7 @@ export function AlertasProvider({ children }: { children: ReactNode }) {
 
   const { naoVistos, reconhecer, dispararTeste, desbloquear } = useAlertasPedido({
     userId: profile.id,
+    empresaId: profile.empresa_id,
     prefs: estado.prefs,
     linkDoPedido: (p) => linkDoPedido(profile.role, p),
     navegar: (href) => {
