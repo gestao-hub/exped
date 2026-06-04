@@ -32,6 +32,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     url: supabaseUrl(),
     anonKey: supabaseAnonKey(),
   };
+  // No HUB (atrás do porteiro de rede), o browser de cada máquina deve falar com a
+  // própria origem (https://<ip-do-servidor>), não com a URL local do servidor. A flag
+  // __SUPABASE_USE_ORIGIN__ manda o client usar window.location.origin. Na nuvem, injeta a
+  // URL real (Vercel). EXPED_HUB=1 é setado pelo maestro do hub.
+  const isHubRuntime = process.env.EXPED_HUB === '1';
 
   return (
     <html
@@ -42,7 +47,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       {/* eslint-disable-next-line @next/next/no-sync-scripts */}
       <script
         dangerouslySetInnerHTML={{
-          __html: `window.__SUPABASE_URL__=${JSON.stringify(supabaseConfig.url)};window.__SUPABASE_ANON_KEY__=${JSON.stringify(supabaseConfig.anonKey)};`,
+          __html:
+            `window.__SUPABASE_ANON_KEY__=${JSON.stringify(supabaseConfig.anonKey)};` +
+            (isHubRuntime
+              ? `window.__SUPABASE_USE_ORIGIN__=true;`
+              : `window.__SUPABASE_URL__=${JSON.stringify(supabaseConfig.url)};`),
         }}
       />
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
