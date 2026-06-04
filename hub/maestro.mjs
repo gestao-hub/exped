@@ -206,6 +206,24 @@ function gatewaySupervisor(cfg, logDir) {
   });
 }
 
+function eventsSupervisor(cfg, logDir) {
+  return new Supervisor({
+    name: 'events',
+    cmd: process.execPath,
+    args: [path.join(ROOT, 'hub', 'events.mjs')],
+    cwd: ROOT,
+    env: {
+      EVENTS_PORT: String(cfg.ports.events),
+      EXPED_PG_PORT: String(cfg.ports.pg),
+      EXPED_PG_HOST: pgTcpHost(cfg),
+      EXPED_PG_USER: cfg.paths.user || 'postgres',
+      EXPED_PG_DB: cfg.paths.db,
+    },
+    logPath: path.join(logDir, 'events.log'),
+    backoffMs: 1500,
+  });
+}
+
 function frontdoorSupervisor(cfg, logDir) {
   return new Supervisor({
     name: 'frontdoor',
@@ -360,8 +378,12 @@ export async function startMaestro(cfg, opts = {}) {
     await waitForHttp(`http://127.0.0.1:${cfg.ports.app}/login`, 60000);
     logger.info('app respondeu em /login');
 
-    // Porteiro de rede (LAN): única peça que escuta em 0.0.0.0. Depois do app
-    // (proxia app+gateway; /avisos→events vem na Fase C). HTTPS auto se há cert.
+    // Tempo-real (SSE + poll do banco) — antes do porteiro, que roteia /avisos pra cá.
+    logger.info(`subindo events :${cfg.ports.events}`);
+    supervisors.events = eventsSupervisor(cfg, logDir).start();
+
+    // Porteiro de rede (LAN): única peça que escuta em 0.0.0.0. Depois do app+events
+    // (proxia app+gateway+/avisos). HTTPS auto se há cert no certDir.
     logger.info(`subindo frontdoor :${cfg.ports.frontdoor}`);
     supervisors.frontdoor = frontdoorSupervisor(cfg, logDir).start();
   }
