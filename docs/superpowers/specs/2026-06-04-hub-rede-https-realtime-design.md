@@ -44,7 +44,7 @@ de `https://10.1.1.30` evita CORS e *mixed-content*. As peças internas continua
  │    /avisos (SSE)                 → events     │ 127.0.0.1:<events>
  │    /* (resto)                    → app Next   │ 127.0.0.1:3000
  │                                              │
- │  [events.mjs] psql LISTEN → SSE              │
+ │  [events.mjs] poll DB (~1.5s) → SSE          │
  │  [agente] → lê Hiper central (já existe)     │
  └──────────────────────────────────────────────┘
 ```
@@ -79,19 +79,20 @@ de `https://10.1.1.30` evita CORS e *mixed-content*. As peças internas continua
   ou `Import-Certificate -FilePath rootCA-Exped.crt -CertStoreLocation Cert:\LocalMachine\Root`).
   Depois: `https://10.1.1.30` abre **sem aviso** e como **contexto seguro** (notificação ✅).
 
-### 3. Tempo-real — `hub/events.mjs` (NOVO) + trigger pg_notify
-- **Migration nova** (`supabase/migrations/2026..._pg_notify_changes.sql`): trigger
-  AFTER INSERT/UPDATE em `pedidos` e `ordens_servico` que faz
-  `pg_notify('exped_changes', json_build_object('empresa_id', NEW.empresa_id, 'tabela', TG_TABLE_NAME)::text)`.
-  (Aditiva/idempotente. Roda também na nuvem — `NOTIFY` sem ouvinte é no-op, inofensivo.)
-- **`hub/events.mjs`:** servidor SSE em `127.0.0.1:${cfg.ports.events}`. Mantém um `psql`
-  persistente (`spawn psql`, escreve `LISTEN exped_changes;` no stdin, mantém aberto) e
-  parseia o stdout (`Asynchronous notification "exped_changes" ... payload "..."`). A cada
-  notificação, faz fan-out pros clientes SSE conectados, **filtrando por `empresa_id`**.
-  - Endpoint: `GET /avisos?empresa=<uuid>` → `Content-Type: text/event-stream`, mantém aberto,
-    manda `event: changed\ndata: {tabela}` quando há mudança da empresa do cliente.
+### 3. Tempo-real — `hub/events.mjs` (NOVO), via POLLING leve (sem dep, sem migration)
+- **Decisão (refinada no planejamento):** `psql LISTEN`/`NOTIFY` é frágil pelo stdin (psql só
+  imprime notificações entre comandos; bloqueado lendo stdin, não as processa). Em vez disso,
+  **polling leve** — robusto e sem dependência nova. Sem migration.
+- **`hub/events.mjs`:** servidor SSE em `127.0.0.1:${cfg.ports.events}`. Enquanto há cliente
+  conectado, a cada **~1.5s** faz UMA query (shell `psql`, igual o sync):
+  `select empresa_id::text, max(greatest(updated_at,...)) from (pedidos UNION os) group by empresa_id`.
+  Compara com o snapshot anterior por empresa; pra cada empresa que **avançou**, manda SSE
+  `event: changed` pros clientes daquela empresa. (Zero clientes → não consulta.)
+  - Endpoint: `GET /avisos?empresa=<uuid>` → `Content-Type: text/event-stream`, mantém aberto.
   - Heartbeat (comentário `:\n` a cada ~25s) pra manter a conexão viva por proxies.
-  - Função pura testável `parsePsqlNotification(linha)` e `fanout(clientes, payload)`.
+  - Funções puras testáveis: `diffEmpresas(prev, atual)` (quais empresas mudaram) e
+    `fanout(clientes, empresaId)` (entrega só aos clientes daquela empresa).
+  - Latência ~1.5s (suficiente pra "fila não pisar"); carga trivial (1 query pequena/1.5s).
 - **Cliente — `lib/realtime/use-live-updates.ts` (NOVO):** hook
   `useLiveUpdates(empresaId, onChange)` que:
   - **no hub** (isHub via window flag) → abre `EventSource('/avisos?empresa='+id)` e chama
@@ -139,8 +140,8 @@ de `https://10.1.1.30` evita CORS e *mixed-content*. As peças internas continua
 - `pickFrontdoorTarget(url)` → roteia /auth,/rest,/storage→gateway, /avisos→events, resto→app.
 - `frontdoor` integração: sobe app/gateway/events fakes em portas locais + um cert de teste,
   faz request HTTPS e valida o proxy (incl. SSE streaming não-bufferizado).
-- `parsePsqlNotification(linha)` → extrai canal+payload; ignora ruído.
-- `events.fanout` → entrega só pros clientes da `empresa_id` do payload; heartbeat.
+- `diffEmpresas(prev, atual)` → retorna as empresas cujo max(updated_at) avançou.
+- `events.fanout(clientes, empresaId)` → entrega só pros clientes daquela empresa; heartbeat.
 - `useLiveUpdates`: hub → cria EventSource no endpoint certo; nuvem → usa channel. (mock).
 - Geração de cert: smoke local (mkcert no Linux do CI) valida SAN com IP.
 - Migration: dry-run BEGIN/ROLLBACK; trigger dispara NOTIFY (teste manual no psql local).
@@ -156,5 +157,5 @@ de `https://10.1.1.30` evita CORS e *mixed-content*. As peças internas continua
   cliente usa origem. Validável: 5 máquinas abrem `http://10.1.1.30`.
 - **Fase B — HTTPS:** mkcert (CA+cert) + frontdoor termina TLS + distribuição do root +
   cliente em `https`. Validável: `https://10.1.1.30` sem aviso + notificação funciona.
-- **Fase C — Tempo-real:** migration pg_notify + events.mjs (LISTEN→SSE) + useLiveUpdates.
-  Validável: mudança numa máquina aparece nas outras sem recarregar.
+- **Fase C — Tempo-real:** events.mjs (poll DB ~1.5s → SSE) + frontdoor /avisos + useLiveUpdates
+  (cliente). Validável: mudança numa máquina aparece nas outras sem recarregar (~1.5s).
