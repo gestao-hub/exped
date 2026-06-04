@@ -51,7 +51,11 @@ export function PedidoComentarios({
   const [texto, setTexto] = useState('');
   const [sending, startSend] = useTransition();
 
-  // Realtime: novos comentários aparecem ao vivo
+  // Realtime: comentários de OUTRAS pessoas aparecem ao vivo. Funciona na NUVEM (Supabase
+  // Realtime via WebSocket). NO HUB o WebSocket não é servido (só SSE p/ a fila), então
+  // comentários de outras máquinas aparecem ao recarregar a página — limitação conhecida e
+  // aceita (comentário é colaboração secundária; a fila é a feature ao vivo). O próprio
+  // comentário do usuário aparece na hora via append otimista no send() (vale no hub também).
   useEffect(() => {
     const channel = supabase
       .channel(`comentarios:${pedidoId}`)
@@ -93,7 +97,21 @@ export function PedidoComentarios({
     startSend(async () => {
       const r = await addComentarioAction({ pedido_id: pedidoId, texto: t });
       if ('error' in r) toast.error(r.error);
-      else setTexto('');
+      else {
+        setTexto('');
+        // Append otimista: o comentário aparece na hora (essencial no hub, onde o realtime
+        // não dispara). Dedup por id evita duplicar quando o canal (nuvem) também entregar.
+        const raw = r.comentario as {
+          id: string; pedido_id: string; autor_id: string | null; texto: string; created_at: string;
+          autor: Comentario['autor'] | Comentario['autor'][];
+        };
+        const autor = Array.isArray(raw.autor) ? (raw.autor[0] ?? null) : raw.autor;
+        const c: Comentario = {
+          id: raw.id, pedido_id: raw.pedido_id, autor_id: raw.autor_id,
+          texto: raw.texto, created_at: raw.created_at, autor,
+        };
+        setComentarios((prev) => (prev.some((p) => p.id === c.id) ? prev : [...prev, c]));
+      }
     });
   }
 

@@ -22,17 +22,20 @@ export async function addComentarioAction(input: {
   } = await supabase.auth.getUser();
   if (!user) return { error: 'Não autenticado' };
 
-  const { error } = await supabase.from('pedido_comentarios').insert({
-    pedido_id: parsed.data.pedido_id,
-    autor_id: user.id,
-    texto: parsed.data.texto,
-  });
-  if (error) return { error: error.message };
+  // Retorna a linha criada (com autor) pro cliente fazer append otimista — assim o comentário
+  // aparece na hora MESMO no hub (onde o realtime via WebSocket não funciona). Na nuvem o canal
+  // também entrega, mas o componente deduplica por id.
+  const { data: novo, error } = await supabase
+    .from('pedido_comentarios')
+    .insert({ pedido_id: parsed.data.pedido_id, autor_id: user.id, texto: parsed.data.texto })
+    .select('id, pedido_id, autor_id, texto, created_at, autor:profiles(full_name, email, role)')
+    .single();
+  if (error || !novo) return { error: error?.message ?? 'Falha ao comentar' };
 
   revalidatePath(`/vendas/${parsed.data.pedido_id}`);
   revalidatePath(`/logistica/${parsed.data.pedido_id}`);
   revalidatePath(`/historico/${parsed.data.pedido_id}`);
-  return { ok: true as const };
+  return { ok: true as const, comentario: novo };
 }
 
 export async function deleteComentarioAction(id: string, pedido_id: string) {

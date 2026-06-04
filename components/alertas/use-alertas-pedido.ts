@@ -101,11 +101,13 @@ export function useAlertasPedido({ prefs, linkDoPedido, navegar, empresaId }: Op
     };
   }, [reconhecer]);
 
-  // Detecção de pedido novo por busca (high-water mark) — funciona no hub (SSE) e na nuvem
-  // (canal), via useLiveUpdates. Ao receber o sinal "mudou", busca os pedidos do Hiper mais
-  // recentes e alerta os que passaram do último visto (não usa o payload do evento, que o SSE
-  // não tem). O primeiro fetch só fixa a baseline (não alerta pedidos pré-existentes).
-  const hwmRef = useRef<string>('');
+  // Detecção de pedido novo por busca + DEDUP POR ID — funciona no hub (SSE) e na nuvem (canal),
+  // via useLiveUpdates. Ao receber o sinal "mudou", busca os pedidos do Hiper recentes e alerta
+  // os cujo id ainda não foi visto (não usa o payload, que o SSE não tem). Dedup por id (não por
+  // created_at) porque no hub o pedido vem do sync com o created_at da NUVEM, que NÃO é monotônico
+  // localmente — comparar timestamp perderia pedidos fora de ordem / com UPDATE pós-criação.
+  // O primeiro fetch só fixa a baseline (marca os existentes como vistos, sem alertar antigos).
+  const seenRef = useRef<Set<string>>(new Set());
   const primedRef = useRef(false);
 
   const checarNovos = useCallback(async () => {
@@ -116,22 +118,24 @@ export function useAlertasPedido({ prefs, linkDoPedido, navegar, empresaId }: Op
       .eq('empresa_id', empresaId)
       .not('documento_erp', 'is', null)
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(50);
     const rows = (data ?? []) as Pedido[];
     if (!primedRef.current) {
-      hwmRef.current = rows[0]?.created_at ?? '';
+      for (const p of rows) seenRef.current.add(p.id);
       primedRef.current = true;
       return;
     }
-    const novos = rows.filter((p) => (p.created_at ?? '') > hwmRef.current).reverse(); // cronológico
-    for (const p of novos) disparar(p);
-    if (rows[0]?.created_at && rows[0].created_at > hwmRef.current) hwmRef.current = rows[0].created_at;
+    const novos = rows.filter((p) => !seenRef.current.has(p.id)).reverse(); // cronológico
+    for (const p of novos) {
+      seenRef.current.add(p.id);
+      disparar(p);
+    }
   }, [supabase, empresaId, disparar]);
 
-  // Baseline quando ativa/troca de empresa (re-fixa o high-water sem alertar).
+  // Baseline quando ativa/troca de empresa (re-fixa os "vistos" sem alertar).
   useEffect(() => {
     primedRef.current = false;
-    hwmRef.current = '';
+    seenRef.current = new Set();
     if (prefs.ativado && empresaId) checarNovos();
   }, [prefs.ativado, empresaId, checarNovos]);
 

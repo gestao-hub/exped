@@ -197,6 +197,10 @@ if (Test-Path $Mkcert) {
     & $Mkcert -cert-file (Join-Path $CertDir 'server.crt') -key-file (Join-Path $CertDir 'server.key') $ServerIp 'localhost' '127.0.0.1'
     $caRoot = (& $Mkcert -CAROOT).Trim()
     Copy-Item (Join-Path $caRoot 'rootCA.pem') (Join-Path $Root 'rootCA-Exped.crt') -Force
+    # Endurece a ACL: a chave privada TLS (server.key) so pode ser lida por SYSTEM+Administrators.
+    # C:\Exped fica na raiz do drive e herda leitura de 'Users' por padrao - sem isto, qualquer
+    # usuario local leria a chave e poderia impersonar/MITM o https://<ip> que as maquinas confiam.
+    icacls $CertDir /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" | Out-Null
     Write-Host "    HTTPS pronto. Instale $Root\rootCA-Exped.crt nas maquinas (Autoridade Raiz Confiavel)." -ForegroundColor Green
 } else {
     Write-Host "    AVISO: bin\mkcert.exe ausente - hub sobe em HTTP (sem notificacao na LAN)." -ForegroundColor Yellow
