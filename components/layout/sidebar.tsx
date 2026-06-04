@@ -84,7 +84,7 @@ const NAV: Record<UserRole, NavSection[]> = {
       title: 'Admin',
       items: [
         { label: 'Clientes', href: '/admin/clientes', icon: UsersRound },
-        { label: 'Usuários', href: '/admin/usuarios', icon: Users },
+        { label: 'Equipe', href: '/admin/usuarios', icon: Users },
       ],
     },
     {

@@ -44,7 +44,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Logística',    href: '/logistica',      icon: TruckIcon },
     { label: 'Histórico',    href: '/historico',      icon: History },
     { label: 'Clientes',     href: '/admin/clientes', icon: UsersRound },
-    { label: 'Usuários',     href: '/admin/usuarios', icon: Users },
+    { label: 'Equipe',       href: '/admin/usuarios', icon: Users },
     { label: 'Tutorial',     href: '/tutorial',       icon: Lightbulb },
   ],
 };

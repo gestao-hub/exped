@@ -177,11 +177,11 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
     },
     {
       icon: Users,
-      title: 'Gerencie usuários e roles',
+      title: 'Gerencie a equipe e os cargos',
       body:
-        'Em "Usuários" você vê todos os profiles cadastrados e pode mudar o role de cada um (admin / vendedor / logística). Você não pode rebaixar o próprio role — guardrail de segurança pra evitar lockout do admin.',
-      cta: { label: 'Usuários', href: '/admin/usuarios' },
-      tip: 'Pra criar usuários novos, rode o script `scripts/seed-users.ts` localmente ou crie via Supabase Dashboard → Authentication → Add User.',
+        'Em "Equipe" você vê todos os colaboradores, adiciona novos (nome, e-mail, senha, cargo), desativa quem saiu (reversível, sem apagar histórico) e muda o cargo de cada um (admin / vendedor / logística). Você não pode rebaixar nem desativar a si mesmo — guardrail pra evitar lockout do admin.',
+      cta: { label: 'Equipe', href: '/admin/usuarios' },
+      tip: 'A gestão da equipe é feita no Exped na nuvem; as mudanças descem automaticamente pro app local (hub).',
     },
     {
       icon: History,

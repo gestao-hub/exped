@@ -107,7 +107,7 @@ export default async function AdminDashboard() {
     { label: 'Fila Logística', href: '/logistica',      icon: TruckIcon,  color: 'text-franzoni-navy' },
     { label: 'Histórico',      href: '/historico',      icon: History,    color: 'text-status-finalizado' },
     { label: 'Clientes',       href: '/admin/clientes', icon: UsersRound, color: 'text-brand' },
-    { label: 'Usuários',       href: '/admin/usuarios', icon: Users,      color: 'text-brand' },
+    { label: 'Equipe',         href: '/admin/usuarios', icon: Users,      color: 'text-brand' },
   ];
 
   return (
@@ -172,7 +172,7 @@ export default async function AdminDashboard() {
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                Usuários ativos
+                Colaboradores ativos
               </p>
               <p className="text-xl font-heading font-bold text-franzoni-navy dark:text-white mt-0.5">
                 {usuariosCount.count ?? 0}
