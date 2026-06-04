@@ -11,8 +11,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { SortableHead, type SortDir } from '@/components/ui/sortable-head';
 import { RoleSelect } from '@/app/(app)/admin/usuarios/role-select';
+import { ColaboradorActions } from '@/app/(app)/admin/usuarios/colaborador-actions';
 import type { Profile } from '@/lib/types';
 
 type SortKey = 'full_name' | 'email' | 'role' | 'created_at';
@@ -33,9 +35,11 @@ function initials(name: string) {
 export function UsuariosTable({
   profiles,
   currentUserId,
+  canManage,
 }: {
   profiles: Profile[];
   currentUserId: string;
+  canManage: boolean;
 }) {
   const [sortBy, setSortBy] = useState<SortKey>('role');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -82,12 +86,20 @@ export function UsuariosTable({
               <p className="font-medium text-sm truncate">{p.full_name || '—'}</p>
               <p className="text-xs text-muted-foreground font-mono truncate">{p.email}</p>
             </div>
-            <div className="shrink-0">
-              <RoleSelect
-                userId={p.id}
-                currentRole={p.role}
-                disabled={p.id === currentUserId}
-              />
+            <div className="shrink-0 flex flex-col items-end gap-1">
+              {!p.ativo && <Badge variant="secondary">Inativo</Badge>}
+              {canManage ? (
+                <>
+                  <RoleSelect
+                    userId={p.id}
+                    currentRole={p.role}
+                    disabled={p.id === currentUserId || !p.ativo}
+                  />
+                  <ColaboradorActions userId={p.id} ativo={p.ativo} disabled={p.id === currentUserId} />
+                </>
+              ) : (
+                <span className="text-sm text-muted-foreground">{p.role}</span>
+              )}
             </div>
           </li>
         ))}
@@ -128,7 +140,7 @@ export function UsuariosTable({
             Role
           </SortableHead>
           <SortableHead
-            width="w-36 pr-5"
+            width="w-32"
             sortKey="created_at"
             current={sortBy}
             dir={sortDir}
@@ -136,6 +148,9 @@ export function UsuariosTable({
           >
             Criado em
           </SortableHead>
+          <th className="w-48 pr-5 text-right text-xs font-medium text-muted-foreground">
+            Status
+          </th>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -160,22 +175,34 @@ export function UsuariosTable({
               {p.email}
             </TableCell>
             <TableCell>
-              <RoleSelect
-                userId={p.id}
-                currentRole={p.role}
-                disabled={p.id === currentUserId}
-              />
+              {canManage ? (
+                <RoleSelect
+                  userId={p.id}
+                  currentRole={p.role}
+                  disabled={p.id === currentUserId || !p.ativo}
+                />
+              ) : (
+                <span className="text-sm">{p.role}</span>
+              )}
             </TableCell>
-            <TableCell className="text-sm text-muted-foreground pr-5">
+            <TableCell className="text-sm text-muted-foreground">
               {p.created_at
                 ? format(new Date(p.created_at), "dd 'de' MMM yyyy", { locale: ptBR })
                 : '—'}
+            </TableCell>
+            <TableCell className="pr-5">
+              <div className="flex items-center justify-end gap-2">
+                {!p.ativo && <Badge variant="secondary">Inativo</Badge>}
+                {canManage && (
+                  <ColaboradorActions userId={p.id} ativo={p.ativo} disabled={p.id === currentUserId} />
+                )}
+              </div>
             </TableCell>
           </TableRow>
         ))}
         {sorted.length === 0 && (
           <TableRow>
-            <TableCell colSpan={4} className="text-center text-muted-foreground py-12">
+            <TableCell colSpan={5} className="text-center text-muted-foreground py-12">
               Nenhum usuário.
             </TableCell>
           </TableRow>
