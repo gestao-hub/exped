@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { calcularPaginacao, PAGE_SIZE } from '@/lib/pedidos/paginacao';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Pencil, Trash2, Loader2, Search } from 'lucide-react';
@@ -49,46 +50,78 @@ type Cliente = {
   pedidos_count: number;
 };
 
-type SortKey = 'nome' | 'cnpj_cpf' | 'pedidos_count' | 'created_at';
+type SortKey = 'nome' | 'cnpj_cpf' | 'created_at';
 
-export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
-  const router = useRouter();
+type ClienteQueryRow = Omit<Cliente, 'pedidos_count'> & {
+  pedidos?: { count: number }[] | { count: number } | null;
+};
+
+export function ClientesTable() {
+  const supabase = useMemo(() => createClient(), []);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('nome');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<Cliente | null>(null);
 
   function toggleSort(key: SortKey) {
     if (sortBy === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
       setSortBy(key);
-      setSortDir(key === 'pedidos_count' || key === 'created_at' ? 'desc' : 'asc');
+      setSortDir(key === 'created_at' ? 'desc' : 'asc');
     }
   }
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLocaleLowerCase('pt-BR');
-    const arr = q
-      ? clientes.filter(
-          (c) =>
-            c.nome.toLocaleLowerCase('pt-BR').includes(q) ||
-            (c.cnpj_cpf ?? '').toLocaleLowerCase().includes(q) ||
-            (c.bairro_padrao ?? '').toLocaleLowerCase('pt-BR').includes(q),
-        )
-      : [...clientes];
-    arr.sort((a, b) => {
-      let cmp = 0;
-      if (sortBy === 'pedidos_count') cmp = a.pedidos_count - b.pedidos_count;
-      else if (sortBy === 'created_at') cmp = a.created_at.localeCompare(b.created_at);
-      else
-        cmp = (a[sortBy] ?? '').toString().localeCompare(
-          (b[sortBy] ?? '').toString(),
-          'pt-BR',
-        );
-      return sortDir === 'asc' ? cmp : -cmp;
+  // Debounce da busca (300ms) — evita 1 query por tecla.
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(id);
+  }, [searchInput]);
+
+  // Volta pra página 1 ao mudar busca/ordenação.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [search, sortBy, sortDir]);
+
+  // Busca a página atual no servidor (offset + count + busca + ordenação).
+  useEffect(() => {
+    let cancel = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    const from = (Math.max(1, page) - 1) * PAGE_SIZE;
+    let query = supabase
+      .from('clientes')
+      .select('*, pedidos:pedidos(count)', { count: 'exact' })
+      .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (search.trim()) {
+      const q = `%${search.trim()}%`;
+      query = query.or(`nome.ilike.${q},cnpj_cpf.ilike.${q},bairro_padrao.ilike.${q}`);
+    }
+    query.then(({ data, count, error }) => {
+      if (cancel) return;
+      if (error) toast.error(error.message);
+      const rows: Cliente[] = ((data ?? []) as ClienteQueryRow[]).map((c) => {
+        const countObj = Array.isArray(c.pedidos) ? c.pedidos[0] : c.pedidos;
+        return { ...c, pedidos_count: countObj?.count ?? 0 } as Cliente;
+      });
+      setClientes(rows);
+      setTotal(count ?? 0);
+      setLoading(false);
     });
-    return arr;
-  }, [clientes, sortBy, sortDir, search]);
+    return () => {
+      cancel = true;
+    };
+  }, [supabase, page, sortBy, sortDir, search, tick]);
+
+  const refetch = () => setTick((t) => t + 1);
 
   return (
     <>
@@ -97,8 +130,8 @@ export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             placeholder="Buscar por nome, CNPJ ou bairro…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
           />
         </div>
@@ -125,16 +158,9 @@ export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
             >
               CNPJ/CPF
             </SortableHead>
-            <SortableHead
-              width="w-24"
-              sortKey="pedidos_count"
-              current={sortBy}
-              dir={sortDir}
-              onClickAction={toggleSort}
-              align="right"
-            >
+            <th className="w-24 pr-2 text-right text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
               Pedidos
-            </SortableHead>
+            </th>
             <SortableHead
               width="w-32"
               sortKey="created_at"
@@ -148,14 +174,20 @@ export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-muted-foreground py-12">
+                Carregando…
+              </TableCell>
+            </TableRow>
+          ) : clientes.length === 0 ? (
             <TableRow>
               <TableCell colSpan={5} className="text-center text-muted-foreground py-12">
                 Nenhum cliente {search ? 'pra esta busca' : 'cadastrado ainda'}.
               </TableCell>
             </TableRow>
           ) : (
-            filtered.map((c) => (
+            clientes.map((c) => (
               <TableRow key={c.id} className="hover:bg-brand/5">
                 <TableCell className="pl-5 min-w-0 font-medium truncate" title={c.nome}>
                   {c.nome}
@@ -183,7 +215,7 @@ export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
-                    <DeleteButton id={c.id} count={c.pedidos_count} onDone={() => router.refresh()} />
+                    <DeleteButton id={c.id} count={c.pedidos_count} onDone={refetch} />
                   </div>
                 </TableCell>
               </TableRow>
@@ -192,13 +224,42 @@ export function ClientesTable({ clientes }: { clientes: Cliente[] }) {
         </TableBody>
       </Table>
 
+      {(() => {
+        const { totalPages, hasPrev, hasNext } = calcularPaginacao(page, total);
+        return (
+          <div className="flex items-center justify-between gap-3 px-5 py-3 text-sm text-muted-foreground border-t">
+            <span>
+              {total} {total === 1 ? 'cliente' : 'clientes'} · página {Math.min(page, totalPages)} de {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!hasPrev}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3 py-1.5 rounded-md border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted/60 transition-colors"
+              >
+                ‹ Anterior
+              </button>
+              <button
+                type="button"
+                disabled={!hasNext}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1.5 rounded-md border disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted/60 transition-colors"
+              >
+                Próxima ›
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
       {editing && (
         <EditDialog
           cliente={editing}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
-            router.refresh();
+            refetch();
           }}
         />
       )}
