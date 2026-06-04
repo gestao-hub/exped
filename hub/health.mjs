@@ -21,6 +21,29 @@ export async function waitForHttp(url, timeoutMs = 30000) {
 }
 
 /**
+ * Probe ÚNICO (não fica retentando, ao contrário de waitForTcp): há algo
+ * aceitando conexão TCP em host:port agora? Resolve true se conectou, false se
+ * recusou/timeout/erro. Usado pelo /status pra refletir o estado REAL de uma
+ * peça cujo processo supervisionado não representa o daemon (ex.: Postgres, que
+ * sobe via `pg_ctl start` — um lançador one-shot que sai após disparar o
+ * postmaster). Checar a porta diz a verdade; checar o child do pg_ctl, não.
+ */
+export function tcpAlive(host, port, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      s.destroy();
+      resolve(ok);
+    };
+    const s = net.connect({ host, port }, () => finish(true));
+    s.on('error', () => finish(false));
+    s.setTimeout(timeoutMs, () => finish(false));
+  });
+}
+
+/**
  * Espera uma porta TCP aceitar conexão. Resolve true na primeira conexão
  * bem-sucedida. Rejeita se o deadline passar sem conseguir conectar.
  */

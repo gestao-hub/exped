@@ -33,7 +33,7 @@ import { mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 import { Supervisor } from './supervisor.mjs';
-import { waitForHttp, waitForTcp } from './health.mjs';
+import { waitForHttp, waitForTcp, tcpAlive } from './health.mjs';
 import { startStorage } from './storage-local.mjs';
 import { loadConfig } from './config.mjs';
 import { bootstrap, applyPendingMigrations } from './bootstrap.mjs';
@@ -237,10 +237,12 @@ function appSupervisor(cfg, logDir, keys) {
 
 function startStatusServer(port, getState) {
   return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
+    const server = http.createServer(async (req, res) => {
       if ((req.url || '').startsWith('/status')) {
+        // getState pode ser async (faz probe TCP do Postgres) — aguardamos.
+        const state = await getState();
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(getState(), null, 2));
+        res.end(JSON.stringify(state, null, 2));
       } else {
         res.writeHead(404, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'use /status' }));
@@ -355,12 +357,19 @@ export async function startMaestro(cfg, opts = {}) {
   // 6. /status --------------------------------------------------------------
   const statusPort = cfg.ports.status || cfg.ports.app + 1;
   const startedAt = new Date().toISOString();
-  const status = () => {
+  const status = async () => {
     const s = sync.getState();
+    const peers = Object.values(supervisors).map(peerState);
+    // O Postgres sobe via `pg_ctl start`, um lançador one-shot que SAI logo após
+    // disparar o postmaster. Por isso o child do Supervisor não representa o
+    // banco e peerState reportaria running:false mesmo com o banco saudável.
+    // Conferimos a porta TCP de verdade — é o que diz a verdade sobre o daemon.
+    const pg = peers.find((p) => p.name === 'postgres');
+    if (pg) pg.running = await tcpAlive(pgTcpHost(cfg), cfg.ports.pg, 1000);
     return {
       maestro: { startedAt, manifestUrl: cfg.manifestUrl || null },
       storage: { name: 'storage', running: !!storageHandle, port: cfg.ports.storage },
-      peers: Object.values(supervisors).map(peerState),
+      peers,
       sync: {
         enabled: !!stopSync,
         lastSyncOk: s.lastSyncOk,
