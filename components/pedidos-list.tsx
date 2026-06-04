@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -41,6 +41,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import { StatusBadge } from '@/components/status-badge';
 import { useConfirm } from '@/components/providers/confirm-provider';
 import { createClient } from '@/lib/supabase/client';
+import { useLiveUpdates } from '@/lib/realtime/use-live-updates';
 import type { Pedido, PedidoStatus } from '@/lib/types';
 import {
   iniciarSeparacaoLoteAction,
@@ -266,52 +267,16 @@ export function PedidosList({
     return () => { cancel = true; };
   }, [supabase, idsParciais]);
 
-  useEffect(() => {
-    if (!empresaId) return;
-    // Defer a subscription pra depois do primeiro paint — assim networkidle
-    // resolve mais rápido e a página fica interativa antes do realtime
-    // entrar em cena. Usa requestIdleCallback quando disponível.
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    let handle: number | NodeJS.Timeout | null = null;
-    let deb: ReturnType<typeof setTimeout> | null = null;
-
-    const subscribe = () => {
-      // Canal POR EMPRESA (nome + filter) — em multi-tenant, evita que mudança de pedido de
-      // outra loja faça fan-out + refetch pra todos os usuários (RLS não filtra o stream WAL).
-      channel = supabase
-        .channel(`pedidos-list:${empresaId}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
-          () => {
-            // Debounce: um lote do sync dispara vários eventos seguidos → refetch 1x após ~500ms.
-            if (deb) clearTimeout(deb);
-            deb = setTimeout(() => setTick((t) => t + 1), 500);
-          },
-        )
-        .subscribe();
-    };
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      handle = (window as Window & typeof globalThis).requestIdleCallback(subscribe, {
-        timeout: 1000,
-      });
-    } else {
-      handle = setTimeout(subscribe, 600);
-    }
-
-    return () => {
-      if (deb) clearTimeout(deb);
-      if (handle != null) {
-        if (typeof handle === 'number' && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          (window as Window & typeof globalThis).cancelIdleCallback(handle);
-        } else {
-          clearTimeout(handle as NodeJS.Timeout);
-        }
-      }
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [supabase, mode, empresaId]);
+  // Atualização ao vivo: hub (SSE /avisos) ou nuvem (canal postgres_changes), escolhido em
+  // useLiveUpdates. Debounce 500ms: um lote do sync dispara vários eventos → refetch 1x.
+  // Canal/SSE escopado por empresa (RLS não filtra o stream WAL; o SSE filtra no fanout).
+  const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onLive = useCallback(() => {
+    if (debRef.current) clearTimeout(debRef.current);
+    debRef.current = setTimeout(() => setTick((t) => t + 1), 500);
+  }, []);
+  useEffect(() => () => { if (debRef.current) clearTimeout(debRef.current); }, []);
+  useLiveUpdates(empresaId, onLive);
 
   return (
     <div className={cn('space-y-3', bounded && 'flex flex-col flex-1 min-h-0')}>

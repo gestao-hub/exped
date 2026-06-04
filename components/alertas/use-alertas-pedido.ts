@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { useLiveUpdates } from '@/lib/realtime/use-live-updates';
 import type { Pedido } from '@/lib/types';
 import type { PreferenciasAviso } from '@/lib/alertas/preferencias';
 import { criarPlayerSom, LoopSom } from '@/lib/alertas/som';
@@ -100,26 +101,42 @@ export function useAlertasPedido({ prefs, linkDoPedido, navegar, empresaId }: Op
     };
   }, [reconhecer]);
 
-  // Assinatura realtime — só quando avisos ativados
+  // Detecção de pedido novo por busca (high-water mark) — funciona no hub (SSE) e na nuvem
+  // (canal), via useLiveUpdates. Ao receber o sinal "mudou", busca os pedidos do Hiper mais
+  // recentes e alerta os que passaram do último visto (não usa o payload do evento, que o SSE
+  // não tem). O primeiro fetch só fixa a baseline (não alerta pedidos pré-existentes).
+  const hwmRef = useRef<string>('');
+  const primedRef = useRef(false);
+
+  const checarNovos = useCallback(async () => {
+    if (!empresaId) return;
+    const { data } = await supabase
+      .from('pedidos')
+      .select('id, cliente_nome, numero_mapa, valor_total, documento_erp, created_at')
+      .eq('empresa_id', empresaId)
+      .not('documento_erp', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const rows = (data ?? []) as Pedido[];
+    if (!primedRef.current) {
+      hwmRef.current = rows[0]?.created_at ?? '';
+      primedRef.current = true;
+      return;
+    }
+    const novos = rows.filter((p) => (p.created_at ?? '') > hwmRef.current).reverse(); // cronológico
+    for (const p of novos) disparar(p);
+    if (rows[0]?.created_at && rows[0].created_at > hwmRef.current) hwmRef.current = rows[0].created_at;
+  }, [supabase, empresaId, disparar]);
+
+  // Baseline quando ativa/troca de empresa (re-fixa o high-water sem alertar).
   useEffect(() => {
-    if (!prefs.ativado || !empresaId) return;
-    const channel = supabase
-      .channel(`pedidos-alertas:${empresaId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
-        (payload) => {
-          const p = payload.new as Pedido;
-          // só pedidos vindos do Hiper (têm documento_erp)
-          if (!p.documento_erp) return;
-          disparar(p);
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, prefs.ativado, disparar, empresaId]);
+    primedRef.current = false;
+    hwmRef.current = '';
+    if (prefs.ativado && empresaId) checarNovos();
+  }, [prefs.ativado, empresaId, checarNovos]);
+
+  // Sinal ao vivo → re-checa. Só assina quando avisos ativados.
+  useLiveUpdates(prefs.ativado ? empresaId : null, checarNovos);
 
   return { naoVistos, reconhecer, dispararTeste, desbloquear };
 }
