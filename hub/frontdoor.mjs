@@ -38,7 +38,7 @@ function makeHandler(ports) {
         port: target.port,
         method: req.method,
         path: req.url,
-        headers: { ...req.headers, host: `${target.host}:${target.port}` },
+        headers: target.name === 'app' ? { ...req.headers, 'x-forwarded-host': req.headers['x-forwarded-host'] || req.headers.host, 'x-forwarded-proto': req.headers['x-forwarded-proto'] || (req.socket && req.socket.encrypted ? 'https' : 'http') } : { ...req.headers, host: `${target.host}:${target.port}` },
       },
       (proxyRes) => {
         // Repassa status+headers crus e faz pipe (inclui SSE: stream aberto, sem buffer).

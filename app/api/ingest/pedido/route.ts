@@ -145,11 +145,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 7) Insere já como 'pendente' → cai direto na Fila de Logística (o pedido nasce
-  //    no Hiper; não há etapa de rascunho/revisão no Exped). empresa explícita (service_role).
+  // 7) Insere como 'rascunho' → cai na "Meus Pedidos" do vendedor MAPEADO (passo 4),
+  //    que revisa e envia pra logística ("Revisar e enviar" → vira 'pendente').
+  //    Decisão Franzoni 2026-06-05: pedido do Hiper passa pelo vendedor antes da logística.
+  //    empresa explícita (service_role).
   const r = await inserirPedido(supabase, valid.data, {
     vendedorId,
-    status: 'pendente',
+    status: 'rascunho',
     empresaId,
   });
   if ('error' in r) return NextResponse.json(r, { status: 500 });

@@ -1,5 +1,12 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Handoff de sessão (contém logins — não versionar)
+/HANDOFF.md
+# Diagnóstico de campo do Hiper (ferramenta de onboarding, não produto)
+/diagnostico-hiper.sql
+/preflight-franzoni.ps1
+/agente-tarefa-agendada.ps1
+
 # dependencies
 /node_modules
 /.pnp

@@ -69,7 +69,7 @@ async function defaultFetchManifest(url) {
 /** baixa `url` pro arquivo `dest`. */
 async function defaultDownload(url, dest) {
   await mkdir(path.dirname(dest), { recursive: true });
-  const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(600000) });
   if (!res.ok || !res.body) throw new Error(`download HTTP ${res.status}`);
   await pipeline(Readable.fromWeb(res.body), createWriteStream(dest));
 }
