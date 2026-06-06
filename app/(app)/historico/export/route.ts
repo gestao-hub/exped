@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
 import type { PedidoStatus } from '@/lib/types';
 
-const VALID_STATUS: PedidoStatus[] = ['rascunho', 'pendente', 'em_separacao', 'parcialmente_entregue', 'finalizado', 'cancelado'];
+const VALID_STATUS: PedidoStatus[] = ['rascunho', 'em_financeiro', 'pendente', 'em_separacao', 'em_transporte', 'parcialmente_entregue', 'finalizado', 'cancelado'];
 // Status "terminais" (finitos) podem exportar sem período; os demais (e 'todos') exigem from+to
 // pra não varrer a base inteira em volume.
 const TERMINAL = new Set(['finalizado', 'cancelado']);

@@ -9,7 +9,7 @@ import type { Profile, UserRole } from '@/lib/types';
  *  2. O role do usuário está no array `allowed`
  *
  * Se não tem permissão, redireciona pro "home" do role real do usuário
- * — admin → /admin, logistica → /logistica, vendedor → /vendas.
+ * — admin → /admin, financeiro → /financeiro, logistica → /logistica, vendedor → /vendas.
  *
  * Retorna o profile pra que a page possa reusar (evita 2ª query).
  */
@@ -32,5 +32,11 @@ export async function requireRole(allowed: UserRole[]): Promise<Profile> {
 }
 
 export function homeFor(role: UserRole): string {
-  return role === 'admin' ? '/admin' : role === 'logistica' ? '/logistica' : '/vendas';
+  return role === 'admin'
+    ? '/admin'
+    : role === 'financeiro'
+      ? '/financeiro'
+      : role === 'logistica'
+        ? '/logistica'
+        : '/vendas';
 }

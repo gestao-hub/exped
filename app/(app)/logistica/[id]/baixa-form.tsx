@@ -5,7 +5,7 @@ import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, Check, PackageCheck } from 'lucide-react';
+import { Loader2, Check, PackageCheck, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import { salvarLogisticaAction } from '@/app/(app)/logistica/actions';
 import {
   finalizarPedidoAction,
   iniciarSeparacaoAction,
+  marcarSaiuEntregaAction,
 } from '@/app/(app)/vendas/actions';
 import type { PedidoStatus } from '@/lib/types';
 
@@ -31,11 +32,14 @@ export function BaixaForm({
   status,
   defaultValues,
   itens = [],
+  isEnvio = false,
 }: {
   pedidoId: string;
   status: PedidoStatus;
   defaultValues: LogisticaFormInput;
   itens?: PedidoItem[];
+  /** true quando o pedido tem ponto de entrega (envio/híbrido) — habilita "Saiu para entrega". */
+  isEnvio?: boolean;
 }) {
   const router = useRouter();
   const [savePending, startSave] = useTransition();
@@ -57,13 +61,22 @@ export function BaixaForm({
     })();
   }
 
-  function changeStatus(action: 'iniciar' | 'finalizar') {
+  function changeStatus(action: 'iniciar' | 'finalizar' | 'saiu') {
     startStatus(async () => {
       const r = await (action === 'iniciar'
         ? iniciarSeparacaoAction(pedidoId)
-        : finalizarPedidoAction(pedidoId));
+        : action === 'saiu'
+          ? marcarSaiuEntregaAction(pedidoId)
+          : finalizarPedidoAction(pedidoId));
       if ('error' in r) toast.error(r.error);
-      else toast.success(action === 'iniciar' ? 'Separação iniciada' : 'Pedido finalizado');
+      else
+        toast.success(
+          action === 'iniciar'
+            ? 'Separação iniciada'
+            : action === 'saiu'
+              ? 'Pedido saiu para entrega'
+              : 'Pedido finalizado',
+        );
       router.refresh();
     });
   }
@@ -83,7 +96,25 @@ export function BaixaForm({
               Iniciar Separação
             </Button>
           )}
-          {(status === 'em_separacao' || status === 'parcialmente_entregue') && (
+          {/* Envio/híbrido: ao terminar a separação, o caminhão sai para entrega. */}
+          {isEnvio && (status === 'em_separacao' || status === 'parcialmente_entregue') && (
+            <Button
+              variant="outline"
+              onClick={() => changeStatus('saiu')}
+              disabled={statusPending}
+            >
+              {statusPending ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Truck className="h-4 w-4 mr-1" />
+              )}
+              Saiu para entrega
+            </Button>
+          )}
+          {/* Baixa: retirada (separação→finaliza direto) ou volta do caminhão (em_transporte). */}
+          {(status === 'em_transporte' ||
+            status === 'parcialmente_entregue' ||
+            (status === 'em_separacao' && !isEnvio)) && (
             <>
               <RegistrarEntregaDialog
                 pedidoId={pedidoId}

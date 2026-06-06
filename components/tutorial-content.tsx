@@ -100,6 +100,29 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
     },
   ],
 
+  financeiro: [
+    {
+      icon: Inbox,
+      title: 'Os pedidos chegam do vendedor',
+      body:
+        'Em "Financeiro", aparecem os pedidos que o vendedor enviou para conferência. Cada um vem com cliente, itens e o que o ERP/vendedor preencheu de pagamento e frete.',
+      cta: { label: 'Abrir Financeiro', href: '/financeiro' },
+    },
+    {
+      icon: ListChecks,
+      title: 'Confira pagamento e frete',
+      body:
+        'Revise e ajuste a forma de pagamento, parcelas, "receber na entrega" e o valor do frete. É aqui que as informações são compiladas antes de seguir para a logística.',
+      tip: 'Quando o pedido vem do Hiper, o valor do frete já chega preenchido — confira e corrija se necessário.',
+    },
+    {
+      icon: Send,
+      title: 'Libere para a logística',
+      body:
+        'Com tudo conferido, clique em "Liberar para logística". O pedido sai da sua fila e entra como Pendente na logística para separação.',
+    },
+  ],
+
   logistica: [
     {
       icon: Inbox,
@@ -470,6 +493,11 @@ const ROLE_HEADERS: Record<UserRole, { title: string; sub: string }> = {
     title: 'Como funciona — Vendas',
     sub:
       'Fluxo do vendedor: do PDF emitido pelo ERP até o pedido entregue. Tudo em tempo real.',
+  },
+  financeiro: {
+    title: 'Como funciona — Financeiro',
+    sub:
+      'Fluxo do financeiro: conferir pagamento e frete dos pedidos do vendedor e liberar para a logística.',
   },
   logistica: {
     title: 'Como funciona — Logística',

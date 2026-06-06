@@ -140,13 +140,14 @@ export type SavePedidoResult =
   | { duplicate: true; existing_id: string; existing_numero: number };
 
 /**
- * Cria um novo pedido (cabeçalho + pontos + itens) com status `rascunho` ou `pendente`.
+ * Cria um novo pedido (cabeçalho + pontos + itens) com status `rascunho` ou
+ * `em_financeiro` (envia pro financeiro, que depois libera p/ logística).
  * `vendedor_id` é setado para auth.uid() (RLS exige).
  * Se já existe um pedido ativo com o mesmo documento_erp, retorna { duplicate }.
  */
 export async function criarPedidoAction(
   raw: PedidoFormInput,
-  status: 'rascunho' | 'pendente',
+  status: 'rascunho' | 'em_financeiro',
 ): Promise<SavePedidoResult> {
   const supabase = await createClient();
   const {
@@ -165,7 +166,7 @@ export async function criarPedidoAction(
   const r = await inserirPedido(supabase, d, { vendedorId: user.id, status });
   if (!('error' in r)) {
     revalidatePath('/vendas');
-    revalidatePath('/logistica');
+    revalidatePath('/financeiro');
   }
   return r;
 }
@@ -178,7 +179,7 @@ export async function criarPedidoAction(
 export async function atualizarPedidoAction(
   id: string,
   raw: PedidoFormInput,
-  status: 'rascunho' | 'pendente',
+  status: 'rascunho' | 'em_financeiro',
 ): Promise<SavePedidoResult> {
   const supabase = await createClient();
   const {
@@ -221,6 +222,7 @@ export async function atualizarPedidoAction(
       parcelas: d.parcelas ?? null,
       receber_na_entrega: d.receber_na_entrega ?? false,
       valor_total: d.valor_total,
+      valor_frete: d.valor_frete ?? 0,
       observacoes: d.observacoes ?? null,
       status,
     })
@@ -238,7 +240,7 @@ export async function atualizarPedidoAction(
 
   revalidatePath('/vendas');
   revalidatePath(`/vendas/${id}`);
-  revalidatePath('/logistica');
+  revalidatePath('/financeiro');
   return { id: pedido.id as string, numero: pedido.numero_mapa as number };
 }
 
@@ -268,6 +270,29 @@ export async function iniciarSeparacaoAction(id: string) {
     .update({ status: 'em_separacao' })
     .eq('id', id);
   if (error) return { error: error.message };
+  revalidatePath('/logistica');
+  revalidatePath(`/logistica/${id}`);
+  return { ok: true as const };
+}
+
+/**
+ * Logística: marca que o pedido saiu para entrega (caminhão na rua).
+ * Só faz sentido em pedido de envio (tem ponto tipo='entrega'); o pedido só será
+ * finalizado quando o caminhão voltar ao galpão. Carimba `saiu_entrega_em`.
+ * Transição atômica a partir de em_separacao/parcialmente_entregue.
+ */
+export async function marcarSaiuEntregaAction(id: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('pedidos')
+    .update({ status: 'em_transporte', saiu_entrega_em: new Date().toISOString() })
+    .eq('id', id)
+    .in('status', ['em_separacao', 'parcialmente_entregue'])
+    .select('id')
+    .single();
+  if (error || !data) {
+    return { error: error?.message ?? 'Pedido não está em separação' };
+  }
   revalidatePath('/logistica');
   revalidatePath(`/logistica/${id}`);
   return { ok: true as const };
@@ -422,7 +447,7 @@ export async function finalizarLoteAction(ids: string[]) {
     .from('pedidos')
     .update({ status: 'finalizado' })
     .in('id', ids)
-    .in('status', ['em_separacao', 'parcialmente_entregue'])
+    .in('status', ['em_separacao', 'em_transporte', 'parcialmente_entregue'])
     .select('id');
   if (error) return { error: error.message };
 

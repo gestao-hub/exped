@@ -17,6 +17,7 @@ import {
   Building2,
   Wrench,
   Settings,
+  Wallet,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,20 @@ const NAV: Record<UserRole, NavSection[]> = {
         { label: 'Meus Pedidos', href: '/vendas',      icon: Package },
         { label: 'Novo Pedido',  href: '/vendas/novo', icon: PackagePlus },
       ],
+    },
+    {
+      title: 'Consulta',
+      items: [{ label: 'Histórico', href: '/historico', icon: History }],
+    },
+    {
+      title: 'Ajuda',
+      items: [{ label: 'Tutorial', href: '/tutorial', icon: Lightbulb }],
+    },
+  ],
+  financeiro: [
+    {
+      title: 'Operação',
+      items: [{ label: 'Financeiro', href: '/financeiro', icon: Wallet }],
     },
     {
       title: 'Consulta',
@@ -73,6 +88,7 @@ const NAV: Record<UserRole, NavSection[]> = {
       items: [
         { label: 'Pedidos',     href: '/vendas',      icon: Package },
         { label: 'Novo Pedido', href: '/vendas/novo', icon: PackagePlus },
+        { label: 'Financeiro',  href: '/financeiro',  icon: Wallet },
         { label: 'Logística',   href: '/logistica',   icon: TruckIcon },
       ],
     },

@@ -95,6 +95,10 @@ export function PedidoForm({
   // No modo híbrido, o tipo do ponto de retirada (loja vs depósito) é um sub-seletor.
   const tipoRetiradaHibrido: 'loja' | 'deposito' =
     pontosWatch?.find((p) => p?.tipo === 'deposito') ? 'deposito' : 'loja';
+  // Frete só faz sentido quando há entrega (envio/híbrido). Mostramos também quando
+  // já existe um valor (ex.: veio do Hiper) pra não esconder o dado.
+  const freteWatch = watch('valor_frete');
+  const mostrarFrete = modoRetirada === 'hibrido' || Number(freteWatch ?? 0) > 0;
 
   /** Endereço do cliente (default do ponto de entrega no modo híbrido). */
   function enderecoCliente() {
@@ -155,7 +159,7 @@ export function PedidoForm({
     ], { shouldDirty: true });
   }
 
-  function submit(status: 'rascunho' | 'pendente') {
+  function submit(status: 'rascunho' | 'em_financeiro') {
     handleSubmit(
       (values) => {
         startTransition(async () => {
@@ -175,8 +179,8 @@ export function PedidoForm({
             return;
           }
           toast.success(
-            status === 'pendente'
-              ? `Pedido enviado para logística`
+            status === 'em_financeiro'
+              ? `Pedido enviado para o financeiro`
               : 'Rascunho salvo',
           );
           router.push(`/vendas/${r.id}`);
@@ -451,6 +455,17 @@ export function PedidoForm({
               Receber na entrega
             </label>
             <div className="grid grid-cols-2 gap-4">
+              {mostrarFrete && (
+                <Field label="Frete (R$)" className="col-span-2">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    {...register('valor_frete', { valueAsNumber: true })}
+                    className="font-mono text-right"
+                    placeholder="0,00"
+                  />
+                </Field>
+              )}
               <Field label="Parcelas">
                 <Controller
                   control={control}
@@ -519,12 +534,12 @@ export function PedidoForm({
         </Button>
         <Button
           type="button"
-          onClick={() => submit('pendente')}
+          onClick={() => submit('em_financeiro')}
           disabled={pending}
           className="bg-brand hover:bg-brand-600"
         >
           {pending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          Enviar para Logística
+          Enviar para Financeiro
         </Button>
       </div>
     </form>

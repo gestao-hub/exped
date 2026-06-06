@@ -80,7 +80,9 @@ export default async function PedidoDetailPage({
     ),
   })) as unknown as PontoComItens[];
 
-  const podeCancelar = ['rascunho', 'pendente'].includes(pedido.status);
+  // Vendedor cancela só antes da logística (rascunho/financeiro). Depois de liberado
+  // (pendente+), quem cancela é logística/admin — alinhado à RLS pedidos_vendedor_update.
+  const podeCancelar = ['rascunho', 'em_financeiro'].includes(pedido.status);
 
   return (
     <>

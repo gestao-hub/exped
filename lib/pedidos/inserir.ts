@@ -22,7 +22,7 @@ export type InserirPedidoResult =
 export async function inserirPedido(
   supabase: SupabaseClient<Database>,
   d: PedidoFormInput,
-  opts: { vendedorId: string; status: 'rascunho' | 'pendente'; empresaId?: string },
+  opts: { vendedorId: string; status: 'rascunho' | 'pendente' | 'em_financeiro'; empresaId?: string },
 ): Promise<InserirPedidoResult> {
   if (d.documento_erp) {
     let q = supabase

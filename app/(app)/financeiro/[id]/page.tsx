@@ -10,10 +10,9 @@ import { PedidoComentarios } from '@/components/pedido-comentarios';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 import type { PedidoItem } from '@/lib/types';
-import { BaixaForm } from './baixa-form';
-import { emptyLogistica } from '@/lib/validators/logistica';
+import { FinanceiroForm } from './financeiro-form';
 
-export default async function LogisticaDetailPage({
+export default async function FinanceiroDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
@@ -25,12 +24,7 @@ export default async function LogisticaDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [
-    { data: pedido },
-    { data: pontosRaw },
-    { data: logistica },
-    { data: comentarios },
-  ] = await Promise.all([
+  const [{ data: pedido }, { data: pontosRaw }, { data: comentarios }] = await Promise.all([
     supabase.from('pedidos').select('*').eq('id', id).single(),
     supabase
       .from('pedido_pontos_retirada')
@@ -39,7 +33,6 @@ export default async function LogisticaDetailPage({
       .is('deleted_at', null)
       .is('itens.deleted_at', null)
       .order('ordem'),
-    supabase.from('pedido_logistica').select('*').eq('pedido_id', id).maybeSingle(),
     supabase
       .from('pedido_comentarios')
       .select('*, autor:profiles(full_name, email, role)')
@@ -72,21 +65,6 @@ export default async function LogisticaDetailPage({
     ),
   })) as unknown as PontoComItens[];
 
-  const defaults = logistica
-    ? {
-        pre_carga: logistica.pre_carga,
-        motorista: logistica.motorista,
-        veiculo: logistica.veiculo,
-        km_inicial: logistica.km_inicial,
-        km_final: logistica.km_final,
-        regiao: logistica.regiao,
-        peso_bruto_total: logistica.peso_bruto_total,
-        peso_liquido_total: logistica.peso_liquido_total,
-        conferente: logistica.conferente,
-        observacoes: logistica.observacoes,
-      }
-    : emptyLogistica();
-
   return (
     <>
       <PageHeader
@@ -107,10 +85,10 @@ export default async function LogisticaDetailPage({
         actions={
           <>
             <Link
-              href="/logistica"
+              href="/financeiro"
               className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
             >
-              <ArrowLeft className="h-4 w-4 mr-1" /> Fila
+              <ArrowLeft className="h-4 w-4 mr-1" /> Financeiro
             </Link>
             <ImprimirPedidoButton id={id} label="Imprimir Pedido" />
           </>
@@ -120,17 +98,20 @@ export default async function LogisticaDetailPage({
       <MapaCarregamento
         pedido={pedido}
         pontos={pontos}
-        logistica={logistica ?? undefined}
         vendedor={vendedor}
         logoUrlPrint={empresa?.logo_url_print ?? null}
       />
 
-      <BaixaForm
+      <FinanceiroForm
         pedidoId={id}
         status={pedido.status}
-        defaultValues={defaults}
-        itens={pontos.flatMap((p) => p.itens)}
-        isEnvio={pontos.some((p) => p.tipo === 'entrega')}
+        defaultValues={{
+          forma_pagamento: pedido.forma_pagamento,
+          parcelas: pedido.parcelas,
+          receber_na_entrega: pedido.receber_na_entrega,
+          valor_total: Number(pedido.valor_total),
+          valor_frete: Number(pedido.valor_frete ?? 0),
+        }}
       />
 
       {user && (

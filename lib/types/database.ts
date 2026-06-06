@@ -918,6 +918,7 @@ export type Database = {
           observacoes: string | null
           parcelas: number | null
           receber_na_entrega: boolean
+          saiu_entrega_em: string | null
           status: Database["public"]["Enums"]["pedido_status"]
           storage_pdf_path: string | null
           updated_at: string
@@ -957,6 +958,7 @@ export type Database = {
           observacoes?: string | null
           parcelas?: number | null
           receber_na_entrega?: boolean
+          saiu_entrega_em?: string | null
           status?: Database["public"]["Enums"]["pedido_status"]
           storage_pdf_path?: string | null
           updated_at?: string
@@ -996,6 +998,7 @@ export type Database = {
           observacoes?: string | null
           parcelas?: number | null
           receber_na_entrega?: boolean
+          saiu_entrega_em?: string | null
           status?: Database["public"]["Enums"]["pedido_status"]
           storage_pdf_path?: string | null
           updated_at?: string
@@ -1216,9 +1219,11 @@ export type Database = {
         | "finalizado"
         | "cancelado"
         | "parcialmente_entregue"
+        | "em_financeiro"
+        | "em_transporte"
       ponto_retirada_destino: "loja" | "deposito" | "entrega"
       ponto_retirada_tipo: "loja" | "deposito"
-      user_role: "admin" | "vendedor" | "logistica"
+      user_role: "admin" | "vendedor" | "logistica" | "financeiro"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1354,10 +1359,12 @@ export const Constants = {
         "finalizado",
         "cancelado",
         "parcialmente_entregue",
+        "em_financeiro",
+        "em_transporte",
       ],
       ponto_retirada_destino: ["loja", "deposito", "entrega"],
       ponto_retirada_tipo: ["loja", "deposito"],
-      user_role: ["admin", "vendedor", "logistica"],
+      user_role: ["admin", "vendedor", "logistica", "financeiro"],
     },
   },
 } as const

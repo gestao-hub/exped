@@ -5,7 +5,7 @@ import { PedidosList } from '@/components/pedidos-list';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { PedidoStatus } from '@/lib/types';
 
-const VALID: PedidoStatus[] = ['pendente', 'em_separacao', 'parcialmente_entregue', 'finalizado'];
+const VALID: PedidoStatus[] = ['pendente', 'em_separacao', 'em_transporte', 'parcialmente_entregue', 'finalizado'];
 
 export default async function LogisticaPage({
   searchParams,
@@ -32,6 +32,9 @@ export default async function LogisticaPage({
           <TabsTrigger value="em_separacao"          render={<Link href="/logistica?status=em_separacao" />}>
             Em separação
           </TabsTrigger>
+          <TabsTrigger value="em_transporte"         render={<Link href="/logistica?status=em_transporte" />}>
+            Em transporte
+          </TabsTrigger>
           <TabsTrigger value="parcialmente_entregue" render={<Link href="/logistica?status=parcialmente_entregue" />}>
             Parcialmente
           </TabsTrigger>
@@ -56,6 +59,7 @@ export default async function LogisticaPage({
           selectable={
             status === 'pendente' ||
             status === 'em_separacao' ||
+            status === 'em_transporte' ||
             status === 'parcialmente_entregue'
           }
         />

@@ -50,7 +50,7 @@ import {
   finalizarPedidoAction,
 } from '@/app/(app)/vendas/actions';
 
-type Mode = 'vendas' | 'logistica' | 'historico';
+type Mode = 'vendas' | 'logistica' | 'historico' | 'financeiro';
 type ParcialItem = {
   codigo: string;
   descricao: string;
@@ -71,8 +71,10 @@ type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes' | 'custom';
 const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
   { value: 'todos',        label: 'Todos' },
   { value: 'rascunho',     label: 'Rascunho' },
+  { value: 'em_financeiro',          label: 'No financeiro' },
   { value: 'pendente',               label: 'Pendente' },
   { value: 'em_separacao',           label: 'Em separação' },
+  { value: 'em_transporte',          label: 'Em transporte' },
   { value: 'parcialmente_entregue',  label: 'Parcialmente entregue' },
   { value: 'finalizado',             label: 'Finalizado' },
   { value: 'cancelado',    label: 'Cancelado' },
@@ -411,6 +413,8 @@ export function PedidosList({
                 const href =
                   mode === 'logistica'
                     ? `/logistica/${p.id}`
+                    : mode === 'financeiro'
+                    ? `/financeiro/${p.id}`
                     : mode === 'historico'
                     ? `/historico/${p.id}`
                     : `/vendas/${p.id}`;
@@ -447,6 +451,14 @@ export function PedidosList({
                         <span className="font-mono text-[11px] text-muted-foreground">
                           #{p.numero_mapa}
                         </span>
+                        {p.documento_erp && (
+                          <span
+                            className="font-mono text-[11px] text-muted-foreground/80 px-1.5 py-0.5 rounded bg-muted/60"
+                            title={`Código Hiper: ${p.documento_erp}`}
+                          >
+                            {p.documento_erp}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5">
                         <StatusBadge status={p.status} />
@@ -512,13 +524,14 @@ export function PedidosList({
                     />
                   </TableHead>
                 )}
-                <SortableHead width={selectable ? 'w-16' : 'w-20 pl-5'} sortKey="numero_mapa" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
+                <SortableHead width={selectable ? 'w-14' : 'w-16 pl-5'} sortKey="numero_mapa" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Nº
                 </SortableHead>
-                <SortableHead width="w-[28%] min-w-0" sortKey="cliente_nome" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
+                <TableHead className="w-24">Cód. Hiper</TableHead>
+                <SortableHead width="w-[24%] min-w-0" sortKey="cliente_nome" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Cliente
                 </SortableHead>
-                <SortableHead width="w-[18%] min-w-0" sortKey="cliente_bairro" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
+                <SortableHead width="w-[16%] min-w-0" sortKey="cliente_bairro" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
                   Bairro
                 </SortableHead>
                 <SortableHead width="w-28" sortKey="data_entrega" current={sortBy} dir={sortDir} onClickAction={toggleSort}>
@@ -533,7 +546,7 @@ export function PedidosList({
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={selectable ? 7 : 6} className="px-5">
+                  <TableCell colSpan={selectable ? 8 : 7} className="px-5">
                     <div className="space-y-2 py-2">
                       {Array.from({ length: 5 }).map((_, i) => (
                         <div key={i} className="h-9 rounded-md animate-pulse bg-muted/60" />
@@ -543,7 +556,7 @@ export function PedidosList({
                 </TableRow>
               ) : pedidos.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={selectable ? 7 : 6} className="py-16">
+                  <TableCell colSpan={selectable ? 8 : 7} className="py-16">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Inbox className="h-10 w-10 opacity-40" />
                       <p className="text-sm">Nenhum pedido encontrado.</p>
@@ -555,6 +568,8 @@ export function PedidosList({
                   const href =
                     mode === 'logistica'
                       ? `/logistica/${p.id}`
+                      : mode === 'financeiro'
+                      ? `/financeiro/${p.id}`
                       : mode === 'historico'
                       ? `/historico/${p.id}`
                       : `/vendas/${p.id}`;
@@ -593,6 +608,11 @@ export function PedidosList({
                       )}
                       <TableCell className={cn('font-mono text-xs text-muted-foreground', !selectable && 'pl-5')}>
                         #{p.numero_mapa}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        <span className="truncate block" title={p.documento_erp ?? undefined}>
+                          {p.documento_erp || '—'}
+                        </span>
                       </TableCell>
                       <TableCell className="font-medium text-foreground min-w-0">
                         <div className="truncate" title={p.cliente_nome}>
@@ -777,7 +797,11 @@ function InlineStatusActions({
       </button>
     );
   }
-  if (status === 'em_separacao' || status === 'parcialmente_entregue') {
+  if (
+    status === 'em_separacao' ||
+    status === 'em_transporte' ||
+    status === 'parcialmente_entregue'
+  ) {
     return (
       <button
         type="button"
@@ -868,7 +892,9 @@ function BulkActionBar({
             Iniciar separação
           </Button>
         )}
-        {(status === 'em_separacao' || status === 'parcialmente_entregue') && (
+        {(status === 'em_separacao' ||
+          status === 'em_transporte' ||
+          status === 'parcialmente_entregue') && (
           <Button
             size="sm"
             onClick={finalizar}

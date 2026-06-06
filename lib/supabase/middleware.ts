@@ -58,6 +58,7 @@ export async function updateSession(request: NextRequest) {
     url.pathname =
       profile?.is_platform_admin    ? '/plataforma' :
       profile?.role === 'logistica' ? '/logistica'  :
+      profile?.role === 'financeiro'? '/financeiro' :
       profile?.role === 'admin'     ? '/admin'      :
       '/vendas';
     return NextResponse.redirect(url);
