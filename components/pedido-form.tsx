@@ -5,7 +5,7 @@ import * as React from 'react';
 import { useTransition, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, ArrowLeftRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,8 +14,17 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { criarPedidoAction, atualizarPedidoAction } from '@/app/(app)/vendas/actions';
-import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
+import { pedidoFormSchema, type PedidoFormInput, type ItemInput } from '@/lib/validators/pedido';
+import { dividirItem, mesclarItem, round2 } from '@/lib/pedidos/dividir-item';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
 import {
@@ -60,6 +69,10 @@ export function PedidoForm({
   // Tabs controlado: ao reduzir o nº de pontos (Híbrido→Loja), a aba ativa pode
   // apontar para um índice que deixou de existir e o painel sairia em branco.
   const [abaPonto, setAbaPonto] = useState('0');
+  // Diálogo de mover/dividir item entre pontos (modo híbrido).
+  const [moverDialog, setMoverDialog] = useState<{ fromPontoIndex: number; itemIndex: number } | null>(null);
+  // Força remount dos ItensEditor após um move (re-lê os valores atualizados via setValue).
+  const [moveTick, setMoveTick] = useState(0);
 
   const form = useForm<PedidoFormInput>({
     resolver: zodResolver(pedidoFormSchema),
@@ -157,6 +170,40 @@ export function PedidoForm({
         itens: entregaExistente?.itens ?? [],
       },
     ], { shouldDirty: true });
+  }
+
+  /**
+   * Move `n` unidades de um item do ponto `fromPontoIndex` para o OUTRO ponto do
+   * híbrido (entrega ↔ retirada). Move tudo (item sai) ou divide a quantidade
+   * (parte fica, parte vai; soma no item de mesmo código no destino).
+   */
+  function moverItem(fromPontoIndex: number, itemIndex: number, n: number) {
+    const pontos = getValues('pontos_retirada') ?? [];
+    const from = pontos[fromPontoIndex];
+    if (!from) return;
+    const targetIndex =
+      from.tipo === 'entrega'
+        ? pontos.findIndex((p) => p?.tipo !== 'entrega')
+        : pontos.findIndex((p) => p?.tipo === 'entrega');
+    if (targetIndex < 0) return;
+    const item = (from.itens ?? [])[itemIndex];
+    if (!item) return;
+
+    const { movido, restante } = dividirItem(item as ItemInput, n);
+    const novos = pontos.map((p, idx) => {
+      if (idx === fromPontoIndex) {
+        const itens = [...(p.itens ?? [])];
+        if (restante) itens[itemIndex] = restante;
+        else itens.splice(itemIndex, 1);
+        return { ...p, itens };
+      }
+      if (idx === targetIndex) {
+        return { ...p, itens: mesclarItem([...(p.itens ?? [])], movido) };
+      }
+      return p;
+    });
+    setValue('pontos_retirada', novos, { shouldDirty: true });
+    setMoveTick((t) => t + 1);
   }
 
   function submit(status: 'rascunho' | 'em_financeiro') {
@@ -385,7 +432,22 @@ export function PedidoForm({
                   </Field>
                 </div>
 
-                <ItensEditor pontoIndex={i} control={control} register={register} />
+                <ItensEditor
+                  key={`itens-${p._rhfId}-${moveTick}`}
+                  pontoIndex={i}
+                  control={control}
+                  register={register}
+                  onMover={
+                    modoRetirada === 'hibrido'
+                      ? (itemIndex) => setMoverDialog({ fromPontoIndex: i, itemIndex })
+                      : undefined
+                  }
+                  moverLabel={
+                    (watch(`pontos_retirada.${i}.tipo`) ?? p.tipo) === 'entrega'
+                      ? 'Retirada'
+                      : 'Entrega'
+                  }
+                />
 
                 {pontos.length > 1 && (
                   <Button
@@ -412,6 +474,28 @@ export function PedidoForm({
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Diálogo de mover/dividir item entre pontos (híbrido) */}
+      {moverDialog &&
+        (() => {
+          const item = getValues(
+            `pontos_retirada.${moverDialog.fromPontoIndex}.itens.${moverDialog.itemIndex}`,
+          ) as ItemInput | undefined;
+          if (!item) return null;
+          const fromTipo = getValues(`pontos_retirada.${moverDialog.fromPontoIndex}.tipo`);
+          const targetLabel = fromTipo === 'entrega' ? 'Retirada' : 'Entrega';
+          return (
+            <MoverItemDialog
+              item={item}
+              targetLabel={targetLabel}
+              onClose={() => setMoverDialog(null)}
+              onConfirm={(n) => {
+                moverItem(moverDialog.fromPontoIndex, moverDialog.itemIndex, n);
+                setMoverDialog(null);
+              }}
+            />
+          );
+        })()}
 
       {/* Pagamento e Observações */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -588,12 +672,17 @@ function ItensEditor({
   pontoIndex,
   control,
   register,
+  onMover,
+  moverLabel,
 }: {
   pontoIndex: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   control: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: any;
+  /** Quando presente (modo híbrido), mostra o botão "Mover" por item. */
+  onMover?: (itemIndex: number) => void;
+  moverLabel?: string;
 }) {
   const { fields, append, remove } = useFieldArray({
     control,
@@ -641,7 +730,7 @@ function ItensEditor({
                 <th className="text-left  px-2 py-2 w-16">Un</th>
                 <th className="text-right px-2 py-2 w-28">Unitário</th>
                 <th className="text-right px-2 py-2 w-28">Total</th>
-                <th className="w-10" />
+                <th className={onMover ? 'w-20' : 'w-10'} />
               </tr>
             </thead>
             <tbody>
@@ -688,15 +777,29 @@ function ItensEditor({
                     />
                   </td>
                   <td className="px-1 py-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => remove(i)}
-                      aria-label="Remover item"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    <div className="flex items-center justify-end gap-0.5">
+                      {onMover && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onMover(i)}
+                          aria-label={`Mover para ${moverLabel}`}
+                          title={`Mover para ${moverLabel}`}
+                        >
+                          <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => remove(i)}
+                        aria-label="Remover item"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -705,5 +808,61 @@ function ItensEditor({
         </div>
       )}
     </div>
+  );
+}
+
+function MoverItemDialog({
+  item,
+  targetLabel,
+  onClose,
+  onConfirm,
+}: {
+  item: ItemInput;
+  targetLabel: string;
+  onClose: () => void;
+  onConfirm: (n: number) => void;
+}) {
+  const max = Number(item.quantidade) || 0;
+  const [qtd, setQtd] = useState<number>(max);
+  const valido = qtd > 0 && qtd <= max;
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mover para {targetLabel}</DialogTitle>
+          <DialogDescription>
+            {item.descricao || item.codigo || 'Item'} — {max} {item.unidade || 'UN'} neste ponto.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2 space-y-2">
+          <Label className="text-xs text-muted-foreground">
+            Quantidade a mover (máx. {max})
+          </Label>
+          <Input
+            type="number"
+            step="0.001"
+            min={0}
+            max={max}
+            value={qtd}
+            onChange={(e) => setQtd(Number(e.target.value))}
+            className="font-mono text-right"
+            autoFocus
+          />
+          <p className="text-[11px] text-muted-foreground">
+            {qtd >= max
+              ? `O item inteiro vai para ${targetLabel}.`
+              : `Ficam ${round2(max - qtd)} aqui e ${round2(qtd)} vão para ${targetLabel}.`}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button disabled={!valido} onClick={() => onConfirm(qtd)} className="bg-brand hover:bg-brand-600">
+            <ArrowLeftRight className="h-4 w-4 mr-1" /> Mover
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
