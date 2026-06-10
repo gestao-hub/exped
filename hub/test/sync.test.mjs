@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import { syncOnce, getState, SYNC_TABLES } from '../sync.mjs';
+import { syncOnce, start, getState, SYNC_TABLES } from '../sync.mjs';
 import { TWO_WAY_TABLES } from '../sync-tables.mjs';
 
 // ---------------------------------------------------------------------------
@@ -397,5 +397,55 @@ describe('sync-tables espelho', () => {
     expect(SYNC_TABLES).toHaveLength(12);
     expect(TWO_WAY_TABLES).toHaveLength(8);
     expect(SYNC_TABLES.filter((t) => t.dir === 'down')).toHaveLength(4);
+  });
+});
+
+describe('start — watchdog (incidente 2026-06-10)', () => {
+  it('um syncOnce que PENDURA nao congela o loop: o vigia forca um novo ciclo', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      // 1o ciclo pendura pra sempre; os seguintes resolvem na hora.
+      const syncOnceFn = () => {
+        calls += 1;
+        return calls === 1 ? new Promise(() => {}) : Promise.resolve({ ok: true, error: null });
+      };
+      const stop = start({
+        db: makeMemDb(), apiBase, deviceToken,
+        intervalMs: 10, stuckMs: 100, syncOnceFn,
+      });
+      // tick imediato disparou o 1o ciclo (pendurado)
+      expect(calls).toBe(1);
+      // antes de stuckMs, os ticks sao pulados (ciclo ainda "em andamento")
+      await vi.advanceTimersByTimeAsync(50);
+      expect(calls).toBe(1);
+      // passado o stuckMs, o vigia forca um novo ciclo MESMO com o 1o pendurado
+      await vi.advanceTimersByTimeAsync(80);
+      expect(calls).toBeGreaterThanOrEqual(2);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ciclo normal (rapido) roda repetidamente, sem pular nem travar', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const syncOnceFn = () => {
+        calls += 1;
+        return Promise.resolve({ ok: true, error: null });
+      };
+      const stop = start({
+        db: makeMemDb(), apiBase, deviceToken,
+        intervalMs: 10, stuckMs: 100, syncOnceFn,
+      });
+      expect(calls).toBe(1); // tick imediato
+      await vi.advanceTimersByTimeAsync(35); // ticks em 10, 20, 30
+      expect(calls).toBeGreaterThanOrEqual(4);
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

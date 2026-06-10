@@ -323,24 +323,45 @@ export async function syncOnce({ db, apiBase, deviceToken, fetchImpl = globalThi
 // --------------------------------------------------------------------------
 // start — loop periódico com setInterval. Cada tick = syncOnce em try/catch
 // (offline silencia + re-tenta). Retorna stop().
+//
+// WATCHDOG (incidente 2026-06-10): em vez de um booleano `running` que, se um
+// ciclo pendura, trava o loop PRA SEMPRE, guardamos `runningSince` (início do
+// ciclo atual). Se um ciclo passar de `stuckMs` sem terminar, o vigia força um
+// novo ciclo. Um `gen` (geração) garante que um ciclo travado, se um dia
+// terminar, NÃO atropele/libere um ciclo mais novo. `syncOnceFn` é injetável
+// (testes). Junto com o timeout do psql, o sync nunca mais congela em silêncio.
 // --------------------------------------------------------------------------
-export function start({ db, apiBase, deviceToken, fetchImpl, intervalMs = 10000, log } = {}) {
+export function start({
+  db, apiBase, deviceToken, fetchImpl,
+  intervalMs = 10000, stuckMs = 120000, log, syncOnceFn = syncOnce,
+} = {}) {
   const logger = log || { info: () => {}, error: () => {} };
-  let running = false;
+  let runningSince = null; // null = nenhum ciclo em andamento
+  let gen = 0;
   let stopped = false;
 
   const tick = async () => {
-    if (running || stopped) return;
-    running = true;
+    if (stopped) return;
+    const now = Date.now();
+    // Ciclo em andamento e ainda dentro do limite → pula este tick.
+    if (runningSince !== null && now - runningSince < stuckMs) return;
+    // Passou do limite (ciclo pendurado): loga e força um novo (vigia).
+    if (runningSince !== null) {
+      logger.error(`sync: ciclo travado ha ${now - runningSince}ms — forcando novo ciclo (watchdog)`);
+    }
+    const myGen = ++gen;
+    runningSince = now;
     try {
-      await syncOnce({ db, apiBase, deviceToken, fetchImpl, log: logger });
+      await syncOnceFn({ db, apiBase, deviceToken, fetchImpl, log: logger });
     } catch (e) {
       // Salvaguarda final: nunca deixa um erro derrubar o loop.
       state.lastSyncOk = false;
       state.lastError = e?.message || String(e);
       logger.error(`sync tick: ${e?.message}`);
     } finally {
-      running = false;
+      // Só libera se ESTE ainda é o ciclo vigente — um ciclo travado que
+      // finalmente terminou não pode liberar/atropelar um ciclo mais novo.
+      if (myGen === gen) runningSince = null;
     }
   };
 
@@ -363,6 +384,13 @@ export function start({ db, apiBase, deviceToken, fetchImpl, intervalMs = 10000,
 // os bytes pelo codepage do console (ex.: WIN1252) e corrompe acentos (vira byte UTF-8 invalido).
 const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '', PGCLIENTENCODING: 'UTF8' };
 
+// Tempo-limite de CADA chamada ao psql. Sem isso, um psql que pendura (lock, conexão
+// presa, Postgres lento) faz o execFile nunca retornar → syncOnce nunca termina →
+// o tick fica preso com o ciclo "em andamento" pra sempre e o sync CONGELA (foi a
+// causa-raiz do congelamento de 2026-06-10). Estourado o tempo, o execFile mata o
+// processo e rejeita → o ciclo falha e re-tenta no próximo tick (offline-safe).
+const PSQL_TIMEOUT_MS = 30000;
+
 function psqlArgs(cfg) {
   return [
     '-p', String(cfg.ports.pg),
@@ -377,7 +405,7 @@ async function psqlCmd(cfg, sql) {
   const { stdout } = await execFileAsync(
     'psql',
     [...psqlArgs(cfg), '-v', 'ON_ERROR_STOP=1', '-tAc', sql],
-    { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 256 },
+    { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 256, timeout: PSQL_TIMEOUT_MS, killSignal: 'SIGKILL' },
   );
   return stdout;
 }
@@ -411,7 +439,7 @@ async function psqlSyncWrite(cfg, sql) {
     await execFileAsync(
       'psql',
       [...psqlArgs(cfg), '-v', 'ON_ERROR_STOP=1', '-f', tmpFile],
-      { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 256 },
+      { env: PSQL_ENV, maxBuffer: 1024 * 1024 * 256, timeout: PSQL_TIMEOUT_MS, killSignal: 'SIGKILL' },
     );
   } finally {
     if (fh) await fh.close().catch(() => {});
