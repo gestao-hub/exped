@@ -22,6 +22,8 @@ export const itemSchema = z.object({
   preco_unitario: z.number().nonnegative(),
   desconto:       z.number().nonnegative(),
   total:          z.number().nonnegative(),
+  // Fonte da verdade de como o cliente recebe o item (substitui o "modo de retirada" global).
+  modalidade:     z.enum(['imediato', 'loja', 'entrega']),
   referencia:     z.string().max(MID).nullable().optional(),
   saldo_estoque:  z.number().nullable().optional(),  // saldo no Hiper no momento da ingestão (snapshot)
 });
@@ -61,23 +63,11 @@ export const pedidoFormSchema = z.object({
   valor_total:      z.number().nonnegative(),
   observacoes:      z.string().max(TEXT).nullable().optional(),
   storage_pdf_path: z.string().max(LONG).nullable().optional(),
+  // `pontos_retirada` é mantido (a UI ainda monta destinos numa fase posterior), mas a
+  // antiga regra "cada ponto com itens" foi removida: a modalidade agora vive POR ITEM
+  // (fonte da verdade) e o vínculo é item→destino, não item-dentro-do-ponto. Um ponto é
+  // só um destino e pode existir sem itens aninhados.
   pontos_retirada:  z.array(pontoRetiradaSchema).min(1, 'Adicione ao menos 1 ponto de retirada').max(5),
-}).superRefine((val, ctx) => {
-  // Com mais de 1 ponto (ex.: modo Híbrido), cada ponto precisa ter ao menos 1 item —
-  // senão dá pra salvar um bloco (ex.: Entrega) totalmente vazio. Com 1 ponto só,
-  // não exigimos (rascunho pode ser salvo sem itens ainda).
-  const pontos = val.pontos_retirada ?? [];
-  if (pontos.length > 1) {
-    pontos.forEach((p, i) => {
-      if (!p.itens || p.itens.length === 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['pontos_retirada', i, 'itens'],
-          message: `O ponto "${p.tipo}" está sem itens — adicione ao menos 1 item.`,
-        });
-      }
-    });
-  }
 });
 
 export type PedidoFormInput = z.infer<typeof pedidoFormSchema>;
