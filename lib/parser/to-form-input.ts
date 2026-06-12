@@ -38,6 +38,7 @@ export function parsedToFormInput(
         preco_unitario: it.preco_unitario,
         desconto:       it.desconto,
         total:          it.total,
+        modalidade:     'loja' as const,  // padrão: item parseado entra como Loja (vendedor ajusta)
         referencia:     it.referencia ?? null,
       })),
     })),
