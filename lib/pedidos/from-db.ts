@@ -13,13 +13,14 @@ type PedidoRow = {
   valor_total: number; observacoes: string | null; storage_pdf_path: string | null;
 };
 type ModalidadeDb = Database['public']['Enums']['modalidade_item'];
+type PontoDestinoDb = Database['public']['Enums']['ponto_retirada_destino'];
 type ItemRow = {
   id: string; codigo: string; descricao: string; quantidade: number; unidade: string;
   preco_unitario: number; desconto: number; total: number; modalidade: ModalidadeDb;
   referencia: string | null; saldo_estoque: number | null; ordem: number | null;
 };
 type PontoRow = {
-  id: string; tipo: 'loja' | 'deposito' | 'entrega'; empresa_nome: string; endereco: string | null; ordem: number | null;
+  id: string; tipo: PontoDestinoDb; empresa_nome: string; endereco: string | null; ordem: number | null;
   itens: ItemRow[];
 };
 

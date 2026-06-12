@@ -65,8 +65,10 @@ export function PedidoForm({
   // a partir das modalidades dos itens. Normalização feita uma vez (defaultValues é
   // estável; o form mantém o estado a partir daqui).
   const initialDefaults = React.useMemo(() => {
-    const { loja, entrega } = normalizarParaForm(defaultValues.pontos_retirada);
-    return { ...defaultValues, pontos_retirada: [loja, entrega] };
+    const { loja, entrega, imediato } = normalizarParaForm(defaultValues.pontos_retirada);
+    // [0]=loja (todos os itens), [1]=entrega (só destino), [2]=imediato (só a PK do
+    // ponto-container, pra UPDATE in-place). O card Destino só usa os índices 0 e 1.
+    return { ...defaultValues, pontos_retirada: [loja, entrega, imediato] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -98,15 +100,16 @@ export function PedidoForm({
 
   /**
    * Reconstrói `pontos_retirada` a partir das modalidades dos itens + os dados dos
-   * destinos (ponto loja[0] e ponto entrega[1] da forma de trabalho). Grava o
+   * destinos (ponto loja[0], entrega[1] e imediato[2] da forma de trabalho). Grava o
    * resultado no form ANTES de validar, pra que o resolver veja a forma canônica que
-   * a persistência espera. Garante ao menos 1 ponto (regra `min(1)` do schema):
-   * pedido só-imediato cai num ponto loja vazio (placeholder, sem itens).
+   * a persistência espera. A regra `min(1)` do schema é satisfeita naturalmente:
+   * havendo qualquer item, sai ao menos 1 ponto (loja, entrega OU imediato).
    */
   function rebuildPontos() {
     const trabalho = getValues('pontos_retirada') ?? [];
     const lojaInfo = trabalho[0];
     const entregaInfo = trabalho[1];
+    const imediatoInfo = trabalho[2];
     const itens = lojaInfo?.itens ?? [];
 
     const pontos = sincronizarDestinos({
@@ -117,20 +120,9 @@ export function PedidoForm({
         empresa_nome: entregaInfo?.empresa_nome,
         endereco: entregaInfo?.endereco,
       },
+      // Carrega a PK do ponto-container imediato (se já existia) pra UPDATE in-place.
+      imediato: { id: imediatoInfo?.id },
     });
-
-    // Fallback p/ pedido só-imediato (ou sem itens): mantém 1 ponto loja vazio só pra
-    // satisfazer `pontos_retirada.min(1)`. Os itens imediato ficam sem destino mesmo
-    // (a coluna modalidade do item é o que importa; ponto_retirada_id sai null).
-    if (pontos.length === 0) {
-      pontos.push({
-        id: lojaInfo?.id ?? null,
-        tipo: 'loja',
-        empresa_nome: lojaInfo?.empresa_nome ?? '',
-        endereco: lojaInfo?.endereco ?? null,
-        itens: [],
-      });
-    }
 
     setValue('pontos_retirada', pontos, { shouldDirty: true, shouldValidate: false });
   }

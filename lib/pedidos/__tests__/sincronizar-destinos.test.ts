@@ -19,11 +19,20 @@ function item(over: Partial<ItemInput> = {}): ItemInput {
 }
 
 describe('sincronizarDestinos', () => {
-  it('só itens imediato → nenhum ponto (sem destino)', () => {
+  it('só itens imediato → 1 ponto imediato com os itens (container, sem destino)', () => {
     const pontos = sincronizarDestinos({
-      itens: [item({ modalidade: 'imediato' }), item({ modalidade: 'imediato' })],
+      itens: [
+        item({ codigo: 'I1', modalidade: 'imediato' }),
+        item({ codigo: 'I2', modalidade: 'imediato' }),
+      ],
     });
-    expect(pontos).toEqual([]);
+    // NÃO é mais um ponto loja vazio (placeholder); é um ponto imediato real que
+    // carrega os itens — senão os itens viram órfãos e somem ao salvar (data loss).
+    expect(pontos).toHaveLength(1);
+    expect(pontos[0].tipo).toBe('imediato');
+    expect(pontos[0].empresa_nome).toBe('');
+    expect(pontos[0].itens.map((i) => i.codigo)).toEqual(['I1', 'I2']);
+    expect(pontos[0].itens.every((i) => i.modalidade === 'imediato')).toBe(true);
   });
 
   it('itens loja → 1 ponto loja com todos os itens loja', () => {
@@ -49,7 +58,7 @@ describe('sincronizarDestinos', () => {
     expect(pontos[0].itens).toHaveLength(1);
   });
 
-  it('mix (loja + entrega + imediato) → ponto loja + ponto entrega; imediato fora', () => {
+  it('mix (loja + entrega + imediato) → 3 pontos; item imediato preservado num ponto imediato', () => {
     const pontos = sincronizarDestinos({
       itens: [
         item({ codigo: 'L1', modalidade: 'loja' }),
@@ -60,14 +69,16 @@ describe('sincronizarDestinos', () => {
       loja: { empresa_nome: 'Loja' },
       entrega: { empresa_nome: 'Cliente', endereco: 'End' },
     });
-    expect(pontos.map((p) => p.tipo)).toEqual(['loja', 'entrega']);
+    expect(pontos.map((p) => p.tipo)).toEqual(['loja', 'entrega', 'imediato']);
     const loja = pontos.find((p) => p.tipo === 'loja')!;
     const entrega = pontos.find((p) => p.tipo === 'entrega')!;
+    const imediato = pontos.find((p) => p.tipo === 'imediato')!;
     expect(loja.itens.map((i) => i.codigo)).toEqual(['L1', 'L2']);
     expect(entrega.itens.map((i) => i.codigo)).toEqual(['E1']);
-    // nenhum ponto contém o item imediato
+    // o item imediato NÃO é descartado: vive no ponto imediato (container).
+    expect(imediato.itens.map((i) => i.codigo)).toEqual(['I1']);
     const todosCodigos = pontos.flatMap((p) => p.itens.map((i) => i.codigo));
-    expect(todosCodigos).not.toContain('I1');
+    expect(todosCodigos).toContain('I1');
   });
 
   it('preserva a PK (id) dos pontos quando informada → permite UPDATE in-place', () => {
@@ -127,6 +138,15 @@ describe('normalizarParaForm', () => {
     expect(loja.itens).toHaveLength(1);
   });
 
+  it('ponto imediato carregado → itens dobrados na tabela de trabalho (modalidade preservada)', () => {
+    const { loja } = normalizarParaForm([
+      { id: 'pi', tipo: 'imediato', empresa_nome: '', endereco: null, itens: [item({ codigo: 'I', modalidade: 'imediato' })] },
+    ]);
+    // O item imediato é recuperado (não some) e mantém sua modalidade.
+    expect(loja.itens.map((i) => i.codigo)).toEqual(['I']);
+    expect(loja.itens[0].modalidade).toBe('imediato');
+  });
+
   it('round-trip: normalizar → sincronizar reconstrói os mesmos destinos', () => {
     const original: PontoInput[] = [
       { id: 'pl', tipo: 'loja', empresa_nome: 'Loja', endereco: 'R1', itens: [item({ codigo: 'A', modalidade: 'loja' })] },
@@ -146,5 +166,26 @@ describe('normalizarParaForm', () => {
     expect(e.id).toBe('pe');
     expect(e.endereco).toBe('R2');
     expect(e.itens.map((i) => i.codigo)).toEqual(['B']);
+  });
+
+  it('round-trip com imediato: item imediato sobrevive a normalizar → sincronizar (sem data loss)', () => {
+    // Pedido carregado com 1 item loja + 1 item imediato (em pontos distintos).
+    const original: PontoInput[] = [
+      { id: 'pl', tipo: 'loja', empresa_nome: 'Loja', endereco: 'R1', itens: [item({ codigo: 'A', modalidade: 'loja' })] },
+      { id: 'pi', tipo: 'imediato', empresa_nome: '', endereco: null, itens: [item({ codigo: 'I', modalidade: 'imediato' })] },
+    ];
+    const { loja, entrega } = normalizarParaForm(original);
+    const reconstruido = sincronizarDestinos({
+      itens: loja.itens,
+      loja: { id: loja.id, empresa_nome: loja.empresa_nome, endereco: loja.endereco },
+      entrega: { id: entrega.id, empresa_nome: entrega.empresa_nome, endereco: entrega.endereco },
+    });
+    // O item imediato continua presente (num ponto imediato) — NÃO foi descartado.
+    const todosCodigos = reconstruido.flatMap((p) => p.itens.map((i) => i.codigo));
+    expect(todosCodigos).toContain('I');
+    const pontoImediato = reconstruido.find((p) => p.tipo === 'imediato')!;
+    expect(pontoImediato).toBeDefined();
+    expect(pontoImediato.itens.map((i) => i.codigo)).toEqual(['I']);
+    expect(pontoImediato.itens[0].modalidade).toBe('imediato');
   });
 });

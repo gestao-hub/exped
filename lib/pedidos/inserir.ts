@@ -131,6 +131,9 @@ export async function inserirPedido(
         preco_unitario: it.preco_unitario,
         desconto: it.desconto,
         total: it.total,
+        // Modalidade é a fonte da verdade do item; sem isto o DEFAULT 'loja' do banco
+        // sobrescreveria itens imediato/entrega ao criar (some a info no reload).
+        modalidade: it.modalidade,
         referencia: it.referencia ?? null,
         saldo_estoque: it.saldo_estoque ?? null,
         ordem: idx,
