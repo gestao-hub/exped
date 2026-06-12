@@ -2,29 +2,20 @@
 
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
-import { useTransition, useState } from 'react';
+import { useTransition } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Plus, Trash2, Loader2, ArrowLeftRight } from 'lucide-react';
+import { Plus, Trash2, Loader2, Store, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
 import { criarPedidoAction, atualizarPedidoAction } from '@/app/(app)/vendas/actions';
-import { pedidoFormSchema, type PedidoFormInput, type ItemInput } from '@/lib/validators/pedido';
-import { dividirItem, mesclarItem, round2 } from '@/lib/pedidos/dividir-item';
+import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
+import { sincronizarDestinos, normalizarParaForm } from '@/lib/pedidos/sincronizar-destinos';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
 import {
@@ -66,17 +57,22 @@ export function PedidoForm({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  // Tabs controlado: ao reduzir o nº de pontos (Híbrido→Loja), a aba ativa pode
-  // apontar para um índice que deixou de existir e o painel sairia em branco.
-  const [abaPonto, setAbaPonto] = useState('0');
-  // Diálogo de mover/dividir item entre pontos (modo híbrido).
-  const [moverDialog, setMoverDialog] = useState<{ fromPontoIndex: number; itemIndex: number } | null>(null);
-  // Força remount dos ItensEditor após um move (re-lê os valores atualizados via setValue).
-  const [moveTick, setMoveTick] = useState(0);
+
+  // Forma de trabalho do form: a modalidade vive POR ITEM (coluna na tabela) e é a
+  // fonte da verdade. Internamente consolidamos tudo em 2 "pontos" de trabalho —
+  // [0]=loja (carrega TODOS os itens, a tabela única) e [1]=entrega (só guarda o
+  // destino de entrega). No submit, `sincronizarDestinos` reconstrói os pontos reais
+  // a partir das modalidades dos itens. Normalização feita uma vez (defaultValues é
+  // estável; o form mantém o estado a partir daqui).
+  const initialDefaults = React.useMemo(() => {
+    const { loja, entrega } = normalizarParaForm(defaultValues.pontos_retirada);
+    return { ...defaultValues, pontos_retirada: [loja, entrega] };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const form = useForm<PedidoFormInput>({
     resolver: zodResolver(pedidoFormSchema),
-    defaultValues,
+    defaultValues: initialDefaults,
   });
   const { control, register, handleSubmit, watch, setValue, getValues, formState: { errors } } = form;
   const cnpjCpfWatch = watch('cliente_cnpj_cpf');
@@ -89,124 +85,59 @@ export function PedidoForm({
     cep:      watch('cliente_cep')      ?? null,
     telefone: watch('cliente_telefone') ?? null,
   };
-  const { fields: pontos, remove: removePonto } = useFieldArray({
-    control,
-    name: 'pontos_retirada',
-    // keyName padrão é 'id' — colidiria com nosso campo `id` (PK do banco) e o RHF
-    // o sobrescreveria/removeria no submit. Usamos uma chave própria pra preservar a PK.
-    keyName: '_rhfId',
-  });
-
-  // Modo de retirada derivado dos pontos atuais (watch p/ refletir mudanças de tipo).
-  const pontosWatch = watch('pontos_retirada');
-  const modoRetirada: 'loja' | 'deposito' | 'hibrido' =
-    pontosWatch?.some((p) => p?.tipo === 'entrega')
-      ? 'hibrido'
-      : pontosWatch?.[0]?.tipo === 'deposito'
-        ? 'deposito'
-        : 'loja';
-  // No modo híbrido, o tipo do ponto de retirada (loja vs depósito) é um sub-seletor.
-  const tipoRetiradaHibrido: 'loja' | 'deposito' =
-    pontosWatch?.find((p) => p?.tipo === 'deposito') ? 'deposito' : 'loja';
-  // Frete só faz sentido quando há entrega (envio/híbrido). Mostramos também quando
-  // já existe um valor (ex.: veio do Hiper) pra não esconder o dado.
+  // Modalidades em uso, derivadas dos itens (a coluna Modalidade é a fonte da verdade).
+  // O índice 0 (`loja`) carrega TODOS os itens; o índice 1 (`entrega`) só guarda o
+  // destino de entrega. Observamos os itens do ponto 0 pra recalcular os blocos do
+  // card Destino quando o operador troca a modalidade de uma linha.
+  const itensWatch = watch('pontos_retirada.0.itens');
+  const temItemLoja = (itensWatch ?? []).some((it) => it?.modalidade === 'loja');
+  const temItemEntrega = (itensWatch ?? []).some((it) => it?.modalidade === 'entrega');
+  // Frete é nível-pedido (valor_frete). Mostra quando há entrega ou já há um valor.
   const freteWatch = watch('valor_frete');
-  const mostrarFrete = modoRetirada === 'hibrido' || Number(freteWatch ?? 0) > 0;
-
-  /** Endereço do cliente (default do ponto de entrega no modo híbrido). */
-  function enderecoCliente() {
-    const partes = [
-      getValues('cliente_endereco'),
-      getValues('cliente_bairro'),
-      getValues('cliente_cidade'),
-      getValues('cliente_uf'),
-    ].filter((s): s is string => !!s && s.trim() !== '');
-    return partes.join(', ');
-  }
-
-  /** Junta todos os itens dos pontos atuais num único array. */
-  function todosItens() {
-    return (getValues('pontos_retirada') ?? []).flatMap((p) => p?.itens ?? []);
-  }
-
-  function aplicarModo(novo: 'loja' | 'deposito' | 'hibrido', tipoRetirada?: 'loja' | 'deposito') {
-    // Reset da aba ativa: tanto loja/deposito (1 ponto) quanto híbrido (reconstrói
-    // os 2 pontos) garantem que índice 0 existe — evita painel em branco.
-    setAbaPonto('0');
-    const atuais = getValues('pontos_retirada') ?? [];
-    if (novo === 'loja' || novo === 'deposito') {
-      // 1 ponto único com TODOS os itens consolidados; remove extras.
-      const itens = todosItens();
-      const base = atuais[0];
-      setValue('pontos_retirada', [
-        {
-          ...(base ?? { empresa_nome: '', endereco: '' }),
-          id: base?.id ?? null,
-          tipo: novo,
-          empresa_nome: base?.empresa_nome ?? '',
-          endereco: base?.endereco ?? '',
-          itens,
-        },
-      ], { shouldDirty: true });
-      return;
-    }
-    // Híbrido: ponto de retirada (loja/depósito) + ponto de entrega (endereço do cliente).
-    const tr = tipoRetirada ?? tipoRetiradaHibrido;
-    const retiradaExistente = atuais.find((p) => p?.tipo === 'loja' || p?.tipo === 'deposito');
-    const entregaExistente = atuais.find((p) => p?.tipo === 'entrega');
-    setValue('pontos_retirada', [
-      {
-        id: retiradaExistente?.id ?? null,
-        tipo: tr,
-        empresa_nome: retiradaExistente?.empresa_nome ?? '',
-        endereco: retiradaExistente?.endereco ?? '',
-        itens: retiradaExistente?.itens ?? (entregaExistente ? [] : todosItens()),
-      },
-      {
-        id: entregaExistente?.id ?? null,
-        tipo: 'entrega',
-        empresa_nome: entregaExistente?.empresa_nome || getValues('cliente_nome') || '',
-        endereco: entregaExistente?.endereco || enderecoCliente(),
-        itens: entregaExistente?.itens ?? [],
-      },
-    ], { shouldDirty: true });
-  }
+  const mostrarFrete = temItemEntrega || Number(freteWatch ?? 0) > 0;
 
   /**
-   * Move `n` unidades de um item do ponto `fromPontoIndex` para o OUTRO ponto do
-   * híbrido (entrega ↔ retirada). Move tudo (item sai) ou divide a quantidade
-   * (parte fica, parte vai; soma no item de mesmo código no destino).
+   * Reconstrói `pontos_retirada` a partir das modalidades dos itens + os dados dos
+   * destinos (ponto loja[0] e ponto entrega[1] da forma de trabalho). Grava o
+   * resultado no form ANTES de validar, pra que o resolver veja a forma canônica que
+   * a persistência espera. Garante ao menos 1 ponto (regra `min(1)` do schema):
+   * pedido só-imediato cai num ponto loja vazio (placeholder, sem itens).
    */
-  function moverItem(fromPontoIndex: number, itemIndex: number, n: number) {
-    const pontos = getValues('pontos_retirada') ?? [];
-    const from = pontos[fromPontoIndex];
-    if (!from) return;
-    const targetIndex =
-      from.tipo === 'entrega'
-        ? pontos.findIndex((p) => p?.tipo !== 'entrega')
-        : pontos.findIndex((p) => p?.tipo === 'entrega');
-    if (targetIndex < 0) return;
-    const item = (from.itens ?? [])[itemIndex];
-    if (!item) return;
+  function rebuildPontos() {
+    const trabalho = getValues('pontos_retirada') ?? [];
+    const lojaInfo = trabalho[0];
+    const entregaInfo = trabalho[1];
+    const itens = lojaInfo?.itens ?? [];
 
-    const { movido, restante } = dividirItem(item as ItemInput, n);
-    const novos = pontos.map((p, idx) => {
-      if (idx === fromPontoIndex) {
-        const itens = [...(p.itens ?? [])];
-        if (restante) itens[itemIndex] = restante;
-        else itens.splice(itemIndex, 1);
-        return { ...p, itens };
-      }
-      if (idx === targetIndex) {
-        return { ...p, itens: mesclarItem([...(p.itens ?? [])], movido) };
-      }
-      return p;
+    const pontos = sincronizarDestinos({
+      itens,
+      loja: { id: lojaInfo?.id, empresa_nome: lojaInfo?.empresa_nome, endereco: lojaInfo?.endereco },
+      entrega: {
+        id: entregaInfo?.id,
+        empresa_nome: entregaInfo?.empresa_nome,
+        endereco: entregaInfo?.endereco,
+      },
     });
-    setValue('pontos_retirada', novos, { shouldDirty: true });
-    setMoveTick((t) => t + 1);
+
+    // Fallback p/ pedido só-imediato (ou sem itens): mantém 1 ponto loja vazio só pra
+    // satisfazer `pontos_retirada.min(1)`. Os itens imediato ficam sem destino mesmo
+    // (a coluna modalidade do item é o que importa; ponto_retirada_id sai null).
+    if (pontos.length === 0) {
+      pontos.push({
+        id: lojaInfo?.id ?? null,
+        tipo: 'loja',
+        empresa_nome: lojaInfo?.empresa_nome ?? '',
+        endereco: lojaInfo?.endereco ?? null,
+        itens: [],
+      });
+    }
+
+    setValue('pontos_retirada', pontos, { shouldDirty: true, shouldValidate: false });
   }
 
   function submit(status: 'rascunho' | 'em_financeiro') {
+    // Re-deriva os pontos das modalidades dos itens ANTES de validar/enviar.
+    rebuildPontos();
     handleSubmit(
       (values) => {
         startTransition(async () => {
@@ -351,151 +282,79 @@ export function PedidoForm({
         </CardContent>
       </Card>
 
-      {/* Pontos de Retirada */}
+      {/* Itens — a modalidade (Imediato/Loja/Entrega) é escolhida POR ITEM na coluna
+          Modalidade; o card Destino abaixo deriva dos itens. */}
       <Card>
-        <CardHeader className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <CardTitle>Pontos de Retirada</CardTitle>
-          <div className="flex flex-wrap items-end gap-3">
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1.5 block">
-                Modo de retirada
-              </Label>
-              <select
-                value={modoRetirada}
-                onChange={(e) => aplicarModo(e.target.value as 'loja' | 'deposito' | 'hibrido')}
-                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-              >
-                <option value="loja">Loja</option>
-                <option value="deposito">Depósito</option>
-                <option value="hibrido">Híbrido (retirada + entrega)</option>
-              </select>
-            </div>
-            {modoRetirada === 'hibrido' && (
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">
-                  Ponto de retirada
-                </Label>
-                <select
-                  value={tipoRetiradaHibrido}
-                  onChange={(e) =>
-                    aplicarModo('hibrido', e.target.value as 'loja' | 'deposito')
-                  }
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                >
-                  <option value="loja">Loja</option>
-                  <option value="deposito">Depósito</option>
-                </select>
-              </div>
-            )}
-          </div>
+        <CardHeader>
+          <CardTitle>Itens</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs value={abaPonto} onValueChange={setAbaPonto} className="w-full">
-            <TabsList>
-              {pontos.map((p, i) => (
-                <TabsTrigger key={p._rhfId} value={String(i)} className="capitalize">
-                  {watch(`pontos_retirada.${i}.tipo`) ?? p.tipo}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            {pontos.map((p, i) => (
-              <TabsContent key={p._rhfId} value={String(i)} className="space-y-4 pt-4">
-                {/* PK estável do ponto (presente ao editar; ausente ao criar novo) */}
-                <input
-                  type="hidden"
-                  {...register(`pontos_retirada.${i}.id`, {
-                    setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
-                  })}
-                />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* No modo híbrido o tipo por ponto é editável (sub-seletor loja/depósito
-                      + ponto de entrega). Fora dele há 1 ponto só e o "Modo de retirada"
-                      já define o tipo — trocar aqui para "entrega" criaria um híbrido
-                      incoerente sem o par retirada+entrega, então ocultamos o select. */}
-                  {modoRetirada === 'hibrido' && (
-                    <Field label="Tipo">
-                      <select
-                        {...register(`pontos_retirada.${i}.tipo`)}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                      >
-                        <option value="loja">Loja</option>
-                        <option value="deposito">Depósito</option>
-                        <option value="entrega">Entrega</option>
-                      </select>
-                    </Field>
-                  )}
-                  <Field label="Empresa" className="md:col-span-2">
-                    <Input {...register(`pontos_retirada.${i}.empresa_nome`)} />
-                  </Field>
-                  <Field label="Endereço" className="md:col-span-3">
-                    <Input {...register(`pontos_retirada.${i}.endereco`)} />
-                  </Field>
-                </div>
-
-                <ItensEditor
-                  key={`itens-${p._rhfId}-${moveTick}`}
-                  pontoIndex={i}
-                  control={control}
-                  register={register}
-                  onMover={
-                    modoRetirada === 'hibrido'
-                      ? (itemIndex) => setMoverDialog({ fromPontoIndex: i, itemIndex })
-                      : undefined
-                  }
-                  moverLabel={
-                    (watch(`pontos_retirada.${i}.tipo`) ?? p.tipo) === 'entrega'
-                      ? 'Retirada'
-                      : 'Entrega'
-                  }
-                />
-
-                {pontos.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      removePonto(i);
-                      // Garante que a aba ativa continue válida após a remoção
-                      // (a lista encolhe de pontos.length para pontos.length - 1).
-                      setAbaPonto((atual) =>
-                        Number(atual) >= pontos.length - 1
-                          ? String(Math.max(0, pontos.length - 2))
-                          : atual,
-                      );
-                    }}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" /> Remover ponto
-                  </Button>
-                )}
-              </TabsContent>
-            ))}
-          </Tabs>
+          {/* PKs estáveis dos pontos de trabalho (loja[0] e entrega[1]) — preservadas
+              pra reconciliação fazer UPDATE in-place ao salvar. */}
+          <input
+            type="hidden"
+            {...register('pontos_retirada.0.id', {
+              setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
+            })}
+          />
+          <input
+            type="hidden"
+            {...register('pontos_retirada.1.id', {
+              setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
+            })}
+          />
+          <ItensEditor pontoIndex={0} control={control} register={register} />
         </CardContent>
       </Card>
 
-      {/* Diálogo de mover/dividir item entre pontos (híbrido) */}
-      {moverDialog &&
-        (() => {
-          const item = getValues(
-            `pontos_retirada.${moverDialog.fromPontoIndex}.itens.${moverDialog.itemIndex}`,
-          ) as ItemInput | undefined;
-          if (!item) return null;
-          const fromTipo = getValues(`pontos_retirada.${moverDialog.fromPontoIndex}.tipo`);
-          const targetLabel = fromTipo === 'entrega' ? 'Retirada' : 'Entrega';
-          return (
-            <MoverItemDialog
-              item={item}
-              targetLabel={targetLabel}
-              onClose={() => setMoverDialog(null)}
-              onConfirm={(n) => {
-                moverItem(moverDialog.fromPontoIndex, moverDialog.itemIndex, n);
-                setMoverDialog(null);
-              }}
-            />
-          );
-        })()}
+      {/* Destino — derivado das modalidades dos itens. Só aparece o bloco da
+          modalidade em uso (Loja se houver item Loja; Entrega se houver item Entrega).
+          Pedido só com itens Imediato não tem destino. */}
+      {(temItemLoja || temItemEntrega) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Destino</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {temItemLoja && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Store className="h-4 w-4 text-brand" /> Retirada na loja
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Field label="Empresa / Loja" className="md:col-span-1">
+                    <Input {...register('pontos_retirada.0.empresa_nome')} />
+                  </Field>
+                  <Field label="Endereço" className="md:col-span-2">
+                    <Input {...register('pontos_retirada.0.endereco')} />
+                  </Field>
+                </div>
+              </div>
+            )}
+
+            {temItemLoja && temItemEntrega && <Separator />}
+
+            {temItemEntrega && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Truck className="h-4 w-4 text-brand" /> Entrega
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Field label="Destinatário" className="md:col-span-1">
+                    <Input {...register('pontos_retirada.1.empresa_nome')} />
+                  </Field>
+                  <Field label="Endereço de entrega" className="md:col-span-2">
+                    <Input {...register('pontos_retirada.1.endereco')} />
+                  </Field>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  O frete é informado no card Pagamento (nível do pedido).
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pagamento e Observações */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -672,17 +531,12 @@ function ItensEditor({
   pontoIndex,
   control,
   register,
-  onMover,
-  moverLabel,
 }: {
   pontoIndex: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   control: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: any;
-  /** Quando presente (modo híbrido), mostra o botão "Mover" por item. */
-  onMover?: (itemIndex: number) => void;
-  moverLabel?: string;
 }) {
   const { fields, append, remove } = useFieldArray({
     control,
@@ -707,6 +561,7 @@ function ItensEditor({
               preco_unitario: 0,
               desconto: 0,
               total: 0,
+              modalidade: 'loja', // item novo nasce Loja (padrão); operador ajusta
               referencia: null,
             })
           }
@@ -726,11 +581,12 @@ function ItensEditor({
               <tr>
                 <th className="text-left  px-2 py-2 w-20">Código</th>
                 <th className="text-left  px-2 py-2">Descrição</th>
+                <th className="text-left  px-2 py-2 w-32">Modalidade</th>
                 <th className="text-right px-2 py-2 w-20">Qtd</th>
                 <th className="text-left  px-2 py-2 w-16">Un</th>
                 <th className="text-right px-2 py-2 w-28">Unitário</th>
                 <th className="text-right px-2 py-2 w-28">Total</th>
-                <th className={onMover ? 'w-20' : 'w-10'} />
+                <th className="w-10" />
               </tr>
             </thead>
             <tbody>
@@ -748,6 +604,26 @@ function ItensEditor({
                   </td>
                   <td className="px-1 py-1">
                     <Input {...register(`pontos_retirada.${pontoIndex}.itens.${i}.descricao`)} className="h-8" />
+                  </td>
+                  <td className="px-1 py-1">
+                    {/* Modalidade do item = fonte da verdade de como o cliente recebe.
+                        O card Destino abaixo deriva dos valores desta coluna. */}
+                    <Controller
+                      control={control}
+                      name={`pontos_retirada.${pontoIndex}.itens.${i}.modalidade`}
+                      render={({ field }) => (
+                        <select
+                          value={field.value ?? 'loja'}
+                          onChange={field.onChange}
+                          onBlur={field.onBlur}
+                          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+                        >
+                          <option value="imediato">Imediato</option>
+                          <option value="loja">Loja</option>
+                          <option value="entrega">Entrega</option>
+                        </select>
+                      )}
+                    />
                   </td>
                   <td className="px-1 py-1">
                     <Input
@@ -778,18 +654,6 @@ function ItensEditor({
                   </td>
                   <td className="px-1 py-1">
                     <div className="flex items-center justify-end gap-0.5">
-                      {onMover && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onMover(i)}
-                          aria-label={`Mover para ${moverLabel}`}
-                          title={`Mover para ${moverLabel}`}
-                        >
-                          <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -808,61 +672,5 @@ function ItensEditor({
         </div>
       )}
     </div>
-  );
-}
-
-function MoverItemDialog({
-  item,
-  targetLabel,
-  onClose,
-  onConfirm,
-}: {
-  item: ItemInput;
-  targetLabel: string;
-  onClose: () => void;
-  onConfirm: (n: number) => void;
-}) {
-  const max = Number(item.quantidade) || 0;
-  const [qtd, setQtd] = useState<number>(max);
-  const valido = qtd > 0 && qtd <= max;
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Mover para {targetLabel}</DialogTitle>
-          <DialogDescription>
-            {item.descricao || item.codigo || 'Item'} — {max} {item.unidade || 'UN'} neste ponto.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="py-2 space-y-2">
-          <Label className="text-xs text-muted-foreground">
-            Quantidade a mover (máx. {max})
-          </Label>
-          <Input
-            type="number"
-            step="0.001"
-            min={0}
-            max={max}
-            value={qtd}
-            onChange={(e) => setQtd(Number(e.target.value))}
-            className="font-mono text-right"
-            autoFocus
-          />
-          <p className="text-[11px] text-muted-foreground">
-            {qtd >= max
-              ? `O item inteiro vai para ${targetLabel}.`
-              : `Ficam ${round2(max - qtd)} aqui e ${round2(qtd)} vão para ${targetLabel}.`}
-          </p>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button disabled={!valido} onClick={() => onConfirm(qtd)} className="bg-brand hover:bg-brand-600">
-            <ArrowLeftRight className="h-4 w-4 mr-1" /> Mover
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
