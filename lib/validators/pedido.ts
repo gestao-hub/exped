@@ -24,6 +24,12 @@ export const itemSchema = z.object({
   total:          z.number().nonnegative(),
   // Fonte da verdade de como o cliente recebe o item (substitui o "modo de retirada" global).
   modalidade:     z.enum(['imediato', 'loja', 'entrega']),
+  // Campo APENAS-DO-FORM (transitório, NÃO persistido em pedido_itens — essa tabela não
+  // tem essa coluna; o endereço vive no PONTO de entrega). Roteia itens `entrega` para
+  // destinos distintos: itens com endereco_entrega_id diferente viram pontos `entrega`
+  // distintos (multi-endereço). null/ausente = destino de entrega padrão. O valor é a
+  // PK do `cliente_enderecos` escolhido (ou a PK do ponto, ao recarregar um pedido salvo).
+  endereco_entrega_id: z.string().nullable().optional(),
   referencia:     z.string().max(MID).nullable().optional(),
   saldo_estoque:  z.number().nullable().optional(),  // saldo no Hiper no momento da ingestão (snapshot)
 });

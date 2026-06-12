@@ -11,6 +11,10 @@ export type DestinoInfo = {
   /** PK do ponto no banco (presente ao editar; ausente ao criar). Preserva o id
    *  pra reconciliação fazer UPDATE in-place em vez de delete+insert. */
   id?: string | null;
+  /** Chave de roteamento do endereço deste destino de entrega — casa com o
+   *  `endereco_entrega_id` dos itens. É a PK do `cliente_enderecos` escolhido (ou a
+   *  PK do ponto, ao recarregar). Usado SÓ por destinos de entrega multi-endereço. */
+  enderecoId?: string | null;
   empresa_nome?: string | null;
   endereco?: string | null;
 };
@@ -20,9 +24,13 @@ export type SincronizarDestinosInput = {
   itens: ItemInput[];
   /** Destino "loja" (empresa de retirada). Usado pelos itens `modalidade==='loja'`. */
   loja?: DestinoInfo;
-  /** Destino "entrega" (endereço do cliente). Nesta fase há UM único destino de
-   *  entrega; multi-endereço é tratado numa task posterior. */
+  /** Destino de entrega PADRÃO — usado por itens `entrega` SEM `endereco_entrega_id`
+   *  (null/ausente). Cobre o fluxo simples de UM endereço de entrega. */
   entrega?: DestinoInfo;
+  /** Destinos de entrega POR ENDEREÇO (multi-endereço). Cada item `entrega` com um
+   *  `endereco_entrega_id` é agrupado e ligado ao destino cujo `enderecoId` casa,
+   *  emitindo UM ponto `entrega` por endereço distinto em uso. */
+  entregas?: DestinoInfo[];
   /** Ponto-container "imediato" (sem destino) dos itens `modalidade==='imediato'`.
    *  Só carrega a PK pra UPDATE in-place; não tem empresa/endereço. */
   imediato?: DestinoInfo;
@@ -65,14 +73,37 @@ export function sincronizarDestinos(input: SincronizarDestinosInput): PontoInput
     });
   }
 
+  // Itens `entrega` viram UM ponto `entrega` POR endereço distinto (multi-endereço):
+  // agrupa por `endereco_entrega_id` (null/ausente = destino padrão `input.entrega`),
+  // preservando a ordem de primeira ocorrência. Cada grupo casa com o destino cujo
+  // `enderecoId` bate (pra herdar PK + empresa + endereço); o grupo padrão usa
+  // `input.entrega`. Itens distintos podem ir para endereços distintos.
   if (itensEntrega.length > 0) {
-    pontos.push({
-      id: input.entrega?.id ?? null,
-      tipo: 'entrega',
-      empresa_nome: input.entrega?.empresa_nome ?? '',
-      endereco: input.entrega?.endereco ?? null,
-      itens: itensEntrega,
-    });
+    const grupos = new Map<string | null, ItemInput[]>();
+    for (const it of itensEntrega) {
+      const key = it.endereco_entrega_id ?? null;
+      const arr = grupos.get(key);
+      if (arr) arr.push(it);
+      else grupos.set(key, [it]);
+    }
+    const entregasPorId = new Map<string, DestinoInfo>();
+    for (const d of input.entregas ?? []) {
+      if (d.enderecoId != null) entregasPorId.set(d.enderecoId, d);
+    }
+    for (const [key, itensDoGrupo] of grupos) {
+      // Grupo sem endereço (key=null) → destino padrão `input.entrega`. Com endereço →
+      // casa por `enderecoId` em `input.entregas`; se não houver match (ex.: fluxo
+      // de UM endereço que só passou `input.entrega`), cai pro destino padrão.
+      const destino: DestinoInfo | undefined =
+        key == null ? input.entrega : entregasPorId.get(key) ?? input.entrega;
+      pontos.push({
+        id: destino?.id ?? null,
+        tipo: 'entrega',
+        empresa_nome: destino?.empresa_nome ?? '',
+        endereco: destino?.endereco ?? null,
+        itens: itensDoGrupo,
+      });
+    }
   }
 
   // Itens `imediato` vivem num ponto-container `imediato` (sem empresa/endereço) só
@@ -96,24 +127,47 @@ export function sincronizarDestinos(input: SincronizarDestinosInput): PontoInput
  * ponto "entrega" vazio só pra guardar os dados do destino de entrega (empresa/
  * endereço) e sua PK. No submit, `sincronizarDestinos` reconstrói os pontos reais.
  */
+/** Um destino de entrega recuperado da carga (multi-endereço): a PK do ponto + o
+ *  endereço + a chave de roteamento (`endereco_entrega_id`) que os itens daquele
+ *  destino carregam. O form lista esses destinos no card e re-passa pra sincronizar. */
+export type FormEntregaDestino = {
+  /** PK do ponto `entrega` no banco (pra UPDATE in-place). */
+  id?: string | null;
+  /** Chave de roteamento — casa com o `endereco_entrega_id` dos itens deste destino. */
+  endereco_entrega_id: string | null;
+  empresa_nome: string;
+  endereco: string | null;
+};
+
 export type FormDestinos = {
-  /** Ponto loja (index 0): empresa/endereço da loja + TODOS os itens. */
+  /** Ponto loja (index 0): empresa/endereço da loja + TODOS os itens. Cada item
+   *  `entrega` vem com seu `endereco_entrega_id` setado (roteamento multi-endereço). */
   loja: PontoInput;
-  /** Ponto entrega (index 1): empresa/endereço do destino de entrega; itens vazio. */
+  /** Ponto entrega (index 1): destino de entrega PADRÃO (1º ponto entrega carregado),
+   *  só pra back-compat do fluxo de UM endereço; itens vazio. */
   entrega: PontoInput;
   /** Ponto imediato (index 2): só guarda a PK do ponto-container imediato (sem
    *  empresa/endereço, itens vazio) pra UPDATE in-place no re-save. */
   imediato: PontoInput;
+  /** TODOS os destinos de entrega carregados (multi-endereço), 1 por ponto `entrega`.
+   *  Cada um traz sua PK + endereço + a chave de roteamento dos seus itens. */
+  entregas: FormEntregaDestino[];
 };
 
 /**
  * Normaliza os `pontos_retirada` carregados (pedido novo, parseado, ou editado e já
- * dividido em loja+entrega) para a forma de trabalho do form. PURA.
+ * dividido em loja+entrega[+entrega…]) para a forma de trabalho do form. PURA.
  *
  *  - Junta TODOS os itens (de todos os pontos) numa única lista, no ponto loja.
  *  - Recupera o destino loja do 1º ponto loja/depósito existente (ou cria um vazio).
- *  - Recupera o destino entrega do 1º ponto entrega existente (ou cria um vazio).
+ *  - Recupera CADA ponto entrega como um destino (multi-endereço), com sua PK.
+ *  - Carimba cada item `entrega` com o `endereco_entrega_id` (chave de roteamento) do
+ *    ponto de onde ele veio, pra que o re-save reagrupe os itens nos mesmos destinos.
  *  - Preserva os ids dos pontos (PK) pra UPDATE in-place na hora de salvar.
+ *
+ * Chave de roteamento: como `pedido_pontos_retirada` não tem coluna de id-de-endereço,
+ * usamos a própria PK do ponto entrega como `endereco_entrega_id` ao recarregar. Assim
+ * o agrupamento no re-save é estável e determinístico (round-trip preserva os destinos).
  *
  * A modalidade de cada item é mantida intacta (fonte da verdade); este normalizador
  * NÃO infere modalidade a partir do tipo do ponto (isso já foi feito no backfill da
@@ -121,13 +175,31 @@ export type FormDestinos = {
  */
 export function normalizarParaForm(pontos: PontoInput[] | undefined): FormDestinos {
   const lista = pontos ?? [];
-  // Junta TODOS os itens de TODOS os pontos (inclusive o imediato) na tabela única.
-  // Cada item mantém sua própria modalidade (fonte da verdade), então um item imediato
-  // já vem dobrado aqui com modalidade='imediato' — não some.
-  const todosItens = lista.flatMap((p) => p?.itens ?? []);
   const pontoLoja = lista.find((p) => p?.tipo === 'loja' || p?.tipo === 'deposito');
-  const pontoEntrega = lista.find((p) => p?.tipo === 'entrega');
+  const pontosEntrega = lista.filter((p) => p?.tipo === 'entrega');
   const pontoImediato = lista.find((p) => p?.tipo === 'imediato');
+
+  // Junta TODOS os itens de TODOS os pontos na tabela única. Itens vindos de um ponto
+  // `entrega` são carimbados com a chave de roteamento daquele ponto (a PK do ponto),
+  // pra reagrupar nos mesmos destinos ao salvar. Itens de outros pontos ficam sem chave.
+  const todosItens: ItemInput[] = [];
+  for (const p of lista) {
+    if (!p) continue;
+    const chave = p.tipo === 'entrega' ? routingKey(p) : null;
+    for (const it of p.itens ?? []) {
+      todosItens.push(chave != null ? { ...it, endereco_entrega_id: chave } : it);
+    }
+  }
+
+  // Um destino de entrega por ponto `entrega` carregado (multi-endereço).
+  const entregas: FormEntregaDestino[] = pontosEntrega.map((p) => ({
+    id: p?.id ?? null,
+    endereco_entrega_id: routingKey(p),
+    empresa_nome: p?.empresa_nome ?? '',
+    endereco: p?.endereco ?? null,
+  }));
+
+  const primeiroEntrega = pontosEntrega[0];
 
   return {
     loja: {
@@ -138,10 +210,10 @@ export function normalizarParaForm(pontos: PontoInput[] | undefined): FormDestin
       itens: todosItens,
     },
     entrega: {
-      id: pontoEntrega?.id ?? null,
+      id: primeiroEntrega?.id ?? null,
       tipo: 'entrega',
-      empresa_nome: pontoEntrega?.empresa_nome ?? '',
-      endereco: pontoEntrega?.endereco ?? null,
+      empresa_nome: primeiroEntrega?.empresa_nome ?? '',
+      endereco: primeiroEntrega?.endereco ?? null,
       itens: [],
     },
     imediato: {
@@ -151,5 +223,15 @@ export function normalizarParaForm(pontos: PontoInput[] | undefined): FormDestin
       endereco: null,
       itens: [],
     },
+    entregas,
   };
+}
+
+/**
+ * Chave de roteamento estável de um ponto `entrega` carregado. Prefere a PK do ponto
+ * (uuid, sempre presente em ponto já salvo). Sem PK (caso raro de ponto não persistido),
+ * cai pro endereço como chave — garante que itens do mesmo endereço agrupem juntos.
+ */
+function routingKey(p: PontoInput | undefined): string {
+  return (p?.id ?? p?.endereco ?? '') as string;
 }

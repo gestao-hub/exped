@@ -100,6 +100,87 @@ describe('sincronizarDestinos', () => {
   });
 });
 
+describe('sincronizarDestinos — multi-endereço de entrega (Task 10)', () => {
+  it('2 itens entrega com endereço DIFERENTE → 2 pontos entrega, cada um com seus itens + endereço', () => {
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E1', modalidade: 'entrega', endereco_entrega_id: 'end-A' }),
+        item({ codigo: 'E2', modalidade: 'entrega', endereco_entrega_id: 'end-B' }),
+      ],
+      entregas: [
+        { enderecoId: 'end-A', empresa_nome: 'Obra Norte', endereco: 'Rua A, 1' },
+        { enderecoId: 'end-B', empresa_nome: 'Obra Sul', endereco: 'Rua B, 2' },
+      ],
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    expect(entregas).toHaveLength(2);
+    const a = entregas.find((p) => p.endereco === 'Rua A, 1')!;
+    const b = entregas.find((p) => p.endereco === 'Rua B, 2')!;
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a.empresa_nome).toBe('Obra Norte');
+    expect(b.empresa_nome).toBe('Obra Sul');
+    expect(a.itens.map((i) => i.codigo)).toEqual(['E1']);
+    expect(b.itens.map((i) => i.codigo)).toEqual(['E2']);
+  });
+
+  it('2 itens entrega no MESMO endereço → 1 ponto entrega com os 2 itens', () => {
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E1', modalidade: 'entrega', endereco_entrega_id: 'end-A' }),
+        item({ codigo: 'E2', modalidade: 'entrega', endereco_entrega_id: 'end-A' }),
+      ],
+      entregas: [{ enderecoId: 'end-A', empresa_nome: 'Obra', endereco: 'Rua A, 1' }],
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    expect(entregas).toHaveLength(1);
+    expect(entregas[0].itens.map((i) => i.codigo)).toEqual(['E1', 'E2']);
+  });
+
+  it('itens entrega SEM endereço_entrega_id → caem no destino entrega padrão (input.entrega)', () => {
+    const pontos = sincronizarDestinos({
+      itens: [item({ codigo: 'E', modalidade: 'entrega' })],
+      entrega: { empresa_nome: 'Cliente', endereco: 'Av. Padrão, 9' },
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    expect(entregas).toHaveLength(1);
+    expect(entregas[0].endereco).toBe('Av. Padrão, 9');
+    expect(entregas[0].itens.map((i) => i.codigo)).toEqual(['E']);
+  });
+
+  it('mistura: 1 item no endereço padrão (null) + 1 item endereço B → 2 pontos entrega distintos', () => {
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E0', modalidade: 'entrega' }),
+        item({ codigo: 'EB', modalidade: 'entrega', endereco_entrega_id: 'end-B' }),
+      ],
+      entrega: { empresa_nome: 'Cliente', endereco: 'Av. Padrão, 9' },
+      entregas: [{ enderecoId: 'end-B', empresa_nome: 'Obra Sul', endereco: 'Rua B, 2' }],
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    expect(entregas).toHaveLength(2);
+    expect(entregas.find((p) => p.endereco === 'Av. Padrão, 9')!.itens.map((i) => i.codigo)).toEqual(['E0']);
+    expect(entregas.find((p) => p.endereco === 'Rua B, 2')!.itens.map((i) => i.codigo)).toEqual(['EB']);
+  });
+
+  it('preserva a PK do ponto entrega por endereço (UPDATE in-place por destino)', () => {
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E1', modalidade: 'entrega', endereco_entrega_id: 'end-A' }),
+        item({ codigo: 'E2', modalidade: 'entrega', endereco_entrega_id: 'end-B' }),
+      ],
+      entregas: [
+        { id: 'ponto-A', enderecoId: 'end-A', endereco: 'Rua A, 1' },
+        { id: 'ponto-B', enderecoId: 'end-B', endereco: 'Rua B, 2' },
+      ],
+    });
+    const a = pontos.find((p) => p.endereco === 'Rua A, 1')!;
+    const b = pontos.find((p) => p.endereco === 'Rua B, 2')!;
+    expect(a.id).toBe('ponto-A');
+    expect(b.id).toBe('ponto-B');
+  });
+});
+
 describe('normalizarParaForm', () => {
   function ponto(over: Partial<PontoInput> = {}): PontoInput {
     return { tipo: 'loja', empresa_nome: '', endereco: null, itens: [], ...over };
@@ -187,5 +268,53 @@ describe('normalizarParaForm', () => {
     expect(pontoImediato).toBeDefined();
     expect(pontoImediato.itens.map((i) => i.codigo)).toEqual(['I']);
     expect(pontoImediato.itens[0].modalidade).toBe('imediato');
+  });
+});
+
+describe('normalizarParaForm — multi-endereço de entrega (Task 10)', () => {
+  it('carrega 2 pontos entrega → cada item entrega ganha endereco_entrega_id do seu ponto', () => {
+    const { loja, entregas } = normalizarParaForm([
+      { id: 'pl', tipo: 'loja', empresa_nome: 'Loja', endereco: 'R1', itens: [item({ codigo: 'A', modalidade: 'loja' })] },
+      { id: 'peA', tipo: 'entrega', empresa_nome: 'Obra Norte', endereco: 'Rua A, 1', itens: [item({ codigo: 'EA', modalidade: 'entrega' })] },
+      { id: 'peB', tipo: 'entrega', empresa_nome: 'Obra Sul', endereco: 'Rua B, 2', itens: [item({ codigo: 'EB', modalidade: 'entrega' })] },
+    ]);
+    // 2 destinos de entrega recuperados, cada um com sua PK + endereço
+    expect(entregas).toHaveLength(2);
+    expect(entregas.map((e) => e.id).sort()).toEqual(['peA', 'peB']);
+    // cada item entrega leva o endereco_entrega_id do destino de onde veio
+    const ea = loja.itens.find((i) => i.codigo === 'EA')!;
+    const eb = loja.itens.find((i) => i.codigo === 'EB')!;
+    expect(ea.endereco_entrega_id).toBeTruthy();
+    expect(eb.endereco_entrega_id).toBeTruthy();
+    expect(ea.endereco_entrega_id).not.toBe(eb.endereco_entrega_id);
+    // o item loja NÃO ganha endereco_entrega_id
+    const a = loja.itens.find((i) => i.codigo === 'A')!;
+    expect(a.endereco_entrega_id ?? null).toBeNull();
+  });
+
+  it('round-trip multi-endereço: normalizar → sincronizar reconstrói os 2 destinos com os itens certos', () => {
+    const original: PontoInput[] = [
+      { id: 'peA', tipo: 'entrega', empresa_nome: 'Obra Norte', endereco: 'Rua A, 1', itens: [item({ codigo: 'EA', modalidade: 'entrega' })] },
+      { id: 'peB', tipo: 'entrega', empresa_nome: 'Obra Sul', endereco: 'Rua B, 2', itens: [item({ codigo: 'EB', modalidade: 'entrega' })] },
+    ];
+    const { loja, entregas } = normalizarParaForm(original);
+    const reconstruido = sincronizarDestinos({
+      itens: loja.itens,
+      loja: { id: loja.id, empresa_nome: loja.empresa_nome, endereco: loja.endereco },
+      entregas: entregas.map((e) => ({
+        id: e.id,
+        enderecoId: e.endereco_entrega_id,
+        empresa_nome: e.empresa_nome,
+        endereco: e.endereco,
+      })),
+    });
+    const ents = reconstruido.filter((p) => p.tipo === 'entrega');
+    expect(ents).toHaveLength(2);
+    const a = ents.find((p) => p.endereco === 'Rua A, 1')!;
+    const b = ents.find((p) => p.endereco === 'Rua B, 2')!;
+    expect(a.id).toBe('peA');
+    expect(b.id).toBe('peB');
+    expect(a.itens.map((i) => i.codigo)).toEqual(['EA']);
+    expect(b.itens.map((i) => i.codigo)).toEqual(['EB']);
   });
 });
