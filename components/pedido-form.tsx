@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import * as React from 'react';
 import { useTransition } from 'react';
-import { Controller, useFieldArray, useForm } from 'react-hook-form';
+import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus, Trash2, Loader2, Store, Truck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,14 +15,43 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { criarPedidoAction, atualizarPedidoAction } from '@/app/(app)/vendas/actions';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
-import { sincronizarDestinos, normalizarParaForm } from '@/lib/pedidos/sincronizar-destinos';
+import {
+  sincronizarDestinos,
+  normalizarParaForm,
+  type DestinoInfo,
+} from '@/lib/pedidos/sincronizar-destinos';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
+import {
+  useEnderecosDoCliente,
+  type ClienteEndereco,
+} from '@/lib/hooks/use-enderecos-do-cliente';
 import {
   FORMAS_PAGAMENTO,
   FORMAS_COM_PARCELAS,
   rotuloFormaPagamento,
 } from '@/lib/parser/forma-pagamento';
+
+/** Destino de entrega por endereço, mantido em estado à parte dos itens (o vínculo
+ *  item→destino é a `endereco_entrega_id` da linha). `enderecoId` é a chave de
+ *  roteamento (PK do `cliente_enderecos` ou PK do ponto ao recarregar). */
+type EntregaDestino = {
+  enderecoId: string;
+  /** PK do ponto entrega no banco (presente ao recarregar; null pra destino novo). */
+  id: string | null;
+  empresa_nome: string;
+  endereco: string | null;
+};
+
+/** Compõe um resumo legível do endereço cadastrado (endereço · bairro · cidade/UF). */
+function enderecoResumo(e: ClienteEndereco): string {
+  const parts = [
+    e.endereco,
+    e.bairro,
+    e.cidade && `${e.cidade}${e.uf ? '/' + e.uf : ''}`,
+  ].filter(Boolean);
+  return parts.join(', ') || (e.rotulo ?? '');
+}
 
 type ErrorLeaf = { path: string; message: string };
 function collectErrorLeaves(node: unknown, prefix = ''): ErrorLeaf[] {
@@ -59,15 +88,20 @@ export function PedidoForm({
   const [pending, startTransition] = useTransition();
 
   // Forma de trabalho do form: a modalidade vive POR ITEM (coluna na tabela) e é a
-  // fonte da verdade. Internamente consolidamos tudo em 2 "pontos" de trabalho —
-  // [0]=loja (carrega TODOS os itens, a tabela única) e [1]=entrega (só guarda o
-  // destino de entrega). No submit, `sincronizarDestinos` reconstrói os pontos reais
-  // a partir das modalidades dos itens. Normalização feita uma vez (defaultValues é
-  // estável; o form mantém o estado a partir daqui).
+  // fonte da verdade. Internamente consolidamos tudo em "pontos" de trabalho —
+  // [0]=loja (carrega TODOS os itens, a tabela única) e [1]=entrega (destino de entrega
+  // padrão). Multi-endereço: cada item `entrega` carrega `endereco_entrega_id` e os
+  // destinos por endereço ficam num estado à parte (`entregaDestinos`). No submit,
+  // `sincronizarDestinos` reconstrói os pontos reais. Normalização feita uma vez.
+  const normalizado = React.useMemo(
+    () => normalizarParaForm(defaultValues.pontos_retirada),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   const initialDefaults = React.useMemo(() => {
-    const { loja, entrega, imediato } = normalizarParaForm(defaultValues.pontos_retirada);
-    // [0]=loja (todos os itens), [1]=entrega (só destino), [2]=imediato (só a PK do
-    // ponto-container, pra UPDATE in-place). O card Destino só usa os índices 0 e 1.
+    const { loja, entrega, imediato } = normalizado;
+    // [0]=loja (todos os itens), [1]=entrega (destino padrão), [2]=imediato (só a PK do
+    // ponto-container, pra UPDATE in-place). O card Destino usa esses + entregaDestinos.
     return { ...defaultValues, pontos_retirada: [loja, entrega, imediato] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -79,6 +113,41 @@ export function PedidoForm({
   const { control, register, handleSubmit, watch, setValue, getValues, formState: { errors } } = form;
   const cnpjCpfWatch = watch('cliente_cnpj_cpf');
   const enderecoIdWatch = watch('cliente_endereco_id');
+
+  // Endereços cadastrados do cliente (mesmo hook do EnderecoSelector do cabeçalho),
+  // usados pelos selects por-item de entrega e pelo card Destino multi-endereço.
+  const { enderecos: enderecosCliente } = useEnderecosDoCliente(cnpjCpfWatch);
+
+  // Destinos de entrega POR ENDEREÇO (multi-endereço). Cada um casa com o
+  // `endereco_entrega_id` dos itens. Semeado dos pontos entrega carregados; cresce
+  // quando o operador escolhe um endereço do cliente para uma linha ou pelo card.
+  const [entregaDestinos, setEntregaDestinos] = React.useState<EntregaDestino[]>(() =>
+    normalizado.entregas
+      .filter((e): e is typeof e & { endereco_entrega_id: string } => !!e.endereco_entrega_id)
+      .map((e) => ({
+        enderecoId: e.endereco_entrega_id,
+        id: e.id ?? null,
+        empresa_nome: e.empresa_nome,
+        endereco: e.endereco,
+      })),
+  );
+
+  /** Garante que existe um destino para `enderecoId` (cria a partir do endereço
+   *  cadastrado, se ainda não houver). Idempotente; não duplica. */
+  const ensureDestino = React.useCallback((ende: ClienteEndereco) => {
+    setEntregaDestinos((prev) => {
+      if (prev.some((d) => d.enderecoId === ende.id)) return prev;
+      return [
+        ...prev,
+        {
+          enderecoId: ende.id,
+          id: null,
+          empresa_nome: ende.rotulo || '',
+          endereco: enderecoResumo(ende),
+        },
+      ];
+    });
+  }, []);
   const endValues = {
     endereco: watch('cliente_endereco') ?? null,
     bairro:   watch('cliente_bairro')   ?? null,
@@ -94,9 +163,33 @@ export function PedidoForm({
   const itensWatch = watch('pontos_retirada.0.itens');
   const temItemLoja = (itensWatch ?? []).some((it) => it?.modalidade === 'loja');
   const temItemEntrega = (itensWatch ?? []).some((it) => it?.modalidade === 'entrega');
+  // Entrega no destino PADRÃO (sem endereco_entrega_id) em uso? Controla o bloco do
+  // destino padrão editável (pontos_retirada.1).
+  const temEntregaPadrao = (itensWatch ?? []).some(
+    (it) => it?.modalidade === 'entrega' && (it?.endereco_entrega_id ?? null) == null,
+  );
+  // enderecoIds de entrega efetivamente em uso pelos itens → quais blocos por-endereço
+  // o card Destino renderiza (remover o último item de um endereço some o bloco).
+  const enderecosEntregaEmUso = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const it of itensWatch ?? []) {
+      if (it?.modalidade === 'entrega' && it?.endereco_entrega_id != null) {
+        ids.add(it.endereco_entrega_id);
+      }
+    }
+    return ids;
+  }, [itensWatch]);
+  const destinosEmUso = entregaDestinos.filter((d) => enderecosEntregaEmUso.has(d.enderecoId));
   // Frete é nível-pedido (valor_frete). Mostra quando há entrega ou já há um valor.
   const freteWatch = watch('valor_frete');
   const mostrarFrete = temItemEntrega || Number(freteWatch ?? 0) > 0;
+
+  /** Atualiza empresa/endereço de um destino por-endereço (edição inline no card). */
+  function patchDestino(enderecoId: string, patch: Partial<EntregaDestino>) {
+    setEntregaDestinos((prev) =>
+      prev.map((d) => (d.enderecoId === enderecoId ? { ...d, ...patch } : d)),
+    );
+  }
 
   /**
    * Reconstrói `pontos_retirada` a partir das modalidades dos itens + os dados dos
@@ -115,11 +208,22 @@ export function PedidoForm({
     const pontos = sincronizarDestinos({
       itens,
       loja: { id: lojaInfo?.id, empresa_nome: lojaInfo?.empresa_nome, endereco: lojaInfo?.endereco },
+      // Destino de entrega PADRÃO: itens `entrega` sem `endereco_entrega_id` caem aqui.
       entrega: {
         id: entregaInfo?.id,
         empresa_nome: entregaInfo?.empresa_nome,
         endereco: entregaInfo?.endereco,
       },
+      // Destinos de entrega POR ENDEREÇO (multi-endereço): cada item `entrega` com
+      // `endereco_entrega_id` é agrupado e ligado ao destino cujo enderecoId casa.
+      entregas: entregaDestinos.map(
+        (d): DestinoInfo => ({
+          id: d.id,
+          enderecoId: d.enderecoId,
+          empresa_nome: d.empresa_nome,
+          endereco: d.endereco,
+        }),
+      ),
       // Carrega a PK do ponto-container imediato (se já existia) pra UPDATE in-place.
       imediato: { id: imediatoInfo?.id },
     });
@@ -295,7 +399,13 @@ export function PedidoForm({
               setValueAs: (v: unknown) => (v === '' || v == null ? null : v),
             })}
           />
-          <ItensEditor pontoIndex={0} control={control} register={register} />
+          <ItensEditor
+            pontoIndex={0}
+            control={control}
+            register={register}
+            enderecosCliente={enderecosCliente}
+            onPickEnderecoItem={(ende) => ende && ensureDestino(ende)}
+          />
         </CardContent>
       </Card>
 
@@ -327,20 +437,94 @@ export function PedidoForm({
             {temItemLoja && temItemEntrega && <Separator />}
 
             {temItemEntrega && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <Truck className="h-4 w-4 text-brand" /> Entrega
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Field label="Destinatário" className="md:col-span-1">
-                    <Input {...register('pontos_retirada.1.empresa_nome')} />
-                  </Field>
-                  <Field label="Endereço de entrega" className="md:col-span-2">
-                    <Input {...register('pontos_retirada.1.endereco')} />
-                  </Field>
-                </div>
+
+                {/* Destino PADRÃO: usado pelos itens Entrega sem endereço específico. */}
+                {temEntregaPadrao && (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Endereço de entrega padrão
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <Field label="Destinatário" className="md:col-span-1">
+                        <Input {...register('pontos_retirada.1.empresa_nome')} />
+                      </Field>
+                      <Field label="Endereço de entrega" className="md:col-span-2">
+                        <Input {...register('pontos_retirada.1.endereco')} />
+                      </Field>
+                    </div>
+                  </div>
+                )}
+
+                {/* Destinos por endereço (multi-endereço) em uso pelos itens. */}
+                {destinosEmUso.map((d) => (
+                  <div key={d.enderecoId} className="space-y-2 rounded-md border p-3">
+                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Endereço de entrega
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <Field label="Destinatário" className="md:col-span-1">
+                        <Input
+                          value={d.empresa_nome}
+                          onChange={(e) => patchDestino(d.enderecoId, { empresa_nome: e.target.value })}
+                        />
+                      </Field>
+                      <Field label="Endereço de entrega" className="md:col-span-2">
+                        <Input
+                          value={d.endereco ?? ''}
+                          onChange={(e) => patchDestino(d.enderecoId, { endereco: e.target.value || null })}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Adiciona outro endereço de entrega cadastrado do cliente. Ao escolher,
+                    registra o destino e aplica a TODOS os itens Entrega ainda no padrão
+                    (atalho prático — o parse vem homogêneo; o operador refina por linha). */}
+                {enderecosCliente.length > 0 && (
+                  <div className="flex items-end gap-2 flex-wrap">
+                    <div className="min-w-[260px]">
+                      <Label className="text-xs text-muted-foreground mb-1.5 block">
+                        Adicionar endereço de entrega
+                      </Label>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const ende = enderecosCliente.find((x) => x.id === e.target.value);
+                          if (!ende) return;
+                          ensureDestino(ende);
+                          // Roteia os itens Entrega ainda no destino padrão p/ este endereço.
+                          const itens = getValues('pontos_retirada.0.itens') ?? [];
+                          itens.forEach((it, idx) => {
+                            if (it?.modalidade === 'entrega' && (it?.endereco_entrega_id ?? null) == null) {
+                              setValue(`pontos_retirada.0.itens.${idx}.endereco_entrega_id`, ende.id, {
+                                shouldDirty: true,
+                              });
+                            }
+                          });
+                        }}
+                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
+                      >
+                        <option value="">— Selecione um endereço cadastrado —</option>
+                        {enderecosCliente.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.rotulo}
+                            {e.is_padrao ? ' ★' : ''} — {enderecoResumo(e)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-[11px] text-muted-foreground">
-                  O frete é informado no card Pagamento (nível do pedido).
+                  Cada item Entrega pode apontar para um endereço diferente (coluna
+                  Endereço na tabela de itens). O frete é informado no card Pagamento
+                  (nível do pedido).
                 </p>
               </div>
             )}
@@ -523,12 +707,17 @@ function ItensEditor({
   pontoIndex,
   control,
   register,
+  enderecosCliente,
+  onPickEnderecoItem,
 }: {
   pontoIndex: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   control: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: any;
+  enderecosCliente: ClienteEndereco[];
+  /** Chamado quando uma linha escolhe um endereço cadastrado (pra registrar o destino). */
+  onPickEnderecoItem: (ende: ClienteEndereco | null) => void;
 }) {
   const { fields, append, remove } = useFieldArray({
     control,
@@ -574,6 +763,7 @@ function ItensEditor({
                 <th className="text-left  px-2 py-2 w-20">Código</th>
                 <th className="text-left  px-2 py-2">Descrição</th>
                 <th className="text-left  px-2 py-2 w-32">Modalidade</th>
+                <th className="text-left  px-2 py-2 w-40">Endereço</th>
                 <th className="text-right px-2 py-2 w-20">Qtd</th>
                 <th className="text-left  px-2 py-2 w-16">Un</th>
                 <th className="text-right px-2 py-2 w-28">Unitário</th>
@@ -615,6 +805,17 @@ function ItensEditor({
                           <option value="entrega">Entrega</option>
                         </select>
                       )}
+                    />
+                  </td>
+                  <td className="px-1 py-1">
+                    {/* Endereço de entrega da linha — só ativo p/ item Entrega. Liga o
+                        item a um destino (multi-endereço); vazio = endereço padrão. */}
+                    <RowEnderecoSelect
+                      control={control}
+                      pontoIndex={pontoIndex}
+                      rowIndex={i}
+                      enderecosCliente={enderecosCliente}
+                      onPick={onPickEnderecoItem}
                     />
                   </td>
                   <td className="px-1 py-1">
@@ -664,5 +865,63 @@ function ItensEditor({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Select de endereço de entrega de UMA linha de item. Só fica ativo quando a
+ * modalidade da linha é `entrega`; pra Imediato/Loja fica desabilitado (mostra "—").
+ * O valor (PK do `cliente_enderecos`) vira o `endereco_entrega_id` do item, que o
+ * sincronizador usa pra agrupar itens por destino. Vazio = endereço de entrega padrão.
+ */
+function RowEnderecoSelect({
+  control,
+  pontoIndex,
+  rowIndex,
+  enderecosCliente,
+  onPick,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  control: any;
+  pontoIndex: number;
+  rowIndex: number;
+  enderecosCliente: ClienteEndereco[];
+  onPick: (ende: ClienteEndereco | null) => void;
+}) {
+  const modalidade = useWatch({
+    control,
+    name: `pontos_retirada.${pontoIndex}.itens.${rowIndex}.modalidade`,
+  });
+  const isEntrega = modalidade === 'entrega';
+
+  if (!isEntrega) {
+    return <span className="block text-center text-xs text-muted-foreground">—</span>;
+  }
+
+  return (
+    <Controller
+      control={control}
+      name={`pontos_retirada.${pontoIndex}.itens.${rowIndex}.endereco_entrega_id`}
+      render={({ field }) => (
+        <select
+          value={field.value ?? ''}
+          onChange={(e) => {
+            const id = e.target.value || null;
+            field.onChange(id);
+            if (id) onPick(enderecosCliente.find((x) => x.id === id) ?? null);
+          }}
+          onBlur={field.onBlur}
+          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+        >
+          <option value="">Padrão</option>
+          {enderecosCliente.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.rotulo}
+              {e.is_padrao ? ' ★' : ''}
+            </option>
+          ))}
+        </select>
+      )}
+    />
   );
 }
