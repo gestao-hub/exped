@@ -32,6 +32,7 @@ export async function salvarFinanceiroAction(
       forma_pagamento: d.forma_pagamento ?? null,
       parcelas: d.parcelas ?? null,
       receber_na_entrega: d.receber_na_entrega ?? false,
+      exige_emissao: d.exige_emissao ?? false,
       valor_total: d.valor_total,
       valor_frete: d.valor_frete ?? 0,
     })
@@ -69,6 +70,7 @@ export async function liberarParaLogisticaAction(
       forma_pagamento: d.forma_pagamento ?? null,
       parcelas: d.parcelas ?? null,
       receber_na_entrega: d.receber_na_entrega ?? false,
+      exige_emissao: d.exige_emissao ?? false,
       valor_total: d.valor_total,
       valor_frete: d.valor_frete ?? 0,
       status: 'pendente',

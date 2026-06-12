@@ -9,6 +9,7 @@ export const financeiroFormSchema = z.object({
   forma_pagamento:    z.enum(FORMAS_PAGAMENTO).nullable().optional(),
   parcelas:           z.number().int().min(1).max(12).nullable().optional(),
   receber_na_entrega: z.boolean().optional(),
+  exige_emissao:      z.boolean().optional(),
   valor_total:        z.number().nonnegative(),
   valor_frete:        z.number().nonnegative().nullable().optional(),
 });

@@ -109,6 +109,7 @@ export default async function FinanceiroDetailPage({
           forma_pagamento: pedido.forma_pagamento,
           parcelas: pedido.parcelas,
           receber_na_entrega: pedido.receber_na_entrega,
+          exige_emissao: pedido.exige_emissao,
           valor_total: Number(pedido.valor_total),
           valor_frete: Number(pedido.valor_frete ?? 0),
         }}

@@ -197,6 +197,16 @@ export function FinanceiroForm({
           />
           Receber na entrega
         </label>
+
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            disabled={!editavel}
+            {...register('exige_emissao')}
+            className="h-4 w-4"
+          />
+          Exige emissão
+        </label>
       </CardContent>
     </Card>
   );
