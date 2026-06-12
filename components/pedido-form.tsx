@@ -32,6 +32,9 @@ import {
   rotuloFormaPagamento,
 } from '@/lib/parser/forma-pagamento';
 
+/** Modalidade de um item (espelha o enum do `itemSchema`). */
+type ModalidadeItem = 'imediato' | 'loja' | 'entrega';
+
 /** Destino de entrega por endereço, mantido em estado à parte dos itens (o vínculo
  *  item→destino é a `endereco_entrega_id` da linha). `enderecoId` é a chave de
  *  roteamento (PK do `cliente_enderecos` ou PK do ponto ao recarregar). */
@@ -403,6 +406,8 @@ export function PedidoForm({
             pontoIndex={0}
             control={control}
             register={register}
+            setValue={setValue}
+            getValues={getValues}
             enderecosCliente={enderecosCliente}
             onPickEnderecoItem={(ende) => ende && ensureDestino(ende)}
           />
@@ -707,6 +712,8 @@ function ItensEditor({
   pontoIndex,
   control,
   register,
+  setValue,
+  getValues,
   enderecosCliente,
   onPickEnderecoItem,
 }: {
@@ -715,6 +722,10 @@ function ItensEditor({
   control: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   register: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setValue: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getValues: any;
   enderecosCliente: ClienteEndereco[];
   /** Chamado quando uma linha escolhe um endereço cadastrado (pra registrar o destino). */
   onPickEnderecoItem: (ende: ClienteEndereco | null) => void;
@@ -725,30 +736,90 @@ function ItensEditor({
     keyName: '_rhfId', // preserva `id` (PK do banco) — ver comentário em PedidoForm
   });
 
+  // "Aplicar a todos": atalho prático — pedidos parseados vêm homogêneos. Define a
+  // mesma modalidade (e, p/ entrega, o mesmo endereço) em TODAS as linhas de uma vez.
+  const [bulkModalidade, setBulkModalidade] = React.useState<ModalidadeItem>('loja');
+  const [bulkEnderecoId, setBulkEnderecoId] = React.useState<string>('');
+
+  function aplicarATodos() {
+    const itens = (getValues(`pontos_retirada.${pontoIndex}.itens`) ?? []) as unknown[];
+    // Endereço só faz sentido p/ entrega; nas outras modalidades zera o vínculo de linha.
+    const enderecoId = bulkModalidade === 'entrega' ? bulkEnderecoId || null : null;
+    itens.forEach((_, idx) => {
+      setValue(`pontos_retirada.${pontoIndex}.itens.${idx}.modalidade`, bulkModalidade, {
+        shouldDirty: true,
+      });
+      setValue(`pontos_retirada.${pontoIndex}.itens.${idx}.endereco_entrega_id`, enderecoId, {
+        shouldDirty: true,
+      });
+    });
+    // Garante que o destino exista no card quando aplicamos um endereço cadastrado a todos.
+    if (enderecoId) {
+      onPickEnderecoItem(enderecosCliente.find((e) => e.id === enderecoId) ?? null);
+    }
+  }
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-medium">Itens ({fields.length})</h4>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            append({
-              codigo: '',
-              descricao: '',
-              quantidade: 1,
-              unidade: 'UN',
-              preco_unitario: 0,
-              desconto: 0,
-              total: 0,
-              modalidade: 'loja', // item novo nasce Loja (padrão); operador ajusta
-              referencia: null,
-            })
-          }
-        >
-          <Plus className="h-4 w-4 mr-1" /> Adicionar item
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Atalho: aplica a mesma modalidade (+ endereço, se entrega) a todos os itens. */}
+          {fields.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Modalidade:</span>
+              <select
+                value={bulkModalidade}
+                onChange={(e) => setBulkModalidade(e.target.value as ModalidadeItem)}
+                aria-label="Modalidade para aplicar a todos os itens"
+                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="imediato">Imediato</option>
+                <option value="loja">Loja</option>
+                <option value="entrega">Entrega</option>
+              </select>
+              {bulkModalidade === 'entrega' && enderecosCliente.length > 0 && (
+                <select
+                  value={bulkEnderecoId}
+                  onChange={(e) => setBulkEnderecoId(e.target.value)}
+                  aria-label="Endereço de entrega para aplicar a todos os itens"
+                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="">Endereço padrão</option>
+                  {enderecosCliente.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.rotulo}
+                      {e.is_padrao ? ' ★' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Button type="button" variant="outline" size="sm" onClick={aplicarATodos}>
+                Aplicar a todos
+              </Button>
+            </div>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              append({
+                codigo: '',
+                descricao: '',
+                quantidade: 1,
+                unidade: 'UN',
+                preco_unitario: 0,
+                desconto: 0,
+                total: 0,
+                modalidade: 'loja', // item novo nasce Loja (padrão); operador ajusta
+                referencia: null,
+              })
+            }
+          >
+            <Plus className="h-4 w-4 mr-1" /> Adicionar item
+          </Button>
+        </div>
       </div>
 
       {fields.length === 0 ? (
