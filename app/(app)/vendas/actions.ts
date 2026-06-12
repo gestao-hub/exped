@@ -106,6 +106,7 @@ async function persistirFilhosPedido(
             preco_unitario: it.data.preco_unitario,
             desconto: it.data.desconto,
             total: it.data.total,
+            modalidade: it.data.modalidade,
             referencia: it.data.referencia ?? null,
             saldo_estoque: it.data.saldo_estoque ?? null,
             ordem: it.ordem,
@@ -122,6 +123,7 @@ async function persistirFilhosPedido(
           preco_unitario: it.data.preco_unitario,
           desconto: it.data.desconto,
           total: it.data.total,
+          modalidade: it.data.modalidade,
           referencia: it.data.referencia ?? null,
           saldo_estoque: it.data.saldo_estoque ?? null,
           ordem: it.ordem,
@@ -354,7 +356,10 @@ export async function registrarEntregaAction(input: {
   if (e0) return { error: e0.message };
 
   // Verifica que TODOS itens pertencem ao mesmo pedido
-  const pontoIds = Array.from(new Set((atuais ?? []).map((a) => a.ponto_retirada_id)));
+  // (ponto_retirada_id é nullable — item Imediato não tem destino; ignora nulos aqui)
+  const pontoIds = Array.from(
+    new Set((atuais ?? []).map((a) => a.ponto_retirada_id).filter((id): id is string => id !== null)),
+  );
   const { data: pontosDoPedido } = await supabase
     .from('pedido_pontos_retirada')
     .select('id, pedido_id')

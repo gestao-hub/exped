@@ -13,6 +13,7 @@ function item(over: Partial<PontoInput['itens'][number]> = {}): PontoInput['iten
     preco_unitario: 10,
     desconto: 0,
     total: 10,
+    modalidade: 'loja',
     ...over,
   };
 }

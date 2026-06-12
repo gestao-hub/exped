@@ -12,10 +12,11 @@ type PedidoRow = {
   receber_na_entrega: boolean;
   valor_total: number; observacoes: string | null; storage_pdf_path: string | null;
 };
+type ModalidadeDb = Database['public']['Enums']['modalidade_item'];
 type ItemRow = {
   id: string; codigo: string; descricao: string; quantidade: number; unidade: string;
-  preco_unitario: number; desconto: number; total: number; referencia: string | null;
-  saldo_estoque: number | null; ordem: number | null;
+  preco_unitario: number; desconto: number; total: number; modalidade: ModalidadeDb;
+  referencia: string | null; saldo_estoque: number | null; ordem: number | null;
 };
 type PontoRow = {
   id: string; tipo: 'loja' | 'deposito' | 'entrega'; empresa_nome: string; endereco: string | null; ordem: number | null;
@@ -57,7 +58,8 @@ export function pedidoRowsToFormInput(pedido: PedidoRow, pontos: PontoRow[]): Pe
             id: it.id,
             codigo: it.codigo, descricao: it.descricao, quantidade: it.quantidade,
             unidade: it.unidade, preco_unitario: it.preco_unitario, desconto: it.desconto,
-            total: it.total, referencia: it.referencia, saldo_estoque: it.saldo_estoque,
+            total: it.total, modalidade: it.modalidade,
+            referencia: it.referencia, saldo_estoque: it.saldo_estoque,
           })),
       })),
   };
