@@ -905,6 +905,7 @@ export type Database = {
           deleted_at: string | null
           documento_erp: string | null
           empresa_id: string
+          exige_emissao: boolean
           field_updated_at: Json
           forma_pagamento:
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
@@ -945,6 +946,7 @@ export type Database = {
           deleted_at?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          exige_emissao?: boolean
           field_updated_at?: Json
           forma_pagamento?:
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
@@ -985,6 +987,7 @@ export type Database = {
           deleted_at?: string | null
           documento_erp?: string | null
           empresa_id?: string
+          exige_emissao?: boolean
           field_updated_at?: Json
           forma_pagamento?:
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
