@@ -163,6 +163,55 @@ describe('sincronizarDestinos — multi-endereço de entrega (Task 10)', () => {
     expect(entregas.find((p) => p.endereco === 'Rua B, 2')!.itens.map((i) => i.codigo)).toEqual(['EB']);
   });
 
+  it('destino PADRÃO e um destino por-endereço com a MESMA PK → 1 ponto (sem PK duplicada)', () => {
+    // Cenário do bug: editar um pedido que carregou com ≥2 pontos entrega. O destino
+    // PADRÃO (input.entrega) herda a PK do 1º ponto (peA), e peA também está em
+    // `entregas`. O operador manda um item pro "Padrão" (sem endereco_entrega_id) e
+    // outro mantém o endereço peA. SEM o merge, sairiam 2 pontos com id='peA' →
+    // a reconciliação faria 2 UPDATE no mesmo registro (perda de item).
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E_PADRAO', modalidade: 'entrega' }), // key=null → input.entrega (peA)
+        item({ codigo: 'E_PEA', modalidade: 'entrega', endereco_entrega_id: 'peA' }), // key=peA
+        item({ codigo: 'E_PEB', modalidade: 'entrega', endereco_entrega_id: 'peB' }),
+      ],
+      entrega: { id: 'peA', empresa_nome: 'Obra Norte', endereco: 'Rua A, 1' },
+      entregas: [
+        { id: 'peA', enderecoId: 'peA', empresa_nome: 'Obra Norte', endereco: 'Rua A, 1' },
+        { id: 'peB', enderecoId: 'peB', empresa_nome: 'Obra Sul', endereco: 'Rua B, 2' },
+      ],
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    // Nenhuma PK aparece duas vezes.
+    const ids = entregas.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // peA virou UM ponto só, com os itens dos dois buckets (padrão + endereço peA).
+    const a = entregas.find((p) => p.id === 'peA')!;
+    expect(a).toBeDefined();
+    expect(a.itens.map((i) => i.codigo).sort()).toEqual(['E_PADRAO', 'E_PEA']);
+    // peB intacto.
+    const b = entregas.find((p) => p.id === 'peB')!;
+    expect(b.itens.map((i) => i.codigo)).toEqual(['E_PEB']);
+  });
+
+  it('dois destinos NOVOS (ambos id=null) NÃO são fundidos', () => {
+    // id=null = destino novo (ainda sem PK). Dois endereços novos distintos devem
+    // continuar separados — o merge só colapsa PKs reais iguais.
+    const pontos = sincronizarDestinos({
+      itens: [
+        item({ codigo: 'E1', modalidade: 'entrega', endereco_entrega_id: 'novo-A' }),
+        item({ codigo: 'E2', modalidade: 'entrega', endereco_entrega_id: 'novo-B' }),
+      ],
+      entregas: [
+        { id: null, enderecoId: 'novo-A', empresa_nome: 'A', endereco: 'Rua A' },
+        { id: null, enderecoId: 'novo-B', empresa_nome: 'B', endereco: 'Rua B' },
+      ],
+    });
+    const entregas = pontos.filter((p) => p.tipo === 'entrega');
+    expect(entregas).toHaveLength(2);
+    expect(entregas.every((p) => p.id == null)).toBe(true);
+  });
+
   it('preserva a PK do ponto entrega por endereço (UPDATE in-place por destino)', () => {
     const pontos = sincronizarDestinos({
       itens: [

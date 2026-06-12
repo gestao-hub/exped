@@ -118,7 +118,41 @@ export function sincronizarDestinos(input: SincronizarDestinosInput): PontoInput
     });
   }
 
-  return pontos;
+  return mergePontosPorPk(pontos);
+}
+
+/**
+ * Funde pontos que apontam pra MESMA PK não-nula num só (concatenando os itens,
+ * preservando ordem e mantendo os dados do 1º). Defensivo e necessário:
+ *
+ * Dois "buckets" de roteamento podem resolver pro MESMO ponto físico. Ao editar um
+ * pedido multi-endereço, o destino de entrega PADRÃO (`input.entrega`) herda a PK do
+ * 1º ponto entrega carregado, e esse mesmo endereço também aparece em `input.entregas`.
+ * Se o operador manda um item pro "Padrão" (sem `endereco_entrega_id`) enquanto outro
+ * item mantém aquele endereço, sairiam DOIS pontos com a mesma PK. A reconciliação
+ * casa ambos com o mesmo registro do banco e emite dois UPDATE conflitantes
+ * (soft-delete/insert) → perda de item. Colapsar por PK evita isso na raiz.
+ *
+ * Pontos SEM PK (`id` null/ausente) são destinos NOVOS e distintos — nunca fundidos
+ * (dois endereços novos diferentes têm ambos id=null e devem continuar separados).
+ */
+function mergePontosPorPk(pontos: PontoInput[]): PontoInput[] {
+  const porPk = new Map<string, PontoInput>();
+  const resultado: PontoInput[] = [];
+  for (const p of pontos) {
+    if (p.id == null) {
+      resultado.push(p);
+      continue;
+    }
+    const existente = porPk.get(p.id);
+    if (existente) {
+      existente.itens = [...existente.itens, ...p.itens];
+    } else {
+      porPk.set(p.id, p);
+      resultado.push(p);
+    }
+  }
+  return resultado;
 }
 
 /**
