@@ -706,10 +706,11 @@ export type Database = {
           field_updated_at: Json
           id: string
           lote: string | null
+          modalidade: Database["public"]["Enums"]["modalidade_item"]
           ordem: number
           peso_bruto: number | null
           peso_liquido: number | null
-          ponto_retirada_id: string
+          ponto_retirada_id: string | null
           preco_unitario: number
           quantidade: number
           quantidade_entregue: number
@@ -729,10 +730,11 @@ export type Database = {
           field_updated_at?: Json
           id?: string
           lote?: string | null
+          modalidade?: Database["public"]["Enums"]["modalidade_item"]
           ordem?: number
           peso_bruto?: number | null
           peso_liquido?: number | null
-          ponto_retirada_id: string
+          ponto_retirada_id?: string | null
           preco_unitario?: number
           quantidade?: number
           quantidade_entregue?: number
@@ -752,10 +754,11 @@ export type Database = {
           field_updated_at?: Json
           id?: string
           lote?: string | null
+          modalidade?: Database["public"]["Enums"]["modalidade_item"]
           ordem?: number
           peso_bruto?: number | null
           peso_liquido?: number | null
-          ponto_retirada_id?: string
+          ponto_retirada_id?: string | null
           preco_unitario?: number
           quantidade?: number
           quantidade_entregue?: number
@@ -1215,6 +1218,7 @@ export type Database = {
     }
     Enums: {
       forma_pagamento_tipo: "credito" | "pix" | "debito" | "dinheiro" | "boleto"
+      modalidade_item: "imediato" | "loja" | "entrega"
       pedido_status:
         | "rascunho"
         | "pendente"
@@ -1355,6 +1359,7 @@ export const Constants = {
   public: {
     Enums: {
       forma_pagamento_tipo: ["credito", "pix", "debito", "dinheiro", "boleto"],
+      modalidade_item: ["imediato", "loja", "entrega"],
       pedido_status: [
         "rascunho",
         "pendente",
