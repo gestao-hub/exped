@@ -72,3 +72,53 @@ export function sincronizarDestinos(input: SincronizarDestinosInput): PontoInput
 
   return pontos;
 }
+
+/**
+ * Forma de trabalho do form (transitória, NÃO é o que vai pro banco): UM ponto
+ * "loja" carregando TODOS os itens (a tabela única, a modalidade é por item) + UM
+ * ponto "entrega" vazio só pra guardar os dados do destino de entrega (empresa/
+ * endereço) e sua PK. No submit, `sincronizarDestinos` reconstrói os pontos reais.
+ */
+export type FormDestinos = {
+  /** Ponto loja (index 0): empresa/endereço da loja + TODOS os itens. */
+  loja: PontoInput;
+  /** Ponto entrega (index 1): empresa/endereço do destino de entrega; itens vazio. */
+  entrega: PontoInput;
+};
+
+/**
+ * Normaliza os `pontos_retirada` carregados (pedido novo, parseado, ou editado e já
+ * dividido em loja+entrega) para a forma de trabalho do form. PURA.
+ *
+ *  - Junta TODOS os itens (de todos os pontos) numa única lista, no ponto loja.
+ *  - Recupera o destino loja do 1º ponto loja/depósito existente (ou cria um vazio).
+ *  - Recupera o destino entrega do 1º ponto entrega existente (ou cria um vazio).
+ *  - Preserva os ids dos pontos (PK) pra UPDATE in-place na hora de salvar.
+ *
+ * A modalidade de cada item é mantida intacta (fonte da verdade); este normalizador
+ * NÃO infere modalidade a partir do tipo do ponto (isso já foi feito no backfill da
+ * migração / no parser, que gravam a coluna modalidade).
+ */
+export function normalizarParaForm(pontos: PontoInput[] | undefined): FormDestinos {
+  const lista = pontos ?? [];
+  const todosItens = lista.flatMap((p) => p?.itens ?? []);
+  const pontoLoja = lista.find((p) => p?.tipo === 'loja' || p?.tipo === 'deposito');
+  const pontoEntrega = lista.find((p) => p?.tipo === 'entrega');
+
+  return {
+    loja: {
+      id: pontoLoja?.id ?? null,
+      tipo: 'loja',
+      empresa_nome: pontoLoja?.empresa_nome ?? '',
+      endereco: pontoLoja?.endereco ?? null,
+      itens: todosItens,
+    },
+    entrega: {
+      id: pontoEntrega?.id ?? null,
+      tipo: 'entrega',
+      empresa_nome: pontoEntrega?.empresa_nome ?? '',
+      endereco: pontoEntrega?.endereco ?? null,
+      itens: [],
+    },
+  };
+}

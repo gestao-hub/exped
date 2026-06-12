@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { sincronizarDestinos } from '@/lib/pedidos/sincronizar-destinos';
-import type { ItemInput } from '@/lib/validators/pedido';
+import { sincronizarDestinos, normalizarParaForm } from '@/lib/pedidos/sincronizar-destinos';
+import type { ItemInput, PedidoFormInput } from '@/lib/validators/pedido';
+
+type PontoInput = PedidoFormInput['pontos_retirada'][number];
 
 function item(over: Partial<ItemInput> = {}): ItemInput {
   return {
@@ -84,5 +86,65 @@ describe('sincronizarDestinos', () => {
     });
     expect(pontos.find((p) => p.tipo === 'loja')!.itens[0].modalidade).toBe('loja');
     expect(pontos.find((p) => p.tipo === 'entrega')!.itens[0].modalidade).toBe('entrega');
+  });
+});
+
+describe('normalizarParaForm', () => {
+  function ponto(over: Partial<PontoInput> = {}): PontoInput {
+    return { tipo: 'loja', empresa_nome: '', endereco: null, itens: [], ...over };
+  }
+
+  it('pedido novo (1 ponto loja vazio) → loja com itens vazio + entrega placeholder', () => {
+    const { loja, entrega } = normalizarParaForm([
+      ponto({ tipo: 'loja', empresa_nome: 'Matriz' }),
+    ]);
+    expect(loja.empresa_nome).toBe('Matriz');
+    expect(loja.itens).toEqual([]);
+    expect(entrega.tipo).toBe('entrega');
+    expect(entrega.itens).toEqual([]);
+  });
+
+  it('híbrido legado (loja+entrega) → todos os itens no ponto loja; destinos preservados', () => {
+    const { loja, entrega } = normalizarParaForm([
+      { id: 'pl', tipo: 'loja', empresa_nome: 'Loja', endereco: 'R1', itens: [item({ codigo: 'A', modalidade: 'loja' })] },
+      { id: 'pe', tipo: 'entrega', empresa_nome: 'Cliente', endereco: 'R2', itens: [item({ codigo: 'B', modalidade: 'entrega' })] },
+    ]);
+    // todos os itens consolidados no ponto de trabalho loja
+    expect(loja.itens.map((i) => i.codigo)).toEqual(['A', 'B']);
+    expect(loja.id).toBe('pl');
+    // o ponto entrega de trabalho guarda só o destino (sem itens) + sua PK
+    expect(entrega.id).toBe('pe');
+    expect(entrega.endereco).toBe('R2');
+    expect(entrega.itens).toEqual([]);
+  });
+
+  it('depósito legado vira destino loja de trabalho (não é mais modalidade)', () => {
+    const { loja } = normalizarParaForm([
+      { tipo: 'deposito', empresa_nome: 'Depósito 1', endereco: null, itens: [item()] },
+    ]);
+    expect(loja.tipo).toBe('loja');
+    expect(loja.empresa_nome).toBe('Depósito 1');
+    expect(loja.itens).toHaveLength(1);
+  });
+
+  it('round-trip: normalizar → sincronizar reconstrói os mesmos destinos', () => {
+    const original: PontoInput[] = [
+      { id: 'pl', tipo: 'loja', empresa_nome: 'Loja', endereco: 'R1', itens: [item({ codigo: 'A', modalidade: 'loja' })] },
+      { id: 'pe', tipo: 'entrega', empresa_nome: 'Cliente', endereco: 'R2', itens: [item({ codigo: 'B', modalidade: 'entrega' })] },
+    ];
+    const { loja, entrega } = normalizarParaForm(original);
+    const reconstruido = sincronizarDestinos({
+      itens: loja.itens,
+      loja: { id: loja.id, empresa_nome: loja.empresa_nome, endereco: loja.endereco },
+      entrega: { id: entrega.id, empresa_nome: entrega.empresa_nome, endereco: entrega.endereco },
+    });
+    expect(reconstruido).toHaveLength(2);
+    const l = reconstruido.find((p) => p.tipo === 'loja')!;
+    const e = reconstruido.find((p) => p.tipo === 'entrega')!;
+    expect(l.id).toBe('pl');
+    expect(l.itens.map((i) => i.codigo)).toEqual(['A']);
+    expect(e.id).toBe('pe');
+    expect(e.endereco).toBe('R2');
+    expect(e.itens.map((i) => i.codigo)).toEqual(['B']);
   });
 });
