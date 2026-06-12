@@ -1,0 +1,12 @@
+-- 20260612000003_ponto_imediato.sql
+-- Permite ponto de retirada do tipo 'imediato' (container dos itens balcão, sem destino).
+--
+-- Motivo: pedido_itens só se liga ao pedido via ponto_retirada_id (não há pedido_id no
+-- item). Itens 'imediato' precisam, portanto, viver dentro de um ponto real — senão
+-- viram órfãos e somem ao salvar/recarregar. Este ponto não tem empresa/endereço (o card
+-- Destino não renderiza nada para ele); é só um container para reaproveitar a
+-- persistência/carga que já são agnósticas ao tipo do ponto.
+--
+-- Nota de deploy: ALTER TYPE ... ADD VALUE NÃO pode rodar dentro de bloco de transação.
+-- Por isso esta migração é standalone e NÃO usa BEGIN/COMMIT.
+ALTER TYPE public.ponto_retirada_destino ADD VALUE IF NOT EXISTS 'imediato';

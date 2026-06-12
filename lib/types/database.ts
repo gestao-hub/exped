@@ -1228,7 +1228,7 @@ export type Database = {
         | "parcialmente_entregue"
         | "em_financeiro"
         | "em_transporte"
-      ponto_retirada_destino: "loja" | "deposito" | "entrega"
+      ponto_retirada_destino: "loja" | "deposito" | "entrega" | "imediato"
       ponto_retirada_tipo: "loja" | "deposito"
       user_role: "admin" | "vendedor" | "logistica" | "financeiro"
     }
@@ -1370,7 +1370,7 @@ export const Constants = {
         "em_financeiro",
         "em_transporte",
       ],
-      ponto_retirada_destino: ["loja", "deposito", "entrega"],
+      ponto_retirada_destino: ["loja", "deposito", "entrega", "imediato"],
       ponto_retirada_tipo: ["loja", "deposito"],
       user_role: ["admin", "vendedor", "logistica", "financeiro"],
     },

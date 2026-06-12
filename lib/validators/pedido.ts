@@ -30,7 +30,9 @@ export const itemSchema = z.object({
 
 export const pontoRetiradaSchema = z.object({
   id:           z.uuid().nullable().optional(),  // PK estável: presente ao editar; ausente ao criar ponto novo
-  tipo:         z.enum(['loja', 'deposito', 'entrega']),
+  // 'imediato' = ponto-container dos itens balcão (sem empresa/endereço). Itens só se
+  // ligam ao pedido via ponto; um item imediato precisa de um ponto pra não virar órfão.
+  tipo:         z.enum(['loja', 'deposito', 'entrega', 'imediato']),
   empresa_nome: z.string().max(MID),
   endereco:     z.string().max(LONG).nullable().optional(),
   itens:        z.array(itemSchema).max(500, 'Mais de 500 itens — provável erro de parse'),
