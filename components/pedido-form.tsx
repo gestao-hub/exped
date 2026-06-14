@@ -15,11 +15,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { criarPedidoAction, atualizarPedidoAction } from '@/app/(app)/vendas/actions';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
+import { normalizarParaForm } from '@/lib/pedidos/sincronizar-destinos';
 import {
-  sincronizarDestinos,
-  normalizarParaForm,
-  type DestinoInfo,
-} from '@/lib/pedidos/sincronizar-destinos';
+  montarPontosCanonicos,
+  type EntregaDestino,
+} from '@/lib/pedidos/montar-pontos-canonicos';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
 import {
@@ -35,16 +35,6 @@ import {
 /** Modalidade de um item (espelha o enum do `itemSchema`). */
 type ModalidadeItem = 'imediato' | 'loja' | 'entrega';
 
-/** Destino de entrega por endereço, mantido em estado à parte dos itens (o vínculo
- *  item→destino é a `endereco_entrega_id` da linha). `enderecoId` é a chave de
- *  roteamento (PK do `cliente_enderecos` ou PK do ponto ao recarregar). */
-type EntregaDestino = {
-  enderecoId: string;
-  /** PK do ponto entrega no banco (presente ao recarregar; null pra destino novo). */
-  id: string | null;
-  empresa_nome: string;
-  endereco: string | null;
-};
 
 /** Compõe um resumo legível do endereço cadastrado (endereço · bairro · cidade/UF). */
 function enderecoResumo(e: ClienteEndereco): string {
@@ -194,57 +184,15 @@ export function PedidoForm({
     );
   }
 
-  /**
-   * Monta os `pontos_retirada` CANÔNICOS (a forma que a persistência espera) a partir das
-   * modalidades dos itens + os destinos (loja[0], entrega[1], imediato[2] da forma de
-   * trabalho + os destinos por-endereço). Função PURA: NÃO grava no estado do form.
-   *
-   * IMPORTANTE (fix da revisão): isto roda SÓ depois da validação passar, com os `values`
-   * já validados — NUNCA antes. Antes, o rebuild reescrevia `pontos_retirada` no estado e,
-   * se a validação falhasse, a forma de trabalho ficava "colapsada" (só os itens loja no
-   * índice 0); no re-save os itens entrega/imediato eram descartados silenciosamente
-   * (perda de dado que ainda se propagava pelo sync no modo edit). Não mutando o estado, a
-   * forma de trabalho (todos os itens no ponto[0]) permanece íntegra entre tentativas.
-   */
-  function montarPontosCanonicos(values: PedidoFormInput): PedidoFormInput['pontos_retirada'] {
-    const trabalho = values.pontos_retirada ?? [];
-    const lojaInfo = trabalho[0];
-    const entregaInfo = trabalho[1];
-    const imediatoInfo = trabalho[2];
-    const itens = lojaInfo?.itens ?? [];
-
-    return sincronizarDestinos({
-      itens,
-      loja: { id: lojaInfo?.id, empresa_nome: lojaInfo?.empresa_nome, endereco: lojaInfo?.endereco },
-      // Destino de entrega PADRÃO: itens `entrega` sem `endereco_entrega_id` caem aqui.
-      entrega: {
-        id: entregaInfo?.id,
-        empresa_nome: entregaInfo?.empresa_nome,
-        endereco: entregaInfo?.endereco,
-      },
-      // Destinos de entrega POR ENDEREÇO (multi-endereço): cada item `entrega` com
-      // `endereco_entrega_id` é agrupado e ligado ao destino cujo enderecoId casa.
-      entregas: entregaDestinos.map(
-        (d): DestinoInfo => ({
-          id: d.id,
-          enderecoId: d.enderecoId,
-          empresa_nome: d.empresa_nome,
-          endereco: d.endereco,
-        }),
-      ),
-      // Carrega a PK do ponto-container imediato (se já existia) pra UPDATE in-place.
-      imediato: { id: imediatoInfo?.id },
-    });
-  }
-
   function submit(status: 'rascunho' | 'em_financeiro') {
     // Valida a FORMA DE TRABALHO (todos os itens no ponto[0]); só DEPOIS de passar é que
-    // derivamos os pontos canônicos — sem tocar no estado do form (ver montarPontosCanonicos).
+    // derivamos os pontos canônicos — sem tocar no estado do form. montarPontosCanonicos é
+    // PURA (lib/pedidos/montar-pontos-canonicos.ts), coberta por teste; ver o fix de re-save.
     handleSubmit(
       (values) => {
         const payload: PedidoFormInput = {
           ...values,
-          pontos_retirada: montarPontosCanonicos(values),
+          pontos_retirada: montarPontosCanonicos(values, entregaDestinos),
         };
         startTransition(async () => {
           const r =

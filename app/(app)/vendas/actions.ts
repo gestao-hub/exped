@@ -359,8 +359,11 @@ export async function registrarEntregaAction(input: {
     .in('id', ids);
   if (e0) return { error: e0.message };
 
-  // Verifica que TODOS itens pertencem ao mesmo pedido
-  // (ponto_retirada_id é nullable — item Imediato não tem destino; ignora nulos aqui)
+  // Verifica que TODOS itens pertencem ao mesmo pedido.
+  // ponto_retirada_id é NOT NULL no banco (todo item — inclusive 'imediato' — vive num
+  // ponto-container; ver migration 20260614000001). O filtro de nulos abaixo é só um
+  // guard de TIPO: os tipos gerados (database.ts) ainda declaram a coluna nullable até
+  // serem regerados pós-deploy. Em runtime nunca há nulo aqui.
   const pontoIds = Array.from(
     new Set((atuais ?? []).map((a) => a.ponto_retirada_id).filter((id): id is string => id !== null)),
   );

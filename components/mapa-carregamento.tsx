@@ -15,6 +15,9 @@ const ROTULO_PONTO: Record<string, string> = {
   loja: 'Loja',
   deposito: 'Depósito',
   entrega: 'Entrega',
+  // Container dos itens 'imediato' (balcão/retirada imediata). Sem isto, o ponto caía no
+  // fallback e era rotulado "Loja" em todo documento impresso (mapa, print, lote).
+  imediato: 'Imediato',
 };
 
 export type PontoComItens = PontoRetirada & { itens: PedidoItem[] };
@@ -149,7 +152,7 @@ export function MapaCarregamento({
       {pontos.map((ponto, idx) => (
         <Section
           key={ponto.id}
-          title={`${ROTULO_PONTO[ponto.tipo] ?? 'Loja'} ${pontos.length > 1 ? `· ${idx + 1}/${pontos.length}` : ''}`}
+          title={`${ROTULO_PONTO[ponto.tipo] ?? 'Retirada'} ${pontos.length > 1 ? `· ${idx + 1}/${pontos.length}` : ''}`}
           headerExtra={ponto.empresa_nome}
           className={isPrint && idx > 0 ? 'print-break-before' : ''}
         >

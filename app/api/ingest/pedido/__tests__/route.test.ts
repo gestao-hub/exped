@@ -22,6 +22,8 @@ vi.mock('@/lib/supabase/admin', () => ({
         update() { return { eq: async () => ({ data: null }) }; },
       };
     },
+    // upload do PDF (caminho multipart) — best-effort, devolve sucesso no teste
+    storage: { from: () => ({ upload: async () => ({ error: null }) }) },
   }),
 }));
 
@@ -63,6 +65,35 @@ function req(body: unknown, token?: string): Request {
   });
 }
 
+/** Monta um POST multipart/form-data (campo 'dados' JSON + 'file' PDF) — é o transporte
+ *  que o agente Hiper usa em produção quando há PDF do pedido. */
+function multipartReq(body: unknown, token: string): Request {
+  const CRLF = '\r\n';
+  const boundary = '----exped-test-boundary';
+  const parts = [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="dados"',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    JSON.stringify(body),
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="file"; filename="pedido.pdf"',
+    'Content-Type: application/pdf',
+    '',
+    '%PDF-1.4 fake',
+    `--${boundary}--`,
+    '',
+  ];
+  return new Request('http://127.0.0.1:3000/api/ingest/pedido', {
+    method: 'POST',
+    headers: {
+      'content-type': `multipart/form-data; boundary=${boundary}`,
+      authorization: `Bearer ${token}`,
+    },
+    body: parts.join(CRLF),
+  });
+}
+
 beforeEach(() => {
   deviceRow = { id: 'D1', empresa_id: 'E1', ativo: true };
   vendedorRow = { vendedor_id: 'V1' };
@@ -97,6 +128,17 @@ describe('POST /api/ingest/pedido — modalidade por item (retrocompat do agente
       pontos_retirada: { itens: { modalidade: string }[] }[];
     };
     expect(validado.pontos_retirada[0].itens[0].modalidade).toBe('entrega');
+  });
+
+  it('multipart com PDF (transporte real do agente) → injeta "loja" e cria o pedido (201)', async () => {
+    inserirPedido.mockResolvedValue({ id: 'P3', numero: 44 });
+    const res = await POST(multipartReq(payloadAgente(), 'tok') as never);
+    expect(res.status).toBe(201);
+    expect(inserirPedido).toHaveBeenCalledOnce();
+    const validado = inserirPedido.mock.calls[0][1] as {
+      pontos_retirada: { itens: { modalidade: string }[] }[];
+    };
+    expect(validado.pontos_retirada[0].itens[0].modalidade).toBe('loja');
   });
 
   it('vendedor Hiper não mapeado → 422 (não cria pedido)', async () => {
