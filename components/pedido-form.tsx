@@ -537,10 +537,14 @@ export function PedidoForm({
             <div className="grid grid-cols-2 gap-4">
               {mostrarFrete && (
                 <Field label="Frete (R$)" className="col-span-2">
+                  {/* Frete vazio → null (válido p/ o schema nullable) em vez de NaN, que
+                      bloqueava o save de pedidos com entrega sem frete digitado. */}
                   <Input
                     type="number"
                     step="0.01"
-                    {...register('valor_frete', { valueAsNumber: true })}
+                    {...register('valor_frete', {
+                      setValueAs: (v: unknown) => (v === '' || v == null ? null : Number(v)),
+                    })}
                     className="font-mono text-right"
                     placeholder="0,00"
                   />
