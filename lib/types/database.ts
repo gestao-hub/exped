@@ -710,7 +710,7 @@ export type Database = {
           ordem: number
           peso_bruto: number | null
           peso_liquido: number | null
-          ponto_retirada_id: string | null
+          ponto_retirada_id: string
           preco_unitario: number
           quantidade: number
           quantidade_entregue: number
@@ -734,7 +734,7 @@ export type Database = {
           ordem?: number
           peso_bruto?: number | null
           peso_liquido?: number | null
-          ponto_retirada_id?: string | null
+          ponto_retirada_id: string
           preco_unitario?: number
           quantidade?: number
           quantidade_entregue?: number
@@ -758,7 +758,7 @@ export type Database = {
           ordem?: number
           peso_bruto?: number | null
           peso_liquido?: number | null
-          ponto_retirada_id?: string | null
+          ponto_retirada_id?: string
           preco_unitario?: number
           quantidade?: number
           quantidade_entregue?: number
