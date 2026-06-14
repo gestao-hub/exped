@@ -39,6 +39,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
+  // empresa_id explícito p/ o planner usar o índice (empresa_id, created_at) — a RLS já
+  // isola, mas sem o predicado constante o export faria Seq Scan no total de todas empresas.
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('empresa_id')
+    .eq('id', user.id)
+    .single();
+  const empresaId = prof?.empresa_id ?? null;
+
   const sp = req.nextUrl.searchParams;
   const from = sp.get('from');
   const to = sp.get('to');
@@ -57,6 +66,7 @@ export async function GET(req: NextRequest) {
       .select(SELECT)
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE - 1);
+    if (empresaId) q = q.eq('empresa_id', empresaId);
     if (status !== 'todos' && (VALID_STATUS as string[]).includes(status)) {
       q = q.eq('status', status as PedidoStatus);
     }

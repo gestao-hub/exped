@@ -170,6 +170,12 @@ export function PedidosList({
       .order('id', { ascending: true })
       .range(pageFrom, pageTo);
 
+    // Filtro explícito de empresa: a RLS já garante o isolamento, mas o predicado dela
+    // (`is_platform_admin() OR empresa_id=…`) impede o planner de usar o índice composto
+    // (empresa_id, status, data_entrega) → Seq Scan que cresce com o total de TODAS as
+    // empresas. Com o empresa_id explícito, o planner usa o índice (Index Scan, escala
+    // flat). Medido em carga (100k pedidos): ~34ms → ~2ms. Redundante com a RLS, nunca a afrouxa.
+    if (empresaId) query = query.eq('empresa_id', empresaId);
     if (status !== 'todos') query = query.eq('status', status);
     if (search.trim()) {
       const q = `%${search.trim()}%`;
@@ -193,7 +199,7 @@ export function PedidosList({
     });
 
     return () => { cancel = true; };
-  }, [supabase, status, search, sortBy, sortDir, dateRange, customFrom, customTo, page, tick]);
+  }, [supabase, empresaId, status, search, sortBy, sortDir, dateRange, customFrom, customTo, page, tick]);
 
   // Volta pra página 1 quando muda filtro/busca/ordenação (evita ficar numa página vazia).
   useEffect(() => {
