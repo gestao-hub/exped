@@ -99,6 +99,10 @@ async function persistirFilhosPedido(
         const { error } = await supabase
           .from('pedido_itens')
           .update({
+            // Reancora o item ao ponto atual. Hoje a reconciliação só casa um item
+            // (por PK) dentro do MESMO ponto, então isto é um no-op defensivo; mantém
+            // update e insert simétricos e blinda contra mudanças futuras no matching.
+            ponto_retirada_id: pontoId,
             codigo: it.data.codigo,
             descricao: it.data.descricao,
             quantidade: it.data.quantidade,

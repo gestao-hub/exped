@@ -7,6 +7,9 @@
 -- Destino não renderiza nada para ele); é só um container para reaproveitar a
 -- persistência/carga que já são agnósticas ao tipo do ponto.
 --
--- Nota de deploy: ALTER TYPE ... ADD VALUE NÃO pode rodar dentro de bloco de transação.
--- Por isso esta migração é standalone e NÃO usa BEGIN/COMMIT.
+-- Nota de deploy (PG 12+/Supabase): ALTER TYPE ... ADD VALUE PODE rodar em transação; a
+-- restrição real é não USAR o novo valor na MESMA transação que o adiciona — esta migração
+-- só adiciona (não usa), então é segura via psql, `supabase db push` ou SQL Editor. Fica
+-- standalone (sem BEGIN/COMMIT) por simplicidade. Aplicar ANTES do código que grava
+-- tipo='imediato' (nuvem E hub), senão o INSERT falha com 'invalid input value for enum'.
 ALTER TYPE public.ponto_retirada_destino ADD VALUE IF NOT EXISTS 'imediato';

@@ -42,12 +42,19 @@ cp .env.example .env.local
 
 ### Aplicar o schema (uma vez)
 
-Abra **Supabase Dashboard → SQL Editor → New query**, cole o conteúdo de
-[supabase/01-SCHEMA.sql](supabase/01-SCHEMA.sql) e clique **Run**.
+A **fonte da verdade** do schema são as migrations em
+[supabase/migrations/](supabase/migrations/) (aplicadas EM ORDEM). Use o CLI:
 
-Esse arquivo é a concatenação das 6 migrations em
-[supabase/migrations/](supabase/migrations/) — fique livre para aplicá-las uma
-a uma se preferir (via `supabase db push` com o CLI).
+```bash
+npx supabase login
+npx supabase link --project-ref <SEU_PROJECT_REF>
+npx supabase db push   # aplica todas as migrations pendentes, em ordem
+```
+
+> ⚠️ O arquivo [supabase/01-SCHEMA.sql](supabase/01-SCHEMA.sql) é um bootstrap
+> ANTIGO (só as primeiras migrations) e **não reflete o schema atual** (faltam,
+> p.ex., `modalidade` por item, `exige_emissao`, status `em_financeiro`/`em_transporte`).
+> Não use para um setup novo — aplique as migrations.
 
 ### Gerar os tipos TypeScript do banco
 
@@ -126,8 +133,8 @@ lib/
   types/                  → tipos do banco (auto-gerados)
 
 supabase/
-  01-SCHEMA.sql           → schema completo (cole no SQL Editor)
-  migrations/             → 6 arquivos temáticos para o supabase CLI
+  migrations/             → fonte da verdade do schema (supabase db push)
+  01-SCHEMA.sql           → bootstrap ANTIGO (desatualizado; não usar)
 
 tests/fixtures/
   pedido-L4077.txt        → texto cru do PDF de exemplo

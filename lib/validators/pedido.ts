@@ -23,6 +23,9 @@ export const itemSchema = z.object({
   desconto:       z.number().nonnegative(),
   total:          z.number().nonnegative(),
   // Fonte da verdade de como o cliente recebe o item (substitui o "modo de retirada" global).
+  // Obrigatório aqui (o form/parser sempre setam). O agente Hiper NÃO envia esse campo, então
+  // o endpoint de ingestão injeta `modalidade='loja'` por item ANTES de validar contra este
+  // schema (ver app/api/ingest/pedido/route.ts) — mantém retrocompat sem afrouxar o schema.
   modalidade:     z.enum(['imediato', 'loja', 'entrega']),
   // Campo APENAS-DO-FORM (transitório, NÃO persistido em pedido_itens — essa tabela não
   // tem essa coluna; o endereço vive no PONTO de entrega). Roteia itens `entrega` para
