@@ -78,7 +78,11 @@ export const pedidoFormSchema = z.object({
   // antiga regra "cada ponto com itens" foi removida: a modalidade agora vive POR ITEM
   // (fonte da verdade) e o vínculo é item→destino, não item-dentro-do-ponto. Um ponto é
   // só um destino e pode existir sem itens aninhados.
-  pontos_retirada:  z.array(pontoRetiradaSchema).min(1, 'Adicione ao menos 1 ponto de retirada').max(5),
+  // max(12) = até 10 endereços de entrega distintos (multi-endereço) + ponto loja + ponto
+  // container 'imediato'. A forma de trabalho do form tem só 3 pontos, mas o payload
+  // CANÔNICO (montarPontosCanonicos) expande 1 ponto entrega por endereço; este limite é o
+  // teto desse payload (validado no servidor). Decisão Franzoni 2026-06-14.
+  pontos_retirada:  z.array(pontoRetiradaSchema).min(1, 'Adicione ao menos 1 ponto de retirada').max(12),
 });
 
 export type PedidoFormInput = z.infer<typeof pedidoFormSchema>;
