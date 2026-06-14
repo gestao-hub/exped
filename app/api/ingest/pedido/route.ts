@@ -15,6 +15,28 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const BUCKET = 'pedidos-pdfs';
 
 /**
+ * Injeta `modalidade: 'loja'` em itens que não trazem o campo (payload do agente Hiper,
+ * que não conhece o conceito). Mutação in-place no JSON cru, ANTES da validação Zod — o
+ * schema do item exige `modalidade`. Tolerante ao formato: só mexe onde a estrutura bate
+ * e nunca lança (validação real fica para o `safeParse`).
+ */
+function preencherModalidadePadrao(dadosJson: unknown): void {
+  if (!dadosJson || typeof dadosJson !== 'object') return;
+  const pontos = (dadosJson as { pontos_retirada?: unknown }).pontos_retirada;
+  if (!Array.isArray(pontos)) return;
+  for (const ponto of pontos) {
+    if (!ponto || typeof ponto !== 'object') continue;
+    const itens = (ponto as { itens?: unknown }).itens;
+    if (!Array.isArray(itens)) continue;
+    for (const item of itens) {
+      if (item && typeof item === 'object' && (item as { modalidade?: unknown }).modalidade == null) {
+        (item as { modalidade?: string }).modalidade = 'loja';
+      }
+    }
+  }
+}
+
+/**
  * Ingestão de pedido vinda do agente local (Serviço Windows).
  * Autenticação: token de dispositivo (Authorization: Bearer <token>) → resolve a
  * empresa via tabela `dispositivos`. Dados estruturados vêm do banco do Hiper (JSON);
@@ -51,6 +73,11 @@ export async function POST(req: NextRequest) {
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: parsed.status });
   const dadosJson = parsed.dadosJson;
   const file: File | null = parsed.file;
+  // Retrocompat: o agente Hiper NÃO envia `modalidade` por item (esse campo é novo e vive
+  // só no Exped — Hiper não tem o conceito). O schema do item exige modalidade, então
+  // injetamos o default 'loja' por item ANTES de validar. Pedido do Hiper sempre entra como
+  // 'loja' (retirada); o vendedor reclassifica itens p/ entrega/imediato na revisão.
+  preencherModalidadePadrao(dadosJson);
   const dados = ingestPedidoSchema.safeParse(dadosJson);
   if (!dados.success) {
     return NextResponse.json(

@@ -195,20 +195,25 @@ export function PedidoForm({
   }
 
   /**
-   * Reconstrói `pontos_retirada` a partir das modalidades dos itens + os dados dos
-   * destinos (ponto loja[0], entrega[1] e imediato[2] da forma de trabalho). Grava o
-   * resultado no form ANTES de validar, pra que o resolver veja a forma canônica que
-   * a persistência espera. A regra `min(1)` do schema é satisfeita naturalmente:
-   * havendo qualquer item, sai ao menos 1 ponto (loja, entrega OU imediato).
+   * Monta os `pontos_retirada` CANÔNICOS (a forma que a persistência espera) a partir das
+   * modalidades dos itens + os destinos (loja[0], entrega[1], imediato[2] da forma de
+   * trabalho + os destinos por-endereço). Função PURA: NÃO grava no estado do form.
+   *
+   * IMPORTANTE (fix da revisão): isto roda SÓ depois da validação passar, com os `values`
+   * já validados — NUNCA antes. Antes, o rebuild reescrevia `pontos_retirada` no estado e,
+   * se a validação falhasse, a forma de trabalho ficava "colapsada" (só os itens loja no
+   * índice 0); no re-save os itens entrega/imediato eram descartados silenciosamente
+   * (perda de dado que ainda se propagava pelo sync no modo edit). Não mutando o estado, a
+   * forma de trabalho (todos os itens no ponto[0]) permanece íntegra entre tentativas.
    */
-  function rebuildPontos() {
-    const trabalho = getValues('pontos_retirada') ?? [];
+  function montarPontosCanonicos(values: PedidoFormInput): PedidoFormInput['pontos_retirada'] {
+    const trabalho = values.pontos_retirada ?? [];
     const lojaInfo = trabalho[0];
     const entregaInfo = trabalho[1];
     const imediatoInfo = trabalho[2];
     const itens = lojaInfo?.itens ?? [];
 
-    const pontos = sincronizarDestinos({
+    return sincronizarDestinos({
       itens,
       loja: { id: lojaInfo?.id, empresa_nome: lojaInfo?.empresa_nome, endereco: lojaInfo?.endereco },
       // Destino de entrega PADRÃO: itens `entrega` sem `endereco_entrega_id` caem aqui.
@@ -230,20 +235,22 @@ export function PedidoForm({
       // Carrega a PK do ponto-container imediato (se já existia) pra UPDATE in-place.
       imediato: { id: imediatoInfo?.id },
     });
-
-    setValue('pontos_retirada', pontos, { shouldDirty: true, shouldValidate: false });
   }
 
   function submit(status: 'rascunho' | 'em_financeiro') {
-    // Re-deriva os pontos das modalidades dos itens ANTES de validar/enviar.
-    rebuildPontos();
+    // Valida a FORMA DE TRABALHO (todos os itens no ponto[0]); só DEPOIS de passar é que
+    // derivamos os pontos canônicos — sem tocar no estado do form (ver montarPontosCanonicos).
     handleSubmit(
       (values) => {
+        const payload: PedidoFormInput = {
+          ...values,
+          pontos_retirada: montarPontosCanonicos(values),
+        };
         startTransition(async () => {
           const r =
             mode === 'edit' && pedidoId
-              ? await atualizarPedidoAction(pedidoId, values, status)
-              : await criarPedidoAction(values, status);
+              ? await atualizarPedidoAction(pedidoId, payload, status)
+              : await criarPedidoAction(payload, status);
           if ('error' in r) {
             toast.error(r.error);
             return;
@@ -409,6 +416,7 @@ export function PedidoForm({
             setValue={setValue}
             getValues={getValues}
             enderecosCliente={enderecosCliente}
+            entregaDestinos={entregaDestinos}
             onPickEnderecoItem={(ende) => ende && ensureDestino(ende)}
           />
         </CardContent>
@@ -715,6 +723,7 @@ function ItensEditor({
   setValue,
   getValues,
   enderecosCliente,
+  entregaDestinos,
   onPickEnderecoItem,
 }: {
   pontoIndex: number;
@@ -727,6 +736,10 @@ function ItensEditor({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getValues: any;
   enderecosCliente: ClienteEndereco[];
+  /** Destinos de entrega já conhecidos (carregados na edição ou criados nesta sessão).
+   *  Repassados ao select por-linha pra que o valor carregado (PK do ponto) case com
+   *  uma opção e o destino correto apareça (em vez de cair em "Padrão"). */
+  entregaDestinos: EntregaDestino[];
   /** Chamado quando uma linha escolhe um endereço cadastrado (pra registrar o destino). */
   onPickEnderecoItem: (ende: ClienteEndereco | null) => void;
 }) {
@@ -867,7 +880,19 @@ function ItensEditor({
                       render={({ field }) => (
                         <select
                           value={field.value ?? 'loja'}
-                          onChange={field.onChange}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            // Endereço de entrega só faz sentido p/ item Entrega. Ao sair de
+                            // Entrega, zera o vínculo de linha — senão fica um destino
+                            // "fantasma" que reaparece se o operador voltar p/ Entrega.
+                            if (e.target.value !== 'entrega') {
+                              setValue(
+                                `pontos_retirada.${pontoIndex}.itens.${i}.endereco_entrega_id`,
+                                null,
+                                { shouldDirty: true },
+                              );
+                            }
+                          }}
                           onBlur={field.onBlur}
                           className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
                         >
@@ -886,6 +911,7 @@ function ItensEditor({
                       pontoIndex={pontoIndex}
                       rowIndex={i}
                       enderecosCliente={enderecosCliente}
+                      destinos={entregaDestinos}
                       onPick={onPickEnderecoItem}
                     />
                   </td>
@@ -942,14 +968,23 @@ function ItensEditor({
 /**
  * Select de endereço de entrega de UMA linha de item. Só fica ativo quando a
  * modalidade da linha é `entrega`; pra Imediato/Loja fica desabilitado (mostra "—").
- * O valor (PK do `cliente_enderecos`) vira o `endereco_entrega_id` do item, que o
- * sincronizador usa pra agrupar itens por destino. Vazio = endereço de entrega padrão.
+ * O valor vira o `endereco_entrega_id` do item, que o sincronizador usa pra agrupar
+ * itens por destino. Vazio = endereço de entrega padrão.
+ *
+ * Opções = endereços cadastrados do cliente (valor = PK do `cliente_enderecos`) MAIS os
+ * destinos já conhecidos cujo `enderecoId` não é um endereço cadastrado. Isso cobre a
+ * EDIÇÃO: ao recarregar um pedido salvo, o item vem com `endereco_entrega_id` = PK do
+ * PONTO de entrega (a chave de roteamento), que não está na lista de endereços do
+ * cliente. Sem incluir esse destino nas opções, o select cairia em "Padrão" (mostrando
+ * destino errado) e, se o operador re-selecionasse, trocaria a chave (churn da PK →
+ * reagrupamento/perda). Incluindo-o, o valor carregado casa e o round-trip é estável.
  */
 function RowEnderecoSelect({
   control,
   pontoIndex,
   rowIndex,
   enderecosCliente,
+  destinos,
   onPick,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -957,6 +992,7 @@ function RowEnderecoSelect({
   pontoIndex: number;
   rowIndex: number;
   enderecosCliente: ClienteEndereco[];
+  destinos: EntregaDestino[];
   onPick: (ende: ClienteEndereco | null) => void;
 }) {
   const modalidade = useWatch({
@@ -964,6 +1000,11 @@ function RowEnderecoSelect({
     name: `pontos_retirada.${pontoIndex}.itens.${rowIndex}.modalidade`,
   });
   const isEntrega = modalidade === 'entrega';
+
+  // Destinos que NÃO correspondem a um endereço cadastrado (ex.: destino salvo, cuja
+  // chave é a PK do ponto). Vão como opções extras pra casar o valor carregado na edição.
+  const idsCadastrados = new Set(enderecosCliente.map((e) => e.id));
+  const destinosExtras = destinos.filter((d) => !idsCadastrados.has(d.enderecoId));
 
   if (!isEntrega) {
     return <span className="block text-center text-xs text-muted-foreground">—</span>;
@@ -973,26 +1014,46 @@ function RowEnderecoSelect({
     <Controller
       control={control}
       name={`pontos_retirada.${pontoIndex}.itens.${rowIndex}.endereco_entrega_id`}
-      render={({ field }) => (
-        <select
-          value={field.value ?? ''}
-          onChange={(e) => {
-            const id = e.target.value || null;
-            field.onChange(id);
-            if (id) onPick(enderecosCliente.find((x) => x.id === id) ?? null);
-          }}
-          onBlur={field.onBlur}
-          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
-        >
-          <option value="">Padrão</option>
-          {enderecosCliente.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.rotulo}
-              {e.is_padrao ? ' ★' : ''}
-            </option>
-          ))}
-        </select>
-      )}
+      render={({ field }) => {
+        // Defensivo: se o valor atual não casa com nenhuma opção (ex.: destino antigo
+        // já removido), preserva-o numa opção própria pra não virar "Padrão" silencioso.
+        const valorConhecido =
+          field.value == null ||
+          field.value === '' ||
+          idsCadastrados.has(field.value) ||
+          destinosExtras.some((d) => d.enderecoId === field.value);
+        return (
+          <select
+            value={field.value ?? ''}
+            onChange={(e) => {
+              const id = e.target.value || null;
+              field.onChange(id);
+              // Só endereços CADASTRADOS viram um destino novo (via onPick→ensureDestino).
+              // Selecionar um destino já existente (PK de ponto) não casa aqui → onPick(null),
+              // que é no-op (o destino já está no card).
+              if (id) onPick(enderecosCliente.find((x) => x.id === id) ?? null);
+            }}
+            onBlur={field.onBlur}
+            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+          >
+            <option value="">Padrão</option>
+            {enderecosCliente.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.rotulo}
+                {e.is_padrao ? ' ★' : ''}
+              </option>
+            ))}
+            {destinosExtras.map((d) => (
+              <option key={d.enderecoId} value={d.enderecoId}>
+                {d.empresa_nome || d.endereco || 'Destino salvo'}
+              </option>
+            ))}
+            {!valorConhecido && field.value && (
+              <option value={field.value}>Destino atual</option>
+            )}
+          </select>
+        );
+      }}
     />
   );
 }
