@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -484,11 +485,15 @@ function VendedoresSection({
         <Field label="ID Hiper"><Input value={hiperId} onChange={(e) => setHiperId(e.target.value)} className="w-24" placeholder="1" /></Field>
         <Field label="Nome no Hiper"><Input value={hiperNome} onChange={(e) => setHiperNome(e.target.value)} className="w-40" placeholder="Michel" /></Field>
         <Field label="Vendedor Exped">
-          <select value={vendedorId} onChange={(e) => setVendedorId(e.target.value)}
-            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm min-w-[200px]">
-            <option value="">— escolher —</option>
-            {vendedores.map((v) => <option key={v.id} value={v.id}>{v.full_name || v.email} ({v.role})</option>)}
-          </select>
+          <Select value={vendedorId} onValueChange={(v) => setVendedorId(v ?? '')}>
+            <SelectTrigger className="h-9 min-w-50">
+              <SelectValue placeholder="— escolher —" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">— escolher —</SelectItem>
+              {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.full_name || v.email} ({v.role})</SelectItem>)}
+            </SelectContent>
+          </Select>
         </Field>
         <Button size="sm" onClick={salvar} disabled={pending}><Plus className="h-4 w-4 mr-1" /> Adicionar</Button>
       </div>

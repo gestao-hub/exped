@@ -7,6 +7,7 @@ import { ptBR } from 'date-fns/locale';
 import { Send, BellRing, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Badge } from '@/components/ui/badge';
 import { ContentCard, ContentCardTitle } from '@/components/layout/content-card';
 import {
@@ -102,7 +103,7 @@ export function OsNotificacoesPanel({
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label className="text-[11px] text-muted-foreground block">Data</label>
-            <Input type="date" value={data} onChange={(e) => setData(e.target.value)} className="w-40" />
+            <DatePicker value={data} onChangeAction={(iso) => setData(iso ?? '')} placeholder="Data" className="w-40" />
           </div>
           <div className="flex-1 min-w-[180px]">
             <label className="text-[11px] text-muted-foreground block">Descrição</label>

@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -81,11 +88,10 @@ export function EnderecoSelector({
             Endereço de entrega
             {loading && <Loader2 className="h-3 w-3 animate-spin" />}
           </Label>
-          <select
+          <Select
             value={selectedId ?? ''}
             disabled={disabled || loading}
-            onChange={(e) => {
-              const id = e.target.value;
+            onValueChange={(id) => {
               if (!id) {
                 onPickAction(null);
                 return;
@@ -93,16 +99,20 @@ export function EnderecoSelector({
               const ende = enderecos.find((x) => x.id === id);
               if (ende) onPickAction(ende);
             }}
-            className="w-full h-9 px-3 rounded-md border border-input bg-transparent text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
           >
-            <option value="">— Outro endereço (digitar abaixo) —</option>
-            {enderecos.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.rotulo}
-                {e.is_padrao ? ' ★' : ''} — {resumo(e)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full h-9">
+              <SelectValue placeholder="— Outro endereço (digitar abaixo) —" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">— Outro endereço (digitar abaixo) —</SelectItem>
+              {enderecos.map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {e.rotulo}
+                  {e.is_padrao ? ' ★' : ''} — {resumo(e)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {!selectedId && cliente && (
           <Button

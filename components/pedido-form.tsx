@@ -21,6 +21,13 @@ import {
   type EntregaDestino,
 } from '@/lib/pedidos/montar-pontos-canonicos';
 import { DatePicker } from '@/components/ui/date-picker';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { EnderecoSelector } from '@/components/clientes/endereco-selector';
 import {
   useEnderecosDoCliente,
@@ -452,10 +459,10 @@ export function PedidoForm({
                       <Label className="text-xs text-muted-foreground mb-1.5 block">
                         Adicionar endereço de entrega
                       </Label>
-                      <select
+                      <Select
                         value=""
-                        onChange={(e) => {
-                          const ende = enderecosCliente.find((x) => x.id === e.target.value);
+                        onValueChange={(v) => {
+                          const ende = enderecosCliente.find((x) => x.id === v);
                           if (!ende) return;
                           ensureDestino(ende);
                           // Roteia os itens Entrega ainda no destino padrão p/ este endereço.
@@ -468,16 +475,20 @@ export function PedidoForm({
                             }
                           });
                         }}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
                       >
-                        <option value="">— Selecione um endereço cadastrado —</option>
-                        {enderecosCliente.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.rotulo}
-                            {e.is_padrao ? ' ★' : ''} — {enderecoResumo(e)}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="— Selecione um endereço cadastrado —" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">— Selecione um endereço cadastrado —</SelectItem>
+                          {enderecosCliente.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>
+                              {e.rotulo}
+                              {e.is_padrao ? ' ★' : ''} — {enderecoResumo(e)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 )}
@@ -505,10 +516,9 @@ export function PedidoForm({
                 control={control}
                 name="forma_pagamento"
                 render={({ field }) => (
-                  <select
+                  <Select
                     value={field.value ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    onValueChange={(v) => {
                       const forma = v === '' ? null : (v as (typeof FORMAS_PAGAMENTO)[number]);
                       field.onChange(forma);
                       // Forma sem parcelamento → zera parcelas (mantém consistência)
@@ -516,16 +526,19 @@ export function PedidoForm({
                         setValue('parcelas', null, { shouldDirty: true });
                       }
                     }}
-                    onBlur={field.onBlur}
-                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
                   >
-                    <option value="">—</option>
-                    {FORMAS_PAGAMENTO.map((f) => (
-                      <option key={f} value={f}>
-                        {rotuloFormaPagamento(f, null)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue placeholder="—" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">—</SelectItem>
+                      {FORMAS_PAGAMENTO.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {rotuloFormaPagamento(f, null)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               />
             </Field>
@@ -558,23 +571,25 @@ export function PedidoForm({
                     const forma = watch('forma_pagamento');
                     const aceitaParcelas = !!forma && FORMAS_COM_PARCELAS.has(forma);
                     return (
-                      <select
-                        value={field.value ?? ''}
+                      <Select
+                        value={field.value != null ? String(field.value) : ''}
                         disabled={!aceitaParcelas}
-                        onChange={(e) => {
-                          const v = e.target.value;
+                        onValueChange={(v) => {
                           field.onChange(v === '' ? null : Number(v));
                         }}
-                        onBlur={field.onBlur}
-                        className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <option value="">—</option>
-                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>
-                            {n}x
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="—" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">—</SelectItem>
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                            <SelectItem key={n} value={String(n)}>
+                              {n}x
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     );
                   }}
                 />
@@ -733,31 +748,43 @@ function ItensEditor({
           {fields.length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-muted-foreground">Modalidade:</span>
-              <select
+              <Select
                 value={bulkModalidade}
-                onChange={(e) => setBulkModalidade(e.target.value as ModalidadeItem)}
-                aria-label="Modalidade para aplicar a todos os itens"
-                className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                onValueChange={(v) => setBulkModalidade(v as ModalidadeItem)}
               >
-                <option value="imediato">Imediato</option>
-                <option value="loja">Loja</option>
-                <option value="entrega">Entrega</option>
-              </select>
-              {bulkModalidade === 'entrega' && enderecosCliente.length > 0 && (
-                <select
-                  value={bulkEnderecoId}
-                  onChange={(e) => setBulkEnderecoId(e.target.value)}
-                  aria-label="Endereço de entrega para aplicar a todos os itens"
-                  className="h-8 rounded-md border border-input bg-transparent px-2 text-sm"
+                <SelectTrigger
+                  className="h-8 w-auto"
+                  aria-label="Modalidade para aplicar a todos os itens"
                 >
-                  <option value="">Endereço padrão</option>
-                  {enderecosCliente.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.rotulo}
-                      {e.is_padrao ? ' ★' : ''}
-                    </option>
-                  ))}
-                </select>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="imediato">Imediato</SelectItem>
+                  <SelectItem value="loja">Loja</SelectItem>
+                  <SelectItem value="entrega">Entrega</SelectItem>
+                </SelectContent>
+              </Select>
+              {bulkModalidade === 'entrega' && enderecosCliente.length > 0 && (
+                <Select
+                  value={bulkEnderecoId}
+                  onValueChange={(v) => setBulkEnderecoId(v ?? '')}
+                >
+                  <SelectTrigger
+                    className="h-8 w-auto"
+                    aria-label="Endereço de entrega para aplicar a todos os itens"
+                  >
+                    <SelectValue placeholder="Endereço padrão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Endereço padrão</SelectItem>
+                    {enderecosCliente.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.rotulo}
+                        {e.is_padrao ? ' ★' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               <Button type="button" variant="outline" size="sm" onClick={aplicarATodos}>
                 Aplicar a todos
@@ -830,14 +857,14 @@ function ItensEditor({
                       control={control}
                       name={`pontos_retirada.${pontoIndex}.itens.${i}.modalidade`}
                       render={({ field }) => (
-                        <select
+                        <Select
                           value={field.value ?? 'loja'}
-                          onChange={(e) => {
-                            field.onChange(e);
+                          onValueChange={(v) => {
+                            field.onChange(v);
                             // Endereço de entrega só faz sentido p/ item Entrega. Ao sair de
                             // Entrega, zera o vínculo de linha — senão fica um destino
                             // "fantasma" que reaparece se o operador voltar p/ Entrega.
-                            if (e.target.value !== 'entrega') {
+                            if (v !== 'entrega') {
                               setValue(
                                 `pontos_retirada.${pontoIndex}.itens.${i}.endereco_entrega_id`,
                                 null,
@@ -845,13 +872,16 @@ function ItensEditor({
                               );
                             }
                           }}
-                          onBlur={field.onBlur}
-                          className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
                         >
-                          <option value="imediato">Imediato</option>
-                          <option value="loja">Loja</option>
-                          <option value="entrega">Entrega</option>
-                        </select>
+                          <SelectTrigger className="h-8 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="imediato">Imediato</SelectItem>
+                            <SelectItem value="loja">Loja</SelectItem>
+                            <SelectItem value="entrega">Entrega</SelectItem>
+                          </SelectContent>
+                        </Select>
                       )}
                     />
                   </td>
@@ -975,35 +1005,38 @@ function RowEnderecoSelect({
           idsCadastrados.has(field.value) ||
           destinosExtras.some((d) => d.enderecoId === field.value);
         return (
-          <select
+          <Select
             value={field.value ?? ''}
-            onChange={(e) => {
-              const id = e.target.value || null;
+            onValueChange={(v) => {
+              const id = v || null;
               field.onChange(id);
               // Só endereços CADASTRADOS viram um destino novo (via onPick→ensureDestino).
               // Selecionar um destino já existente (PK de ponto) não casa aqui → onPick(null),
               // que é no-op (o destino já está no card).
               if (id) onPick(enderecosCliente.find((x) => x.id === id) ?? null);
             }}
-            onBlur={field.onBlur}
-            className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
           >
-            <option value="">Padrão</option>
-            {enderecosCliente.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.rotulo}
-                {e.is_padrao ? ' ★' : ''}
-              </option>
-            ))}
-            {destinosExtras.map((d) => (
-              <option key={d.enderecoId} value={d.enderecoId}>
-                {d.empresa_nome || d.endereco || 'Destino salvo'}
-              </option>
-            ))}
-            {!valorConhecido && field.value && (
-              <option value={field.value}>Destino atual</option>
-            )}
-          </select>
+            <SelectTrigger className="h-8 w-full">
+              <SelectValue placeholder="Padrão" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Padrão</SelectItem>
+              {enderecosCliente.map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {e.rotulo}
+                  {e.is_padrao ? ' ★' : ''}
+                </SelectItem>
+              ))}
+              {destinosExtras.map((d) => (
+                <SelectItem key={d.enderecoId} value={d.enderecoId}>
+                  {d.empresa_nome || d.endereco || 'Destino salvo'}
+                </SelectItem>
+              ))}
+              {!valorConhecido && field.value && (
+                <SelectItem value={field.value}>Destino atual</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
         );
       }}
     />

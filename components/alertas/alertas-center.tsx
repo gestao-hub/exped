@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Bell, BellRing } from 'lucide-react';
 import { type SomId } from '@/lib/alertas/preferencias';
 import { SONS_LABEL } from '@/lib/alertas/som';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAlertas } from './alertas-provider';
 
 export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
@@ -84,17 +85,21 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
             <Linha label="Tocar som" checked={prefs.som} onChange={(v) => atualizar({ som: v })} />
             <div className="my-2 flex items-center justify-between">
               <span className="text-sm text-[#344054]">Som</span>
-              <select
+              <Select
                 value={prefs.somId}
-                onChange={(e) => atualizar({ somId: e.target.value as SomId })}
-                className="rounded-md border border-[#D0D5DD] px-2 py-1 text-sm"
+                onValueChange={(v) => atualizar({ somId: v as SomId })}
               >
-                {(Object.keys(SONS_LABEL) as SomId[]).map((id) => (
-                  <option key={id} value={id}>
-                    {SONS_LABEL[id]}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger size="sm">
+                  <SelectValue placeholder="Selecione" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(SONS_LABEL) as SomId[]).map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {SONS_LABEL[id]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Linha
               label="Repetir som até eu ver"

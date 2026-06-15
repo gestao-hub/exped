@@ -12,6 +12,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   financeiroFormSchema,
   type FinanceiroFormInput,
 } from '@/lib/validators/financeiro';
@@ -112,27 +119,29 @@ export function FinanceiroForm({
               control={control}
               name="forma_pagamento"
               render={({ field }) => (
-                <select
+                <Select
                   value={field.value ?? ''}
                   disabled={!editavel}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onValueChange={(v) => {
                     const forma = v === '' ? null : (v as (typeof FORMAS_PAGAMENTO)[number]);
                     field.onChange(forma);
                     if (!forma || !FORMAS_COM_PARCELAS.has(forma)) {
                       setValue('parcelas', null, { shouldDirty: true });
                     }
                   }}
-                  onBlur={field.onBlur}
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <option value="">—</option>
-                  {FORMAS_PAGAMENTO.map((f) => (
-                    <option key={f} value={f}>
-                      {rotuloFormaPagamento(f, null)}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="h-9 w-full">
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">—</SelectItem>
+                    {FORMAS_PAGAMENTO.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {rotuloFormaPagamento(f, null)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             />
           </Field>
@@ -145,23 +154,25 @@ export function FinanceiroForm({
                 const forma = watch('forma_pagamento');
                 const aceitaParcelas = !!forma && FORMAS_COM_PARCELAS.has(forma);
                 return (
-                  <select
-                    value={field.value ?? ''}
+                  <Select
+                    value={field.value == null ? '' : String(field.value)}
                     disabled={!editavel || !aceitaParcelas}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                    onValueChange={(v) => {
                       field.onChange(v === '' ? null : Number(v));
                     }}
-                    onBlur={field.onBlur}
-                    className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <option value="">—</option>
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n}x
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="h-9 w-full">
+                      <SelectValue placeholder="—" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">—</SelectItem>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}x
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 );
               }}
             />
