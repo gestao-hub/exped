@@ -6,6 +6,9 @@ import { makeSupabaseSyncDb } from '@/lib/sync/supabase-db';
 import { runPush, PushError, type Row } from '@/lib/sync/engine';
 
 export const runtime = 'nodejs';
+// Lote de push faz uma chamada por linha (até SYNC_LIMIT); em catch-up de backlog
+// grande isso passa do timeout padrão e o hub vê "fetch failed". Estende a janela.
+export const maxDuration = 60;
 
 /**
  * Push de lote do hub. Auth por token de dispositivo → empresa_id. A nuvem é a

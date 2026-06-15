@@ -65,6 +65,22 @@ async function psqlFile(cfg, file, { dbOverride } = {}) {
   );
 }
 
+/**
+ * Manda o PostgREST recarregar o schema cache (NOTIFY no canal `pgrst`).
+ * OBRIGATÓRIO após aplicar migrations que mudam o schema (ex.: ADD COLUMN): o
+ * PostgREST carrega o schema só no boot e o auto-update reinicia SÓ o app (não o
+ * PostgREST). Sem isso, ele segue com o cache antigo e rejeita a coluna nova com
+ * "Could not find the '<col>' column ... in the schema cache" (foi o que travou o
+ * ingest após o exige_emissao). Não-fatal se o PostgREST ainda não estiver de pé.
+ */
+export async function reloadPostgrest(cfg) {
+  try {
+    await psqlCmd(cfg, "NOTIFY pgrst, 'reload schema'");
+  } catch {
+    /* PostgREST pode não estar escutando ainda (boot inicial) — não é fatal */
+  }
+}
+
 async function dbExists(cfg, name) {
   const out = await psqlCmd(cfg, `select 1 from pg_database where datname='${name}'`, {
     dbOverride: 'postgres',

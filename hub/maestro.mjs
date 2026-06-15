@@ -36,7 +36,7 @@ import { Supervisor } from './supervisor.mjs';
 import { waitForHttp, waitForTcp, tcpAlive } from './health.mjs';
 import { startStorage } from './storage-local.mjs';
 import { loadConfig } from './config.mjs';
-import { bootstrap, applyPendingMigrations } from './bootstrap.mjs';
+import { bootstrap, applyPendingMigrations, reloadPostgrest } from './bootstrap.mjs';
 import { checkAndUpdate } from './updater.mjs';
 import { makeKeys } from './keys.mjs';
 import { exe } from './platform.mjs';
@@ -357,6 +357,9 @@ export async function startMaestro(cfg, opts = {}) {
   logger.info(`subindo PostgREST :${cfg.ports.postgrest}`);
   supervisors.postgrest = postgrestSupervisor(cfg, logDir).start();
   await waitForTcp('127.0.0.1', cfg.ports.postgrest, 30000);
+  // Recarrega o schema cache (cobre migrations aplicadas no bootstrap antes do
+  // PostgREST subir e qualquer estado herdado de um restart só-do-app do updater).
+  await reloadPostgrest(cfg);
 
   logger.info(`subindo GoTrue :${cfg.ports.gotrue}`);
   supervisors.gotrue = gotrueSupervisor(cfg, logDir).start();
@@ -455,8 +458,12 @@ export async function startMaestro(cfg, opts = {}) {
         restart,
         health,
         logger,
-        migrate: async (releaseDir) =>
-          applyPendingMigrations(cfg, cfg.paths.db, path.join(releaseDir, 'supabase', 'migrations')),
+        migrate: async (releaseDir) => {
+          await applyPendingMigrations(cfg, cfg.paths.db, path.join(releaseDir, 'supabase', 'migrations'));
+          // CRÍTICO: o updater reinicia só o app, não o PostgREST. Sem recarregar o
+          // schema cache aqui, colunas novas da migration ficam invisíveis ao REST.
+          await reloadPostgrest(cfg);
+        },
       }).catch((e) => logger.error(`updater: ${e?.message}`));
     }, intervalMs);
     updateTimer.unref?.();

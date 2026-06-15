@@ -7,6 +7,7 @@ import { makeSupabaseSyncDb } from '@/lib/sync/supabase-db';
 import { runPull } from '@/lib/sync/engine';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 /**
  * Pull de deltas canônicos desde os cursores do hub. Auth por token de dispositivo
