@@ -90,6 +90,12 @@ export function EnderecoSelector({
           </Label>
           <Select
             value={selectedId ?? ''}
+            items={{
+              '': '— Outro endereço (digitar abaixo) —',
+              ...Object.fromEntries(
+                enderecos.map((e) => [e.id, `${e.rotulo}${e.is_padrao ? ' ★' : ''} — ${resumo(e)}`]),
+              ),
+            }}
             disabled={disabled || loading}
             onValueChange={(id) => {
               if (!id) {

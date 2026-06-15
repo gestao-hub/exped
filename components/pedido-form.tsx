@@ -42,6 +42,14 @@ import {
 /** Modalidade de um item (espelha o enum do `itemSchema`). */
 type ModalidadeItem = 'imediato' | 'loja' | 'entrega';
 
+/** Rótulo legível por modalidade. Usado tanto nas opções quanto no `items` do Select
+ *  (Base UI: sem `items`, o trigger fechado mostra o VALOR cru — ex.: "loja" — em vez do rótulo). */
+const MODALIDADE_LABELS: Record<ModalidadeItem, string> = {
+  imediato: 'Imediato',
+  loja: 'Loja',
+  entrega: 'Entrega',
+};
+
 
 /** Compõe um resumo legível do endereço cadastrado (endereço · bairro · cidade/UF). */
 function enderecoResumo(e: ClienteEndereco): string {
@@ -518,6 +526,10 @@ export function PedidoForm({
                 render={({ field }) => (
                   <Select
                     value={field.value ?? ''}
+                    items={{
+                      '': '—',
+                      ...Object.fromEntries(FORMAS_PAGAMENTO.map((f) => [f, rotuloFormaPagamento(f, null)])),
+                    }}
                     onValueChange={(v) => {
                       const forma = v === '' ? null : (v as (typeof FORMAS_PAGAMENTO)[number]);
                       field.onChange(forma);
@@ -573,6 +585,12 @@ export function PedidoForm({
                     return (
                       <Select
                         value={field.value != null ? String(field.value) : ''}
+                        items={{
+                          '': '—',
+                          ...Object.fromEntries(
+                            Array.from({ length: 12 }, (_, i) => [String(i + 1), `${i + 1}x`]),
+                          ),
+                        }}
                         disabled={!aceitaParcelas}
                         onValueChange={(v) => {
                           field.onChange(v === '' ? null : Number(v));
@@ -750,6 +768,7 @@ function ItensEditor({
               <span className="text-xs text-muted-foreground">Modalidade:</span>
               <Select
                 value={bulkModalidade}
+                items={MODALIDADE_LABELS}
                 onValueChange={(v) => setBulkModalidade(v as ModalidadeItem)}
               >
                 <SelectTrigger
@@ -767,6 +786,12 @@ function ItensEditor({
               {bulkModalidade === 'entrega' && enderecosCliente.length > 0 && (
                 <Select
                   value={bulkEnderecoId}
+                  items={{
+                    '': 'Endereço padrão',
+                    ...Object.fromEntries(
+                      enderecosCliente.map((e) => [e.id, `${e.rotulo}${e.is_padrao ? ' ★' : ''}`]),
+                    ),
+                  }}
                   onValueChange={(v) => setBulkEnderecoId(v ?? '')}
                 >
                   <SelectTrigger
@@ -859,6 +884,7 @@ function ItensEditor({
                       render={({ field }) => (
                         <Select
                           value={field.value ?? 'loja'}
+                          items={MODALIDADE_LABELS}
                           onValueChange={(v) => {
                             field.onChange(v);
                             // Endereço de entrega só faz sentido p/ item Entrega. Ao sair de
@@ -1004,9 +1030,26 @@ function RowEnderecoSelect({
           field.value === '' ||
           idsCadastrados.has(field.value) ||
           destinosExtras.some((d) => d.enderecoId === field.value);
+        // Mapa valor→rótulo p/ o trigger fechado exibir o NOME do endereço, não o UUID
+        // (Base UI Select mostra o valor cru sem `items`). Espelha as opções abaixo.
+        const enderecoItems = [
+          { value: '', label: 'Padrão' },
+          ...enderecosCliente.map((e) => ({
+            value: e.id,
+            label: `${e.rotulo}${e.is_padrao ? ' ★' : ''}`,
+          })),
+          ...destinosExtras.map((d) => ({
+            value: d.enderecoId,
+            label: d.empresa_nome || d.endereco || 'Destino salvo',
+          })),
+          ...(!valorConhecido && field.value
+            ? [{ value: field.value, label: 'Destino atual' }]
+            : []),
+        ];
         return (
           <Select
             value={field.value ?? ''}
+            items={enderecoItems}
             onValueChange={(v) => {
               const id = v || null;
               field.onChange(id);

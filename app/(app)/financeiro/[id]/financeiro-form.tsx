@@ -121,6 +121,10 @@ export function FinanceiroForm({
               render={({ field }) => (
                 <Select
                   value={field.value ?? ''}
+                  items={{
+                    '': '—',
+                    ...Object.fromEntries(FORMAS_PAGAMENTO.map((f) => [f, rotuloFormaPagamento(f, null)])),
+                  }}
                   disabled={!editavel}
                   onValueChange={(v) => {
                     const forma = v === '' ? null : (v as (typeof FORMAS_PAGAMENTO)[number]);
@@ -156,6 +160,12 @@ export function FinanceiroForm({
                 return (
                   <Select
                     value={field.value == null ? '' : String(field.value)}
+                    items={{
+                      '': '—',
+                      ...Object.fromEntries(
+                        Array.from({ length: 12 }, (_, i) => [String(i + 1), `${i + 1}x`]),
+                      ),
+                    }}
                     disabled={!editavel || !aceitaParcelas}
                     onValueChange={(v) => {
                       field.onChange(v === '' ? null : Number(v));

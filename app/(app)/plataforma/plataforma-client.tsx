@@ -485,7 +485,14 @@ function VendedoresSection({
         <Field label="ID Hiper"><Input value={hiperId} onChange={(e) => setHiperId(e.target.value)} className="w-24" placeholder="1" /></Field>
         <Field label="Nome no Hiper"><Input value={hiperNome} onChange={(e) => setHiperNome(e.target.value)} className="w-40" placeholder="Michel" /></Field>
         <Field label="Vendedor Exped">
-          <Select value={vendedorId} onValueChange={(v) => setVendedorId(v ?? '')}>
+          <Select
+            value={vendedorId}
+            items={{
+              '': '— escolher —',
+              ...Object.fromEntries(vendedores.map((v) => [v.id, `${v.full_name || v.email} (${v.role})`])),
+            }}
+            onValueChange={(v) => setVendedorId(v ?? '')}
+          >
             <SelectTrigger className="h-9 min-w-50">
               <SelectValue placeholder="— escolher —" />
             </SelectTrigger>

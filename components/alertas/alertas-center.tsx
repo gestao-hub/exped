@@ -87,6 +87,7 @@ export function AlertasCenter({ tom = 'claro' }: { tom?: 'claro' | 'escuro' }) {
               <span className="text-sm text-[#344054]">Som</span>
               <Select
                 value={prefs.somId}
+                items={SONS_LABEL}
                 onValueChange={(v) => atualizar({ somId: v as SomId })}
               >
                 <SelectTrigger size="sm">
