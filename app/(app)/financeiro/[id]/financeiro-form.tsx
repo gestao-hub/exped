@@ -74,7 +74,7 @@ export function FinanceiroForm({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-3">
-        <CardTitle>Conferência do Financeiro</CardTitle>
+        <CardTitle>Conferência do Caixa</CardTitle>
         {editavel && (
           <div className="flex gap-2">
             <Button

@@ -227,7 +227,7 @@ export function PedidoForm({
           }
           toast.success(
             status === 'em_financeiro'
-              ? `Pedido enviado para o financeiro`
+              ? `Pedido enviado para o caixa`
               : 'Rascunho salvo',
           );
           router.push(`/vendas/${r.id}`);
@@ -662,7 +662,7 @@ export function PedidoForm({
           className="bg-brand hover:bg-brand-600"
         >
           {pending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-          Enviar para Financeiro
+          Enviar para o Caixa
         </Button>
       </div>
     </form>

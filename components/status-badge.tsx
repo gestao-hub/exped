@@ -3,7 +3,7 @@ import type { PedidoStatus } from '@/lib/types';
 
 const LABELS: Record<PedidoStatus, string> = {
   rascunho:               'Rascunho',
-  em_financeiro:          'No financeiro',
+  em_financeiro:          'No caixa',
   pendente:               'Pendente',
   em_separacao:           'Em separação',
   em_transporte:          'Em transporte',

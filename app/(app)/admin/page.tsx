@@ -103,7 +103,7 @@ export default async function AdminDashboard() {
   // ---------- Stats e shortcuts ----------
   const stats = [
     { label: 'Total de pedidos', value: pedidosCount.count ?? 0,    accent: 'text-foreground' },
-    { label: 'No financeiro',    value: financeiroCount.count ?? 0, accent: 'text-sky-600 dark:text-sky-400' },
+    { label: 'No caixa',         value: financeiroCount.count ?? 0, accent: 'text-sky-600 dark:text-sky-400' },
     { label: 'Pendentes',        value: pendentesCount.count ?? 0,  accent: 'text-status-pendente' },
     { label: 'Em separação',     value: separacaoCount.count ?? 0,  accent: 'text-status-separacao' },
     { label: 'Em transporte',    value: transporteCount.count ?? 0, accent: 'text-violet-600 dark:text-violet-400' },

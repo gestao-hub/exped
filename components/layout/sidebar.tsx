@@ -53,7 +53,7 @@ const NAV: Record<UserRole, NavSection[]> = {
   financeiro: [
     {
       title: 'Operação',
-      items: [{ label: 'Financeiro', href: '/financeiro', icon: Wallet }],
+      items: [{ label: 'Caixa', href: '/financeiro', icon: Wallet }],
     },
     {
       title: 'Consulta',
@@ -88,7 +88,7 @@ const NAV: Record<UserRole, NavSection[]> = {
       items: [
         { label: 'Pedidos',     href: '/vendas',      icon: Package },
         { label: 'Novo Pedido', href: '/vendas/novo', icon: PackagePlus },
-        { label: 'Financeiro',  href: '/financeiro',  icon: Wallet },
+        { label: 'Caixa',  href: '/financeiro',  icon: Wallet },
         { label: 'Logística',   href: '/logistica',   icon: TruckIcon },
       ],
     },
@@ -229,7 +229,7 @@ export function Sidebar({ empresa }: { empresa?: EmpresaAtual | null }) {
               {profile.full_name || profile.email}
             </p>
             <p className="text-[11px] text-white/50 capitalize leading-tight mt-0.5">
-              {profile.role}
+              {profile.role === 'financeiro' ? 'Caixa' : profile.role}
             </p>
           </div>
         </div>

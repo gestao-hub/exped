@@ -88,7 +88,7 @@ export default async function FinanceiroDetailPage({
               href="/financeiro"
               className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
             >
-              <ArrowLeft className="h-4 w-4 mr-1" /> Financeiro
+              <ArrowLeft className="h-4 w-4 mr-1" /> Caixa
             </Link>
             <ImprimirPedidoButton id={id} label="Imprimir Pedido" />
           </>

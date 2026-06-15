@@ -20,7 +20,7 @@ export default async function FinanceiroPage({
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader
-        title="Financeiro"
+        title="Caixa"
         description="Confira pagamento e frete dos pedidos enviados pelos vendedores e libere para a logística."
       />
 

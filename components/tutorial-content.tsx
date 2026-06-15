@@ -105,8 +105,8 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       icon: Inbox,
       title: 'Os pedidos chegam do vendedor',
       body:
-        'Em "Financeiro", aparecem os pedidos que o vendedor enviou para conferência. Cada um vem com cliente, itens e o que o ERP/vendedor preencheu de pagamento e frete.',
-      cta: { label: 'Abrir Financeiro', href: '/financeiro' },
+        'Em "Caixa", aparecem os pedidos que o vendedor enviou para conferência. Cada um vem com cliente, itens e o que o ERP/vendedor preencheu de pagamento e frete.',
+      cta: { label: 'Abrir Caixa', href: '/financeiro' },
     },
     {
       icon: ListChecks,
@@ -495,9 +495,9 @@ const ROLE_HEADERS: Record<UserRole, { title: string; sub: string }> = {
       'Fluxo do vendedor: do PDF emitido pelo ERP até o pedido entregue. Tudo em tempo real.',
   },
   financeiro: {
-    title: 'Como funciona — Financeiro',
+    title: 'Como funciona — Caixa',
     sub:
-      'Fluxo do financeiro: conferir pagamento e frete dos pedidos do vendedor e liberar para a logística.',
+      'Fluxo do caixa: conferir pagamento e frete dos pedidos do vendedor e liberar para a logística.',
   },
   logistica: {
     title: 'Como funciona — Logística',

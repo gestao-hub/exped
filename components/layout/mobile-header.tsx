@@ -34,7 +34,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Tutorial',     href: '/tutorial',    icon: Lightbulb },
   ],
   financeiro: [
-    { label: 'Financeiro',   href: '/financeiro',                      icon: Wallet },
+    { label: 'Caixa',        href: '/financeiro',                      icon: Wallet },
     { label: 'Histórico',    href: '/historico',                       icon: History },
     { label: 'Tutorial',     href: '/tutorial',                        icon: Lightbulb },
   ],
@@ -47,7 +47,7 @@ const NAV: Record<UserRole, NavItem[]> = {
     { label: 'Dashboard',    href: '/admin',          icon: LayoutDashboard },
     { label: 'Pedidos',      href: '/vendas',         icon: Package },
     { label: 'Novo Pedido',  href: '/vendas/novo',    icon: PackagePlus },
-    { label: 'Financeiro',   href: '/financeiro',     icon: Wallet },
+    { label: 'Caixa',        href: '/financeiro',     icon: Wallet },
     { label: 'Logística',    href: '/logistica',      icon: TruckIcon },
     { label: 'Histórico',    href: '/historico',      icon: History },
     { label: 'Clientes',     href: '/admin/clientes', icon: UsersRound },

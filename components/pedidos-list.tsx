@@ -71,7 +71,7 @@ type DateRangeKey = 'todos' | 'hoje' | 'semana' | 'mes' | 'custom';
 const STATUS_OPTIONS: { value: PedidoStatus | 'todos'; label: string }[] = [
   { value: 'todos',        label: 'Todos' },
   { value: 'rascunho',     label: 'Rascunho' },
-  { value: 'em_financeiro',          label: 'No financeiro' },
+  { value: 'em_financeiro',          label: 'No caixa' },
   { value: 'pendente',               label: 'Pendente' },
   { value: 'em_separacao',           label: 'Em separação' },
   { value: 'em_transporte',          label: 'Em transporte' },
