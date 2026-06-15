@@ -9,7 +9,7 @@ function pedidoRow(over: Record<string, unknown> = {}) {
     cliente_endereco: null, cliente_bairro: null, cliente_cidade: null,
     cliente_uf: null, cliente_cep: null, cliente_telefone: null,
     cliente_endereco_id: null, forma_pagamento: null, parcelas: null,
-    receber_na_entrega: false, valor_total: 60, valor_frete: 15,
+    receber_na_entrega: false, exige_emissao: false, valor_total: 60, valor_frete: 15,
     observacoes: null, storage_pdf_path: null,
     ...over,
   } as Parameters<typeof pedidoRowsToFormInput>[0];
@@ -36,6 +36,11 @@ describe('pedidoRowsToFormInput', () => {
   it('valor_frete null do banco é preservado como null (campo opcional)', () => {
     const form = pedidoRowsToFormInput(pedidoRow({ valor_frete: null }), []);
     expect(form.valor_frete).toBeNull();
+  });
+
+  it('mapeia exige_emissao do banco para o form (vendedor não zera a flag do financeiro ao re-salvar)', () => {
+    expect(pedidoRowsToFormInput(pedidoRow({ exige_emissao: true }), []).exige_emissao).toBe(true);
+    expect(pedidoRowsToFormInput(pedidoRow({ exige_emissao: false }), []).exige_emissao).toBe(false);
   });
 
   it('preserva a modalidade de cada item no round-trip do banco', () => {

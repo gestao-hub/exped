@@ -71,6 +71,8 @@ export const pedidoFormSchema = z.object({
   parcelas:         z.number().int().min(1).max(12).nullable().optional(),
   // Independente da forma: marca que o valor é recebido na entrega (ex.: motorista cobra).
   receber_na_entrega: z.boolean().optional(),
+  // Se o carregamento exige emissão de nota. Conferida também no financeiro.
+  exige_emissao: z.boolean().optional(),
   valor_total:      z.number().nonnegative(),
   observacoes:      z.string().max(TEXT).nullable().optional(),
   storage_pdf_path: z.string().max(LONG).nullable().optional(),

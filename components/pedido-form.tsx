@@ -559,6 +559,12 @@ export function PedidoForm({
               <input type="checkbox" {...register('receber_na_entrega')} className="h-4 w-4" />
               Receber na entrega
             </label>
+            {/* Se o carregamento exige emissão de nota. Flag conferida também pelo financeiro;
+                o vendedor já adianta. Independente da forma de pagamento. */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input type="checkbox" {...register('exige_emissao')} className="h-4 w-4" />
+              Exige emissão
+            </label>
             <div className="grid grid-cols-2 gap-4">
               {mostrarFrete && (
                 <Field label="Frete (R$)" className="col-span-2">

@@ -9,7 +9,7 @@ type PedidoRow = {
   cliente_endereco: string | null; cliente_bairro: string | null; cliente_cidade: string | null;
   cliente_uf: string | null; cliente_cep: string | null; cliente_telefone: string | null;
   cliente_endereco_id: string | null; forma_pagamento: FormaPagamentoDb | null; parcelas: number | null;
-  receber_na_entrega: boolean;
+  receber_na_entrega: boolean; exige_emissao: boolean;
   valor_total: number; valor_frete: number | null; observacoes: string | null; storage_pdf_path: string | null;
 };
 type ModalidadeDb = Database['public']['Enums']['modalidade_item'];
@@ -43,6 +43,7 @@ export function pedidoRowsToFormInput(pedido: PedidoRow, pontos: PontoRow[]): Pe
     forma_pagamento: pedido.forma_pagamento,
     parcelas: pedido.parcelas,
     receber_na_entrega: pedido.receber_na_entrega,
+    exige_emissao: pedido.exige_emissao,
     valor_total: pedido.valor_total,
     valor_frete: pedido.valor_frete,
     observacoes: pedido.observacoes,

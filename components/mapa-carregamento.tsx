@@ -144,6 +144,11 @@ export function MapaCarregamento({
               }
               className={`col-span-2 [&_.kv-value]:font-semibold ${pedido.receber_na_entrega ? '[&_.kv-value]:text-brand-700' : ''}`}
             />
+            <KV
+              label="Nota Fiscal"
+              value={pedido.exige_emissao ? 'EXIGE EMISSÃO' : 'Sem emissão'}
+              className={`col-span-2 [&_.kv-value]:font-semibold ${pedido.exige_emissao ? '[&_.kv-value]:text-brand-700' : '[&_.kv-value]:text-muted-foreground'}`}
+            />
           </Grid>
         </div>
       </div>
