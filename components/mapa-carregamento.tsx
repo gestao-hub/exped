@@ -153,13 +153,14 @@ export function MapaCarregamento({
         </div>
       </div>
 
-      {/* Pontos de Retirada */}
+      {/* Pontos de Retirada — Loja + Envio ficam na MESMA folha: sem quebra de página
+          entre pontos. O .print-avoid-break do Section evita cortar um ponto no meio;
+          o zoom das vias (AjustarVias) + fallback .paginado cuidam do tamanho. */}
       {pontos.map((ponto, idx) => (
         <Section
           key={ponto.id}
           title={`${ROTULO_PONTO[ponto.tipo] ?? 'Retirada'} ${pontos.length > 1 ? `· ${idx + 1}/${pontos.length}` : ''}`}
           headerExtra={ponto.empresa_nome}
-          className={isPrint && idx > 0 ? 'print-break-before' : ''}
         >
           {ponto.tipo === 'entrega' ? (
             <p className="text-xs mb-2">

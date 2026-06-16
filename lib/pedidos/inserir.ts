@@ -77,7 +77,6 @@ export async function inserirPedido(
     forma_pagamento: d.forma_pagamento ?? null,
     parcelas: d.parcelas ?? null,
     receber_na_entrega: d.receber_na_entrega ?? false,
-    exige_emissao: d.exige_emissao ?? false,
     valor_total: d.valor_total,
     valor_frete: d.valor_frete ?? 0,
     data_entrega_inicio: d.data_entrega_inicio ?? null,
@@ -91,6 +90,12 @@ export async function inserirPedido(
     vendedor_id: opts.vendedorId,
   };
   if (opts.empresaId) insertRow.empresa_id = opts.empresaId;
+  // exige_emissao SÓ entra no INSERT quando o VENDEDOR marcou no form (d definido).
+  // O agente Hiper NÃO envia esse campo → fica de fora e pega o DEFAULT false do banco.
+  // Assim a INGESTÃO não referencia a coluna e fica imune ao schema cache velho do
+  // PostgREST do hub (o erro "Could not find the 'exige_emissao' column ... in the
+  // schema cache" que derrubava pedidos do Hiper). O vendedor segue podendo marcar.
+  if (d.exige_emissao !== undefined) insertRow.exige_emissao = d.exige_emissao;
 
   const { data: pedido, error: insErr } = await supabase
     .from('pedidos')
