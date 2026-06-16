@@ -4,6 +4,10 @@ namespace ExpedAgent;
 public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, RemoteConfigClient remote, ILogger<Worker> log)
     : BackgroundService
 {
+    // Ids já conferidos pelo backfill NESTA execução — evita re-POSTar a janela inteira toda rodada
+    // (o dedup do servidor já protegia os dados; isto corta o trabalho/uploads repetidos).
+    private readonly HashSet<int> _backfillSeen = new();
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         log.LogInformation("ExpedAgent {Ver} iniciado. Poll a cada {S}s, situações-gatilho {Sit}.", AgentInfo.Version, cfg.PollIntervalSeconds, cfg.SituacoesGatilho);
@@ -181,6 +185,7 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         foreach (var h in janela)
         {
             if (ct.IsCancellationRequested) break;
+            if (_backfillSeen.Contains(h.IdPedidoVenda)) continue; // já conferido neste run — não re-POSTa
             try
             {
                 var cli = await repo.ClienteAsync(h.IdEntidadeCliente, ct);
@@ -196,7 +201,10 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
                     if (string.IsNullOrWhiteSpace(h.NfNumero))
                         state.AddNfPendente(h.IdPedidoVenda, h.Codigo, DateTime.UtcNow);
                 }
-                // Duplicate = já existe (ok); falha = ignora e segue (não trava o backfill).
+                // Created OU Duplicate => já está no hub: marca pra não reprocessar nos próximos ciclos.
+                if (r is IngestResult.Created or IngestResult.Duplicate)
+                    _backfillSeen.Add(h.IdPedidoVenda);
+                // falha (outro resultado/exceção): não marca, tenta de novo no próximo ciclo.
             }
             catch (Exception ex) { log.LogWarning("Backfill: pedido {Cod} falhou: {Msg}", h.Codigo, ex.Message); }
         }

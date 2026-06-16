@@ -27,10 +27,24 @@ public sealed class StateStore
 
     private State Load()
     {
-        try { return File.Exists(_path) ? (JsonSerializer.Deserialize<State>(File.ReadAllText(_path)) ?? new State()) : new State(); }
-        catch { return new State(); }
+        // Tenta o principal e, se corrompido (ex.: queda de energia no meio do Save), cai no .bak —
+        // evita resetar Hwm=0 e perder NfPendentes silenciosamente (o que dispararia re-ingestão geral).
+        foreach (var p in new[] { _path, _path + ".bak" })
+        {
+            try { if (File.Exists(p)) { var s = JsonSerializer.Deserialize<State>(File.ReadAllText(p)); if (s != null) return s; } }
+            catch { /* corrompido — tenta o backup */ }
+        }
+        return new State();
     }
-    private void Save(State s) => File.WriteAllText(_path, JsonSerializer.Serialize(s));
+    // Escrita ATÔMICA: grava em .tmp, faz backup do bom anterior em .bak, troca por rename (atômico
+    // no mesmo volume). Sem isso, um crash no meio do WriteAllText deixava o state.json truncado.
+    private void Save(State s)
+    {
+        var tmp = _path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(s));
+        try { if (File.Exists(_path)) File.Copy(_path, _path + ".bak", true); } catch { /* best-effort */ }
+        File.Move(tmp, _path, true);
+    }
 
     public int GetHwm() => Load().Hwm;
     public void SetHwm(int hwm) { var s = Load(); s.Hwm = hwm; Save(s); }
