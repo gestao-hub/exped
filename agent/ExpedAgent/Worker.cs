@@ -16,6 +16,12 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
 
             try { await TickAsync(situacoesVenda, ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no ciclo de sync"); }
+            // Backfill periodico: repesca pedido finalizado fora de ordem de id que o cursor pulou.
+            if (cfg.BackfillEveryTicks > 0 && tick % cfg.BackfillEveryTicks == 0)
+            {
+                try { await TickBackfillAsync(situacoesVenda, ct); }
+                catch (Exception ex) { log.LogError(ex, "Erro no backfill"); }
+            }
             try { await TickNfPendentesAsync(ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no re-sync de NF"); }
             if (rc.SyncOs)
@@ -156,6 +162,45 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
             }
         }
         if (maxOk > hwm) state.SetHwm(maxOk);
+    }
+
+    /// <summary>
+    /// Backfill: o cursor (HWM por id_pedido_venda) PULA pedido que só vira elegível (sit 2/5/7)
+    /// DEPOIS do cursor passar (orçamento finalizado fora de ordem de id). Aqui re-varremos a janela
+    /// [hwm-BackfillWindow, hwm] e re-POSTamos; o dedup do ingest (por documento_erp) recria só o que
+    /// falta. NÃO mexe no HWM e NÃO para no primeiro erro (uma falha não trava o resto do backfill).
+    /// </summary>
+    private async Task TickBackfillAsync(short[] situacoesVenda, CancellationToken ct)
+    {
+        int hwm = state.GetHwm();
+        int floor = Math.Max(0, hwm - cfg.BackfillWindow);
+        var janela = await repo.PedidosNoIntervaloAsync(floor, hwm, situacoesVenda, ct);
+        if (janela.Count == 0) return;
+
+        int recriados = 0;
+        foreach (var h in janela)
+        {
+            if (ct.IsCancellationRequested) break;
+            try
+            {
+                var cli = await repo.ClienteAsync(h.IdEntidadeCliente, ct);
+                var itens = await repo.ItensAsync(h.IdPedidoVenda, ct);
+                if (itens.Count == 0) continue;
+                var payload = PayloadBuilder.Build(h, cli, itens);
+                string pdf = Path.Combine(cfg.ResolvedTempDir, $"PedidoVenda_{h.IdPedidoVenda}.pdf");
+                var r = await client.EnviarAsync(payload, File.Exists(pdf) ? pdf : null, ct);
+                if (r is IngestResult.Created)
+                {
+                    recriados++;
+                    log.LogInformation("Backfill: pedido {Cod} repescado.", h.Codigo);
+                    if (string.IsNullOrWhiteSpace(h.NfNumero))
+                        state.AddNfPendente(h.IdPedidoVenda, h.Codigo, DateTime.UtcNow);
+                }
+                // Duplicate = já existe (ok); falha = ignora e segue (não trava o backfill).
+            }
+            catch (Exception ex) { log.LogWarning("Backfill: pedido {Cod} falhou: {Msg}", h.Codigo, ex.Message); }
+        }
+        if (recriados > 0) log.LogInformation("Backfill: {N} pedido(s) repescado(s) na janela ({F},{H}].", recriados, floor, hwm);
     }
 
     /// <summary>

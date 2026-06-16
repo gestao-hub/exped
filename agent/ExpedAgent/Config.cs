@@ -24,4 +24,11 @@ public sealed class AgentConfig
     public int PdfGraceMinutes { get; set; } = 3;
     public string TempDir { get; set; } = "";
     public string ResolvedTempDir => string.IsNullOrWhiteSpace(TempDir) ? Path.GetTempPath() : TempDir;
+
+    // Backfill: o cursor (HWM por id_pedido_venda) PULA pedido que so vira elegivel (sit 2/5/7)
+    // DEPOIS do cursor passar (orcamento finalizado fora de ordem de id). Periodicamente re-varremos
+    // a janela [hwm-BackfillWindow, hwm] e re-POSTamos; o dedup do ingest (por documento_erp) recria
+    // so o que falta. BackfillEveryTicks=0 desliga.
+    public int BackfillWindow { get; set; } = 1000;
+    public int BackfillEveryTicks { get; set; } = 150; // ~5min a 2s de poll
 }

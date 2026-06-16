@@ -62,6 +62,50 @@ ORDER BY pv.id_pedido_venda;";
         return list;
     }
 
+    /// <summary>
+    /// Backfill: pedidos elegiveis numa JANELA de id (floorExclusive, ceilingInclusive].
+    /// Repesca os que so viraram elegiveis (sit 2/5/7) DEPOIS do cursor (HWM) passar — orcamento
+    /// finalizado fora de ordem de id. Mesma projecao do NovosPedidosAsync.
+    /// </summary>
+    public async Task<List<PedidoHeader>> PedidosNoIntervaloAsync(int floorExclusive, int ceilingInclusive, short[] situacoes, CancellationToken ct)
+    {
+        if (situacoes is null || situacoes.Length == 0 || ceilingInclusive <= floorExclusive) return new();
+        var nomes = situacoes.Select((_, i) => "@s" + i).ToArray();
+        string sql = $@"
+SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
+       pv.id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
+       pv.observacao, pv.valor_frete
+FROM pedido_venda pv WITH (NOLOCK)
+WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomes)})
+  AND pv.id_pedido_venda > @floor AND pv.id_pedido_venda <= @ceil
+ORDER BY pv.id_pedido_venda;";
+        var list = new List<PedidoHeader>();
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, cn);
+        for (int i = 0; i < situacoes.Length; i++)
+            cmd.Parameters.AddWithValue(nomes[i], situacoes[i]);
+        cmd.Parameters.AddWithValue("@floor", floorExclusive);
+        cmd.Parameters.AddWithValue("@ceil", ceilingInclusive);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new PedidoHeader
+            {
+                IdPedidoVenda = r.GetInt32(0),
+                Codigo = r.GetString(1),
+                DataHoraGeracao = r.GetDateTime(2),
+                IdEntidadeCliente = r.GetInt32(3),
+                IdUsuarioVendedor = r.IsDBNull(4) ? 0 : Convert.ToInt32(r.GetValue(4)),
+                DataEntrega = !r.IsDBNull(5) ? r.GetDateTime(5) : (r.IsDBNull(6) ? null : r.GetDateTime(6)),
+                DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
+                Observacao = r.IsDBNull(7) ? null : r.GetString(7),
+                ValorFrete = r.IsDBNull(8) ? 0m : Convert.ToDecimal(r.GetValue(8)),
+            });
+        }
+        return list;
+    }
+
     public async Task<ClienteRow?> ClienteAsync(int idEntidade, CancellationToken ct)
     {
         const string sql = @"
