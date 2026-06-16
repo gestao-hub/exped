@@ -7,6 +7,8 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
     // Ids já conferidos pelo backfill NESTA execução — evita re-POSTar a janela inteira toda rodada
     // (o dedup do servidor já protegia os dados; isto corta o trabalho/uploads repetidos).
     private readonly HashSet<int> _backfillSeen = new();
+    // Contador de falhas por pedido (id → nº de tentativas que falharam) p/ pular após MaxFalhasPorPedido.
+    private readonly Dictionary<int, int> _falhas = new();
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -108,61 +110,76 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
                 break; // preserva ordem; tenta de novo no próximo poll
             }
 
-            var cli = await repo.ClienteAsync(h.IdEntidadeCliente, ct);
-            var itens = await repo.ItensAsync(h.IdPedidoVenda, ct);
-            if (itens.Count == 0)
-            {
-                log.LogWarning("Pedido {Cod} sem itens — pulando.", h.Codigo);
-                maxOk = h.IdPedidoVenda; continue;
-            }
-
-            // #3 NF-e (best-effort): não pode quebrar o sync do pedido.
             try
             {
-                var nf = await repo.NfDoPedidoAsync(h.IdPedidoVenda, ct);
-                if (nf is { } n)
+                var cli = await repo.ClienteAsync(h.IdEntidadeCliente, ct);
+                var itens = await repo.ItensAsync(h.IdPedidoVenda, ct);
+                if (itens.Count == 0)
                 {
-                    h.NfNumero = n.Numero; h.NfChave = n.Chave;
-                    h.NfEmitidaEm = n.Emitida; h.NfValor = n.Valor;
+                    log.LogWarning("Pedido {Cod} sem itens — pulando.", h.Codigo);
+                    maxOk = h.IdPedidoVenda; _falhas.Remove(h.IdPedidoVenda); continue;
                 }
-            }
-            catch (Exception ex) { log.LogWarning("NF do pedido {Cod} indisponível: {Msg}", h.Codigo, ex.Message); }
 
-            // #5 estoque (best-effort): saldo snapshot por item.
-            try
-            {
-                var saldos = await repo.SaldosAsync(itens.Select(i => i.IdProduto).ToArray(), ct);
-                foreach (var it in itens)
-                    if (saldos.TryGetValue(it.IdProduto, out var s)) it.SaldoEstoque = s;
-            }
-            catch (Exception ex) { log.LogWarning("Saldos do pedido {Cod} indisponíveis: {Msg}", h.Codigo, ex.Message); }
-
-            // #2 pagamento estruturado (best-effort): só finalizado tem negociacao.
-            try
-            {
-                var pg = await repo.PagamentoDoPedidoAsync(h.IdPedidoVenda, ct);
-                if (pg is { } p && !string.IsNullOrWhiteSpace(p.Forma))
+                // #3 NF-e (best-effort): não pode quebrar o sync do pedido.
+                try
                 {
-                    h.FormaPagamento = p.Forma; h.Parcelas = p.Parcelas;
+                    var nf = await repo.NfDoPedidoAsync(h.IdPedidoVenda, ct);
+                    if (nf is { } n)
+                    {
+                        h.NfNumero = n.Numero; h.NfChave = n.Chave;
+                        h.NfEmitidaEm = n.Emitida; h.NfValor = n.Valor;
+                    }
                 }
-            }
-            catch (Exception ex) { log.LogWarning("Pagamento do pedido {Cod} indisponível (usa PDF): {Msg}", h.Codigo, ex.Message); }
+                catch (Exception ex) { log.LogWarning("NF do pedido {Cod} indisponível: {Msg}", h.Codigo, ex.Message); }
 
-            var payload = PayloadBuilder.Build(h, cli, itens);
-            var r = await client.EnviarAsync(payload, pdfExiste ? pdf : null, ct);
+                // #5 estoque (best-effort): saldo snapshot por item.
+                try
+                {
+                    var saldos = await repo.SaldosAsync(itens.Select(i => i.IdProduto).ToArray(), ct);
+                    foreach (var it in itens)
+                        if (saldos.TryGetValue(it.IdProduto, out var s)) it.SaldoEstoque = s;
+                }
+                catch (Exception ex) { log.LogWarning("Saldos do pedido {Cod} indisponíveis: {Msg}", h.Codigo, ex.Message); }
 
-            if (r is IngestResult.Created or IngestResult.Duplicate)
-            {
-                log.LogInformation("Pedido {Cod} sincronizado ({R}{Pdf}).", h.Codigo, r, pdfExiste ? ", com PDF" : ", sem PDF");
-                maxOk = h.IdPedidoVenda;
-                // Ingerido sem NF → observa pra re-sincronizar quando faturar (2→5).
-                if (string.IsNullOrWhiteSpace(h.NfNumero))
-                    state.AddNfPendente(h.IdPedidoVenda, h.Codigo, DateTime.UtcNow);
+                // #2 pagamento estruturado (best-effort): só finalizado tem negociacao.
+                try
+                {
+                    var pg = await repo.PagamentoDoPedidoAsync(h.IdPedidoVenda, ct);
+                    if (pg is { } p && !string.IsNullOrWhiteSpace(p.Forma))
+                    {
+                        h.FormaPagamento = p.Forma; h.Parcelas = p.Parcelas;
+                    }
+                }
+                catch (Exception ex) { log.LogWarning("Pagamento do pedido {Cod} indisponível (usa PDF): {Msg}", h.Codigo, ex.Message); }
+
+                var payload = PayloadBuilder.Build(h, cli, itens);
+                var r = await client.EnviarAsync(payload, pdfExiste ? pdf : null, ct);
+
+                if (r is IngestResult.Created or IngestResult.Duplicate)
+                {
+                    log.LogInformation("Pedido {Cod} sincronizado ({R}{Pdf}).", h.Codigo, r, pdfExiste ? ", com PDF" : ", sem PDF");
+                    maxOk = h.IdPedidoVenda; _falhas.Remove(h.IdPedidoVenda);
+                    // Ingerido sem NF → observa pra re-sincronizar quando faturar (2→5).
+                    if (string.IsNullOrWhiteSpace(h.NfNumero))
+                        state.AddNfPendente(h.IdPedidoVenda, h.Codigo, DateTime.UtcNow);
+                    continue;
+                }
+                // Falha de ingestão (não-Created/Duplicate) → trata como falha abaixo (retenta/pula).
+                throw new InvalidOperationException($"ingest retornou {r}");
             }
-            else
+            catch (Exception ex)
             {
-                log.LogWarning("Pedido {Cod} falhou ({R}); parando o lote (tenta no próximo poll).", h.Codigo, r);
-                break; // não avança além de uma falha pra preservar ordem
+                // ROBUSTEZ: NUNCA travar a fila pra sempre num pedido ruim. Retenta algumas vezes
+                // (falha transitória, ex.: cache) e, se persistir, PULA o pedido (dado quebrado) e segue.
+                int n = (_falhas.TryGetValue(h.IdPedidoVenda, out var c) ? c : 0) + 1;
+                _falhas[h.IdPedidoVenda] = n;
+                if (n >= cfg.MaxFalhasPorPedido)
+                {
+                    log.LogError(ex, "Pedido {Cod} falhou {N}x — PULANDO pra não travar a fila.", h.Codigo, n);
+                    maxOk = h.IdPedidoVenda; _falhas.Remove(h.IdPedidoVenda); continue;
+                }
+                log.LogWarning("Pedido {Cod} falhou ({N}/{Max}): {Msg} — tenta no próximo poll.", h.Codigo, n, cfg.MaxFalhasPorPedido, ex.Message);
+                break; // preserva ordem; retenta no próximo poll
             }
         }
         if (maxOk > hwm) state.SetHwm(maxOk);

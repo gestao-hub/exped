@@ -31,4 +31,6 @@ public sealed class AgentConfig
     // so o que falta. BackfillEveryTicks=0 desliga.
     public int BackfillWindow { get; set; } = 1000;
     public int BackfillEveryTicks { get; set; } = 150; // ~5min a 2s de poll
+    // ROBUSTEZ: após N falhas no MESMO pedido, pula ele (dado quebrado) em vez de travar a fila.
+    public int MaxFalhasPorPedido { get; set; } = 3;
 }

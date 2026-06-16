@@ -49,9 +49,9 @@ ORDER BY pv.id_pedido_venda;";
             list.Add(new PedidoHeader
             {
                 IdPedidoVenda = r.GetInt32(0),
-                Codigo = r.GetString(1),
-                DataHoraGeracao = r.GetDateTime(2),
-                IdEntidadeCliente = r.GetInt32(3),
+                Codigo = r.IsDBNull(1) ? "" : r.GetString(1),
+                DataHoraGeracao = r.IsDBNull(2) ? DateTime.Now : r.GetDateTime(2),
+                IdEntidadeCliente = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3)),
                 IdUsuarioVendedor = r.IsDBNull(4) ? 0 : Convert.ToInt32(r.GetValue(4)), // id_usuario_vendedor é smallint no Hiper
                 DataEntrega = !r.IsDBNull(5) ? r.GetDateTime(5) : (r.IsDBNull(6) ? null : r.GetDateTime(6)),
                 DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
@@ -93,9 +93,9 @@ ORDER BY pv.id_pedido_venda;";
             list.Add(new PedidoHeader
             {
                 IdPedidoVenda = r.GetInt32(0),
-                Codigo = r.GetString(1),
-                DataHoraGeracao = r.GetDateTime(2),
-                IdEntidadeCliente = r.GetInt32(3),
+                Codigo = r.IsDBNull(1) ? "" : r.GetString(1),
+                DataHoraGeracao = r.IsDBNull(2) ? DateTime.Now : r.GetDateTime(2),
+                IdEntidadeCliente = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3)),
                 IdUsuarioVendedor = r.IsDBNull(4) ? 0 : Convert.ToInt32(r.GetValue(4)),
                 DataEntrega = !r.IsDBNull(5) ? r.GetDateTime(5) : (r.IsDBNull(6) ? null : r.GetDateTime(6)),
                 DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
@@ -127,7 +127,7 @@ WHERE e.id_entidade = @id;";
         string? S(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i));
         return new ClienteRow
         {
-            Nome = r.GetString(0), CpfCnpj = S(1), Logradouro = S(2), Numero = S(3),
+            Nome = r.IsDBNull(0) ? "" : r.GetString(0), CpfCnpj = S(1), Logradouro = S(2), Numero = S(3),
             Complemento = S(4), Bairro = S(5), Cep = S(6), Cidade = S(7), Uf = S(8),
             FoneDdd = S(9), FoneNumero = S(10),
         };
@@ -151,13 +151,17 @@ ORDER BY ipv.sequencia_item;";
         await using var r = await cmd.ExecuteReaderAsync(ct);
         while (await r.ReadAsync(ct))
         {
+            // Blindagem: campo vazio no Hiper (ex.: grade.quantidade NULL em orçamento) NÃO pode
+            // estourar o agente. NULL vira 0 / "". valor_unitario_com_desconto NULL = sem desconto (vira o vu).
+            decimal vu = r.IsDBNull(3) ? 0m : Convert.ToDecimal(r.GetValue(3));
+            decimal vd = r.IsDBNull(4) ? vu : Convert.ToDecimal(r.GetValue(4));
             list.Add(new ItemRow
             {
-                Codigo = Convert.ToString(r.GetValue(0)) ?? "",
-                Descricao = r.GetString(1),
-                Quantidade = r.GetDecimal(2),
-                ValorUnitario = r.GetDecimal(3),
-                ValorUnitarioComDesconto = r.GetDecimal(4),
+                Codigo = r.IsDBNull(0) ? "" : (Convert.ToString(r.GetValue(0)) ?? ""),
+                Descricao = r.IsDBNull(1) ? "" : (Convert.ToString(r.GetValue(1)) ?? ""),
+                Quantidade = r.IsDBNull(2) ? 0m : Convert.ToDecimal(r.GetValue(2)),
+                ValorUnitario = vu,
+                ValorUnitarioComDesconto = vd,
                 IdProduto = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5)),
             });
         }
