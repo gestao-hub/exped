@@ -3,5 +3,5 @@ namespace ExpedAgent;
 /// <summary>Versão do agente — comparada com /api/agent/version pra avisar de atualização.</summary>
 public static class AgentInfo
 {
-    public const string Version = "1.2.0";
+    public const string Version = "1.3.0";
 }

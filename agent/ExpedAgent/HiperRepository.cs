@@ -138,9 +138,9 @@ WHERE e.id_entidade = @id;";
         const string sql = @"
 SELECT p.codigo, p.nome, g.quantidade, ipv.valor_unitario, ipv.valor_unitario_com_desconto, ipv.id_produto
 FROM item_pedido_venda ipv WITH (NOLOCK)
-JOIN grade_pedido_venda g WITH (NOLOCK)
+LEFT JOIN grade_pedido_venda g WITH (NOLOCK)
   ON g.id_pedido_venda = ipv.id_pedido_venda AND g.sequencia_item = ipv.sequencia_item
-JOIN produto p WITH (NOLOCK) ON p.id_produto = ipv.id_produto
+LEFT JOIN produto p WITH (NOLOCK) ON p.id_produto = ipv.id_produto
 WHERE ipv.id_pedido_venda = @id AND ipv.excluido = 0 AND ipv.cancelado = 0
 ORDER BY ipv.sequencia_item;";
         var list = new List<ItemRow>();
@@ -155,14 +155,17 @@ ORDER BY ipv.sequencia_item;";
             // estourar o agente. NULL vira 0 / "". valor_unitario_com_desconto NULL = sem desconto (vira o vu).
             decimal vu = r.IsDBNull(3) ? 0m : Convert.ToDecimal(r.GetValue(3));
             decimal vd = r.IsDBNull(4) ? vu : Convert.ToDecimal(r.GetValue(4));
+            int idProd = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5));
+            string desc = r.IsDBNull(1) ? "" : (Convert.ToString(r.GetValue(1)) ?? "");
+            if (string.IsNullOrWhiteSpace(desc)) desc = idProd > 0 ? $"Produto {idProd}" : "Item"; // item sem produto (LEFT JOIN)
             list.Add(new ItemRow
             {
                 Codigo = r.IsDBNull(0) ? "" : (Convert.ToString(r.GetValue(0)) ?? ""),
-                Descricao = r.IsDBNull(1) ? "" : (Convert.ToString(r.GetValue(1)) ?? ""),
+                Descricao = desc,
                 Quantidade = r.IsDBNull(2) ? 0m : Convert.ToDecimal(r.GetValue(2)),
                 ValorUnitario = vu,
                 ValorUnitarioComDesconto = vd,
-                IdProduto = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5)),
+                IdProduto = idProd,
             });
         }
         return list;
