@@ -43,4 +43,11 @@ public sealed class AgentConfig
     // NF-e → a lista acumula até o TTL). NfEveryTicks=0 desliga o throttle (roda todo ciclo).
     public int NfEveryTicks { get; set; } = 12;
     public int NfTtlDias { get; set; } = 7;
+
+    // "Só cai completo": só sincroniza o pedido depois que ele PAROU de mudar — sem item novo há
+    // EstabilizacaoSegundos. Evita capturar pela metade (itens add ao longo de minutos) e o pedido
+    // avançar pro financeiro incompleto. Cap: após MaxEsperaEstabilizacaoMin desde a criação,
+    // sincroniza mesmo assim (não trava num pedido sempre-mudando).
+    public int EstabilizacaoSegundos { get; set; } = 90;
+    public int MaxEsperaEstabilizacaoMin { get; set; } = 15;
 }

@@ -12,6 +12,9 @@ public sealed class PedidoHeader
     public DateTime? DataEntregaInicio { get; set; }  // início da janela (data_previsao_entrega_inicial)
     public decimal ValorFrete { get; set; }
     public string? Observacao { get; set; }
+    // Último item adicionado (MAX item_pedido_venda.data_hora_cadastro) — gatilho da
+    // estabilização ("só cai completo"): só sincroniza quando o pedido parou de mudar.
+    public DateTime? UltItemCadastro { get; set; }
     // NF-e (preenchida quando o pedido já foi faturado no Hiper)
     public string? NfNumero { get; set; }
     public string? NfChave { get; set; }

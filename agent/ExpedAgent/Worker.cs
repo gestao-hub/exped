@@ -118,6 +118,16 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         int maxOk = hwm;
         foreach (var h in novos)
         {
+            // "Só cai completo": espera o pedido ESTABILIZAR (sem item novo há EstabilizacaoSegundos)
+            // antes de sincronizar — não captura pela metade nem deixa avançar pro financeiro
+            // incompleto. Cap em MaxEsperaEstabilizacaoMin desde a criação (não trava pra sempre).
+            if (h.UltItemCadastro is { } ultItem
+                && (DateTime.Now - ultItem).TotalSeconds < cfg.EstabilizacaoSegundos
+                && (DateTime.Now - h.DataHoraGeracao).TotalMinutes < cfg.MaxEsperaEstabilizacaoMin)
+            {
+                log.LogInformation("Pedido {Cod}: aguardando estabilizar (item novo há <{S}s).", h.Codigo, cfg.EstabilizacaoSegundos);
+                break; // preserva ordem; re-tenta no próximo poll
+            }
             string pdf = Path.Combine(cfg.ResolvedTempDir, $"PedidoVenda_{h.IdPedidoVenda}.pdf");
             bool pdfExiste = File.Exists(pdf);
             bool dentroCarencia = (DateTime.Now - h.DataHoraGeracao).TotalMinutes < cfg.PdfGraceMinutes;
@@ -222,6 +232,11 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
         {
             if (ct.IsCancellationRequested) break;
             if (_backfillSeen.Contains(h.IdPedidoVenda)) continue; // já conferido neste run — não re-POSTa
+            // "Só cai completo": não repesca pedido que ainda está mudando (não marca seen → re-checa depois)
+            if (h.UltItemCadastro is { } ultB
+                && (DateTime.Now - ultB).TotalSeconds < cfg.EstabilizacaoSegundos
+                && (DateTime.Now - h.DataHoraGeracao).TotalMinutes < cfg.MaxEsperaEstabilizacaoMin)
+                continue;
             try
             {
                 var cli = await repo.ClienteAsync(h.IdEntidadeCliente, ct);

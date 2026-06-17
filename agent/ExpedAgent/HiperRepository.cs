@@ -34,7 +34,9 @@ public sealed class HiperRepository(string connectionString)
         string sql = $@"
 SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
        COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) AS id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
-       pv.observacao, pv.valor_frete
+       pv.observacao, pv.valor_frete,
+       (SELECT MAX(ipv.data_hora_cadastro) FROM item_pedido_venda ipv WITH (NOLOCK)
+          WHERE ipv.id_pedido_venda = pv.id_pedido_venda AND ipv.excluido = 0 AND ipv.cancelado = 0) AS ult_item_cadastro
 FROM pedido_venda pv WITH (NOLOCK)
 WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomes)}) AND pv.id_pedido_venda > @hwm
 ORDER BY pv.id_pedido_venda;";
@@ -59,6 +61,7 @@ ORDER BY pv.id_pedido_venda;";
                 DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
                 Observacao = r.IsDBNull(7) ? null : r.GetString(7),
                 ValorFrete = r.IsDBNull(8) ? 0m : Convert.ToDecimal(r.GetValue(8)),
+                UltItemCadastro = r.IsDBNull(9) ? (DateTime?)null : r.GetDateTime(9),
             });
         }
         return list;
@@ -76,7 +79,9 @@ ORDER BY pv.id_pedido_venda;";
         string sql = $@"
 SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
        COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) AS id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
-       pv.observacao, pv.valor_frete
+       pv.observacao, pv.valor_frete,
+       (SELECT MAX(ipv.data_hora_cadastro) FROM item_pedido_venda ipv WITH (NOLOCK)
+          WHERE ipv.id_pedido_venda = pv.id_pedido_venda AND ipv.excluido = 0 AND ipv.cancelado = 0) AS ult_item_cadastro
 FROM pedido_venda pv WITH (NOLOCK)
 WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomes)})
   AND pv.id_pedido_venda > @floor AND pv.id_pedido_venda <= @ceil
@@ -103,6 +108,7 @@ ORDER BY pv.id_pedido_venda;";
                 DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
                 Observacao = r.IsDBNull(7) ? null : r.GetString(7),
                 ValorFrete = r.IsDBNull(8) ? 0m : Convert.ToDecimal(r.GetValue(8)),
+                UltItemCadastro = r.IsDBNull(9) ? (DateTime?)null : r.GetDateTime(9),
             });
         }
         return list;
@@ -328,7 +334,7 @@ ORDER BY nfin.valor_parcelas DESC;";
             ("cidade","nome"), ("cidade","uf"), ("cidade","id_cidade"),
             ("item_pedido_venda","sequencia_item"), ("item_pedido_venda","id_produto"),
             ("item_pedido_venda","valor_unitario"), ("item_pedido_venda","valor_unitario_com_desconto"),
-            ("item_pedido_venda","excluido"), ("item_pedido_venda","cancelado"),
+            ("item_pedido_venda","excluido"), ("item_pedido_venda","cancelado"), ("item_pedido_venda","data_hora_cadastro"),
             ("grade_pedido_venda","quantidade"), ("grade_pedido_venda","sequencia_item"),
             ("grade_pedido_venda","id_pedido_venda"),
             ("produto","codigo"), ("produto","nome"), ("produto","id_produto"),
