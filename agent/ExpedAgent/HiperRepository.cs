@@ -28,10 +28,12 @@ public sealed class HiperRepository(string connectionString)
         if (situacoes is null || situacoes.Length == 0) return new();
         // placeholders dinâmicos @s0,@s1,... — só NOMES de parâmetro entram na string;
         // os VALORES vão por SqlParameter (sem interpolar dados → sem risco de injeção).
+        // Vendedor: orçamento sem vendedor atribuído tem id_usuario_vendedor NULL/0; nesse caso
+        // caímos pra id_usuario_geracao (quem CRIOU o orçamento = login do vendedor). v1.4.1.
         var nomes = situacoes.Select((_, i) => "@s" + i).ToArray();
         string sql = $@"
 SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
-       pv.id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
+       COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) AS id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
        pv.observacao, pv.valor_frete
 FROM pedido_venda pv WITH (NOLOCK)
 WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomes)}) AND pv.id_pedido_venda > @hwm
@@ -73,7 +75,7 @@ ORDER BY pv.id_pedido_venda;";
         var nomes = situacoes.Select((_, i) => "@s" + i).ToArray();
         string sql = $@"
 SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
-       pv.id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
+       COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) AS id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
        pv.observacao, pv.valor_frete
 FROM pedido_venda pv WITH (NOLOCK)
 WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomes)})
@@ -225,6 +227,54 @@ ORDER BY nf.data_hora_emissao DESC;";
             r.IsDBNull(2) ? null : r.GetDateTime(2),
             r.IsDBNull(3) ? null : Convert.ToDecimal(r.GetValue(3))
         );
+    }
+
+    /// <summary>
+    /// #3 NF-e em LOTE (best-effort): a última NF de CADA pedido da lista, numa única query
+    /// (antes era 1 query por item, todo ciclo → o re-sync de NF pendente inflava o ciclo e
+    /// atrasava o pedido novo). Devolve só os que já têm NF; ausentes = ainda não faturados.
+    /// ROW_NUMBER pega a NF mais recente por pedido. Chunk de 500 ids (limite de params do SQL Server).
+    /// </summary>
+    public async Task<Dictionary<int, (string? Numero, string? Chave, DateTime? Emitida, decimal? Valor)>> NfDosPedidosAsync(
+        IReadOnlyList<int> ids, CancellationToken ct)
+    {
+        var map = new Dictionary<int, (string?, string?, DateTime?, decimal?)>();
+        if (ids is null || ids.Count == 0) return map;
+        if (!await PdvOperacaoExisteAsync(ct)) return map; // Hiper antigo: sem essa tabela, sem NF
+
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        const int chunk = 500;
+        for (int off = 0; off < ids.Count && !ct.IsCancellationRequested; off += chunk)
+        {
+            var slice = ids.Skip(off).Take(chunk).ToArray();
+            var nomes = slice.Select((_, i) => "@id" + i).ToArray();
+            string sql = $@"
+SELECT id_pedido_venda, numero_documento_fiscal, chave_documento_fiscal, data_hora_emissao, valor_total
+FROM (
+  SELECT pvo.id_pedido_venda,
+         nf.numero_documento_fiscal, nf.chave_documento_fiscal, nf.data_hora_emissao, nf.valor_total,
+         ROW_NUMBER() OVER (PARTITION BY pvo.id_pedido_venda ORDER BY nf.data_hora_emissao DESC) AS rn
+  FROM pedido_venda_operacao_pdv pvo WITH (NOLOCK)
+  JOIN operacao_pdv op WITH (NOLOCK) ON op.id_operacao = pvo.id_operacao
+  JOIN nota_fiscal nf WITH (NOLOCK) ON nf.id_nota_fiscal = op.id_nota_fiscal
+  WHERE pvo.id_pedido_venda IN ({string.Join(",", nomes)})
+) t WHERE t.rn = 1;";
+            await using var cmd = new SqlCommand(sql, cn);
+            for (int i = 0; i < slice.Length; i++) cmd.Parameters.AddWithValue(nomes[i], slice[i]);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                int id = Convert.ToInt32(r.GetValue(0));
+                map[id] = (
+                    r.IsDBNull(1) ? null : Convert.ToString(r.GetValue(1)),
+                    r.IsDBNull(2) ? null : Convert.ToString(r.GetValue(2)),
+                    r.IsDBNull(3) ? null : r.GetDateTime(3),
+                    r.IsDBNull(4) ? null : Convert.ToDecimal(r.GetValue(4))
+                );
+            }
+        }
+        return map;
     }
 
     /// <summary>

@@ -104,7 +104,7 @@ const RX = {
   formaPagto: /Forma\s+de\s+Pagamento\s*:?\s*([\s\S]*?)(?=\s*(?:Observa[cç][aã]o\s*:|É\s+vedada|$))/i,
   observacao: /Observa[cç][aã]o\s*:?\s*([\s\S]+?)(?=\s*(?:É\s+vedada|$))/i,
   // item: cód + descrição + (opcional " - ") + qtd + unidade + 3 valores monetários
-  item:       /^(\d{3,})\s+(.+?)(?:\s+-)?\s+(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/gm,
+  item:       /^(\d{3,})\s+(.+?)(?:\s+-)?\s+(\d+(?:[.,]\d+)?)\s+([A-Z0-9]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/gm,
   refDiversos:/^\s*(Diversos\s*\([^)]*\))\s*$/im,
 };
 
@@ -156,51 +156,65 @@ function parseCliente(text: string): ClienteParsed {
 // extrai itens (uma linha por item, opcionalmente seguido por Diversos (Ref. X))
 // ---------------------------------------------------------------------------
 
-function parseItens(text: string): ItemParsed[] {
-  const itens: ItemParsed[] = [];
-  // Resetar lastIndex porque o regex tem flag /g e mantém estado
-  RX.item.lastIndex = 0;
-  const lines = text.split(/\r?\n/);
+/**
+ * Parse de UMA linha de item por TOKENIZAÇÃO (robusto). Em vez de uma regex rígida que
+ * exigia unidade [A-Z]{1,3} e código \d{3,} (derrubava em silêncio M³/M²/PÇ, unidades de
+ * 4+ chars e códigos curtos), tokeniza:
+ *   <código> <descrição...> [- Diversos (Ref. X)] <quantidade> <unidade> <preço> [<desconto>] <total>
+ * Puxa do FIM os valores monetários BR (n,dd) e depois quantidade+unidade — então a unidade
+ * pode ser qualquer coisa (UN, M3, M², PÇ, PCT, KG) e o código qualquer dígito.
+ */
+function parseItemLine(line: string): ItemParsed | null {
+  const head = /^(\d{1,})\s+(.+)$/.exec(line.trim());
+  if (!head) return null;
+  const codigo = head[1];
+  let rest = head[2];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // grupos: 1=código 2=descrição 3=ref inline (opcional) 4=qtd 5=un 6=preço 7=desc 8=total
-    // O " - " antes da qtd é OPCIONAL: Hiper antigo usa "<desc> - <qtd> UN ...";
-    // Hiper novo cola a qtd direto ("<desc> <qtd> UN ...") e usa " - " só DENTRO do
-    // nome (ex.: "VASSOURA ... - DTOOLS 1 PC ..."). Ancoramos no bloco numérico final.
-    const m = line.match(
-      /^(\d{3,})\s+(.+?)(?:\s+-(?:\s+Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\))?)?\s+(\d+(?:[.,]\d+)?)\s+([A-Z]{1,3})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/,
-    );
-    if (!m) continue;
-
-    const item: ItemParsed = {
-      codigo:         m[1],
-      descricao:      m[2].trim(),
-      quantidade:     brNumber(m[4]),
-      unidade:        m[5],
-      preco_unitario: brNumber(m[6]),
-      desconto:       brNumber(m[7]),
-      total:          brNumber(m[8]),
-    };
-
-    // ref inline ("- Diversos (Ref.56578) ..." no L4079)
-    if (m[3] !== undefined) {
-      item.referencia = m[3].trim() || 'Diversos';
-    } else {
-      // senão, próxima linha pode ser "Diversos (Ref. X)" (trailing, L4077)
-      const next = lines[i + 1]?.trim();
-      if (next) {
-        const refM = next.match(/^Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\)\s*$/i);
-        if (refM) {
-          item.referencia = refM[1].trim() || 'Diversos';
-          i++; // consome a linha de ref
-        }
-      }
-    }
-
-    itens.push(item);
+  // "- Diversos (Ref. X)" inline (ref opcional) — extrai e remove da descrição. "-" opcional.
+  let refInline: string | undefined;
+  const refM = /\s*-?\s*Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\)/i.exec(rest);
+  if (refM) {
+    refInline = refM[1].trim() || 'Diversos';
+    rest = (rest.slice(0, refM.index) + ' ' + rest.slice(refM.index + refM[0].length)).trim();
   }
 
+  const tokens = rest.split(/\s+/).filter(Boolean);
+  // 1) puxa do fim os monetários BR (n,dd): [..., preço, (desconto), total]
+  const money: string[] = [];
+  while (tokens.length && /^[\d.]+,\d{2}$/.test(tokens[tokens.length - 1])) money.unshift(tokens.pop()!);
+  if (money.length < 2) return null; // precisa ao menos preço e total
+  const preco_unitario = brNumber(money[0]);
+  const total = brNumber(money[money.length - 1]);
+  const desconto = money.length >= 3 ? brNumber(money[1]) : 0;
+  // 2) agora o fim é <quantidade> <unidade>
+  if (tokens.length < 2) return null;
+  const unidade = tokens.pop()!;                 // qualquer sigla: UN, M3, M², PÇ, PCT, KG...
+  const quantidade = brNumber(tokens.pop()!);
+  // guarda defensiva: item real tem quantidade > 0. Rejeita lixo de rodapé que grudou
+  // na linha (ex.: "... Total Frete: 0,00 963,94" vira qtd=0/unidade="Frete:").
+  if (!Number.isFinite(quantidade) || quantidade <= 0) return null;
+  const descricao = tokens.join(' ').replace(/\s*-\s*$/, '').trim();
+  if (!descricao) return null;
+
+  const item: ItemParsed = { codigo, descricao, quantidade, unidade, preco_unitario, desconto, total };
+  if (refInline !== undefined) item.referencia = refInline;
+  return item;
+}
+
+function parseItens(text: string): ItemParsed[] {
+  const itens: ItemParsed[] = [];
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const item = parseItemLine(lines[i]);
+    if (!item) continue;
+    // ref TRAILING na próxima linha (L4077: "Diversos (Ref. X)" numa linha só)
+    if (item.referencia === undefined) {
+      const next = lines[i + 1]?.trim();
+      const refM = next ? next.match(/^Diversos\s*\(\s*Ref\.?\s*([^)]*?)\s*\)\s*$/i) : null;
+      if (refM) { item.referencia = refM[1].trim() || 'Diversos'; i++; }
+    }
+    itens.push(item);
+  }
   return itens;
 }
 
@@ -252,14 +266,16 @@ function normalizeBreaks(text: string): string {
   }
   // Cabeçalho da tabela e primeiro item ficam grudados em wall-of-text;
   // insere \n após o "Total" do cabeçalho (último Total antes do código)
-  out = out.replace(/(Produto\s+Quantidade[^\n]*?Total)\s+(?=\d{3,}\s+\S)/g, '$1\n');
-  // Entre itens: <num>,<dd> seguido de espaço + código (3+ dígitos)
-  out = out.replace(/(\d+[.,]\d{2})\s+(?=\d{3,}\s+\S)/g, '$1\n');
+  out = out.replace(/(Produto\s+Quantidade[^\n]*?Total)\s+(?=\d{1,}\s+\S)/g, '$1\n');
+  // Entre itens: <num>,<dd> seguido de espaço + código (qualquer nº de dígitos — Hiper tem
+  // código curto). O lookahead exige dígitos + ESPAÇO + não-espaço, padrão que só ocorre na
+  // fronteira total→próximo-código (preço/desconto/total não têm espaço entre o nº e a vírgula).
+  out = out.replace(/(\d+[.,]\d{2})\s+(?=\d{1,}\s+\S)/g, '$1\n');
   // "Diversos (Ref. ...)" TRAILING numa linha própria (caso do L4077, ref no
   // fim). NÃO quebrar quando vier inline no item (L4079: "...2L - Diversos
   // (Ref.56578) 1 UN 8,52..."), detectado pelo lookahead de qtd+unidade após o ")".
   out = out.replace(
-    /\s+(Diversos\s*\([^)]*\))(?!\s+\d+(?:[.,]\d+)?\s+[A-Za-z]{1,3}\b)/g,
+    /\s+(Diversos\s*\([^)]*\))(?!\s+\d+(?:[.,]\d+)?\s+\S{1,4}(?:\s|$))/g,
     '\n$1',
   );
   // "Total <valor>" final (após itens) numa linha própria

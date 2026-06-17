@@ -1,5 +1,10 @@
 using ExpedAgent;
 
+// O log vai pro agent.log via redirect do start.cmd, que é block-buffered → o arquivo ficava
+// "parado" e o watchdog (mtime > 15min) reiniciava o agente à toa. AutoFlush no stdout grava
+// cada linha na hora. (v1.4.3)
+Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(o => o.ServiceName = "ExpedAgent");
 

@@ -141,10 +141,15 @@ describe('POST /api/ingest/pedido — modalidade por item (retrocompat do agente
     expect(validado.pontos_retirada[0].itens[0].modalidade).toBe('loja');
   });
 
-  it('vendedor Hiper não mapeado → 422 (não cria pedido)', async () => {
+  it('vendedor Hiper não mapeado → ainda cria o pedido com vendedor nulo (não 422)', async () => {
+    // Mudança 2026-06-17: o 422 derrubava o pedido (nunca caía). Agora entra com
+    // vendedor_id null (aparece sem vendedor; admin/caixa atribui).
     vendedorRow = null;
+    inserirPedido.mockResolvedValue({ id: 'P9', numero: 99 });
     const res = await POST(req(payloadAgente(), 'tok') as never);
-    expect(res.status).toBe(422);
-    expect(inserirPedido).not.toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(inserirPedido).toHaveBeenCalledOnce();
+    const opts = inserirPedido.mock.calls[0][2] as { vendedorId: string | null };
+    expect(opts.vendedorId).toBeNull();
   });
 });

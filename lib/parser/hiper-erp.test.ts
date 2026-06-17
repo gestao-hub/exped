@@ -195,3 +195,64 @@ describe('parseHiperErp — fixture Hiper novo (L001000001013)', () => {
     expect(r.cliente.nome).toBe('CLIENTE EXEMPLO LTDA');
   });
 });
+
+// Regressão (doc real L001000002335 da Franzoni): a unidade era lida como [A-Z]{1,3}
+// (só letras), então itens com unidade contendo DÍGITO (M3 = metro cúbico, S5 = saco)
+// não casavam e o item sumia ("não mapeia todos os itens"). Wall-of-text estilo unpdf.
+describe('parseHiperErp — unidade alfanumérica (M3/S5) — doc L001000002335', () => {
+  const wall =
+    'FRANZONI CASA & CONSTRUCAO AVENIDA LUIZ BOITEUX PIAZZA, 2260 ' +
+    'DOCUMENTO AUXILIAR DE VENDA - PEDIDO DE VENDA - N. L001000002335 ' +
+    'Data de emissão: 17/06/2026 10:20 Data de entrega: 17/06/2026 até 17/06/2026 ' +
+    'Número do documento: L001000002335 Identificação do destinatário ' +
+    'Cliente 15060 - ATAIDE HIGINIO DA SILVA B. DE CAMARGO (26.661.120/0001-23) ' +
+    'Endereço: AV LUIZ BOITEUX PIAZZA, 3537 - - CACHOEIRA DO BOM JESUS ' +
+    'CEP: 88056-000 - FLORIANÓPOLIS - SC Telefone: (48) 3284-8118 (48) 99159-0967 ' +
+    'Produto Quantidade Unitário Desconto Total ' +
+    '10186 AREIA MEDIA METRO - Diversos (Ref. ) 5 M3 198,50 46,16 946,34 ' +
+    '1284 CIMENTO VOTORAN T.OBRAS 50KG - Diversos (Ref. ) 30 S5 45,06 62,86 1.288,94 ' +
+    '925 CAIXA LAJE AJUSTAVEL - TIGRE - Diversos (Ref. ) 6 UN 21,80 6,08 124,72 ' +
+    'Meios de pagamento Parcelas Vencimento Valor Total Frete: 0,00 2.360,00';
+  const r = parseHiperErp(wall);
+
+  it('mapeia os 3 itens, inclusive unidades com dígito (M3, S5)', () => {
+    const itens = r.pontos_retirada[0].itens;
+    expect(itens).toHaveLength(3);
+
+    expect(itens[0].codigo).toBe('10186');
+    expect(itens[0].unidade).toBe('M3');
+    expect(itens[0].quantidade).toBe(5);
+    expect(itens[0].total).toBe(946.34);
+
+    expect(itens[1].codigo).toBe('1284');
+    expect(itens[1].unidade).toBe('S5');
+    expect(itens[1].total).toBe(1288.94);
+
+    expect(itens[2].codigo).toBe('925');
+    expect(itens[2].unidade).toBe('UN');
+  });
+});
+
+// Regressão tokenização: unidades que a regex antiga derrubava (cedilha PÇ, 4+ letras PCT)
+// e código curto (<3 dígitos). Agora a unidade é o penúltimo token, livre de regex.
+describe('parseHiperErp — tokenização: unidade PÇ/PCT, código curto', () => {
+  const wall =
+    'PEDIDO DE VENDA - N. L001000009999 Número do documento: L001000009999 ' +
+    'Cliente 1 - FULANO (12.345.678/0001-99) Produto Quantidade Unitário Desconto Total ' +
+    '42 PARAFUSO SEXTAVADO 2 PÇ 1,50 0,00 3,00 ' +
+    '7788 LIXA FERRO GRAO 100 3 PCT 4,90 0,10 14,60 ' +
+    '10186 AREIA MEDIA METRO - Diversos (Ref. ) 5 M3 198,50 46,16 946,34 ' +
+    'Meios de pagamento Parcelas Vencimento Valor Total Frete: 0,00 963,94';
+  const r = parseHiperErp(wall);
+
+  it('mapeia código curto (42), unidade com cedilha (PÇ), 4-char (PCT) e M3', () => {
+    const itens = r.pontos_retirada[0].itens;
+    expect(itens).toHaveLength(3);
+    expect(itens[0].codigo).toBe('42');
+    expect(itens[0].unidade).toBe('PÇ');
+    expect(itens[0].total).toBe(3);
+    expect(itens[1].codigo).toBe('7788');
+    expect(itens[1].unidade).toBe('PCT');
+    expect(itens[2].unidade).toBe('M3');
+  });
+});

@@ -105,20 +105,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 4) Vendedor Hiper → Franzoni (por empresa)
+  // 4) Vendedor Hiper → Franzoni (por empresa).
+  // Vendedor NÃO mapeado: NÃO rejeita (o 422 derrubava o pedido — ele nunca caía no Exped).
+  // Entra com vendedor_id NULL (aparece sem vendedor; admin/caixa pode atribuir). Mapear o
+  // usuário no hiper_vendedor_map faz o vendedor real aparecer.
   const { data: map } = await supabase
     .from('hiper_vendedor_map')
     .select('vendedor_id')
     .eq('empresa_id', empresaId)
     .eq('hiper_usuario_id', d.hiper_usuario_id)
     .maybeSingle();
-  const vendedorId = map?.vendedor_id as string | undefined;
-  if (!vendedorId) {
-    return NextResponse.json(
-      { error: `Vendedor Hiper ${d.hiper_usuario_id} não mapeado para esta empresa` },
-      { status: 422 },
-    );
-  }
+  const vendedorId = (map?.vendedor_id as string | undefined) ?? null;
 
   // 5) Upload do PDF (opcional)
   let storage_pdf_path: string | null = null;
@@ -176,14 +173,18 @@ export async function POST(req: NextRequest) {
   //    que revisa e envia pra logística ("Revisar e enviar" → vira 'pendente').
   //    Decisão Franzoni 2026-06-05: pedido do Hiper passa pelo vendedor antes da logística.
   //    empresa explícita (service_role).
+  //    upsertOnDuplicate: re-sync do Hiper atualiza o pedido (itens/cliente que entraram
+  //    depois) ENQUANTO estiver em rascunho e intocado — senão preserva o trabalho do vendedor.
   const r = await inserirPedido(supabase, valid.data, {
     vendedorId,
     status: 'rascunho',
     empresaId,
+    upsertOnDuplicate: true,
   });
   if ('error' in r) return NextResponse.json(r, { status: 500 });
   if ('duplicate' in r) {
     return NextResponse.json({ duplicate: true, id: r.existing_id, numero: r.existing_numero }, { status: 200 });
   }
-  return NextResponse.json({ id: r.id, numero: r.numero }, { status: 201 });
+  // updated=true → re-sync atualizou um pedido existente (200); senão criou novo (201).
+  return NextResponse.json({ id: r.id, numero: r.numero }, { status: r.updated ? 200 : 201 });
 }

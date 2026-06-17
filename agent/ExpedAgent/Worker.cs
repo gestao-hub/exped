@@ -9,6 +9,11 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
     private readonly HashSet<int> _backfillSeen = new();
     // Contador de falhas por pedido (id → nº de tentativas que falharam) p/ pular após MaxFalhasPorPedido.
     private readonly Dictionary<int, int> _falhas = new();
+    // Re-check periódico da janela do backfill: limpa o "já visto" a cada ~5min pra re-enviar a
+    // janela → o ingest faz UPSERT dos pedidos editados DEPOIS da 1ª captura (itens/cliente que
+    // entraram ao longo dos minutos). Substitui a re-sincronização que dependia de reinício do
+    // processo (que o autoflush do log agora elimina). (v1.4.3)
+    private DateTime _lastBackfillReset = DateTime.UtcNow;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -22,14 +27,28 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
 
             try { await TickAsync(situacoesVenda, ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no ciclo de sync"); }
+            // Re-check periódico (~5min): limpa o "já visto" → o backfill re-envia a janela →
+            // ingest faz UPSERT dos pedidos editados depois da captura. Também serve de heartbeat
+            // no log (com o autoflush, o arquivo atualiza e o watchdog não reinicia à toa).
+            if (DateTime.UtcNow - _lastBackfillReset > TimeSpan.FromMinutes(5))
+            {
+                _backfillSeen.Clear();
+                _lastBackfillReset = DateTime.UtcNow;
+                log.LogInformation("Backfill: re-check periódico da janela (HWM {H}).", state.GetHwm());
+            }
             // Backfill periodico: repesca pedido finalizado fora de ordem de id que o cursor pulou.
             if (cfg.BackfillEveryTicks > 0 && tick % cfg.BackfillEveryTicks == 0)
             {
                 try { await TickBackfillAsync(situacoesVenda, ct); }
                 catch (Exception ex) { log.LogError(ex, "Erro no backfill"); }
             }
-            try { await TickNfPendentesAsync(ct); }
-            catch (Exception ex) { log.LogError(ex, "Erro no re-sync de NF"); }
+            // Re-sync de NF: throttle (a cada NfEveryTicks). É best-effort e agora em LOTE (1 query),
+            // então não precisa rodar todo ciclo — mantém o ciclo de pedido novo (TickAsync) leve.
+            if (cfg.NfEveryTicks > 0 && tick % cfg.NfEveryTicks == 0)
+            {
+                try { await TickNfPendentesAsync(ct); }
+                catch (Exception ex) { log.LogError(ex, "Erro no re-sync de NF"); }
+            }
             if (rc.SyncOs)
             {
                 try { await TickOsAsync(AgentConfig.ParseSituacoes(rc.SituacoesOs), ct); }
@@ -235,12 +254,19 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
     /// </summary>
     private async Task TickNfPendentesAsync(CancellationToken ct)
     {
-        state.PruneNfPendentes(DateTime.UtcNow, 7);
-        foreach (var p in state.GetNfPendentes())
+        state.PruneNfPendentes(DateTime.UtcNow, cfg.NfTtlDias);
+        var pendentes = state.GetNfPendentes();
+        if (pendentes.Count == 0) return;
+
+        // 1 query em LOTE p/ a NF de TODOS os pendentes (antes: 1 query/conexão por item, todo ciclo
+        // → o ciclo inflava p/ minutos com a lista grande e atrasava o pedido novo).
+        var nfs = await repo.NfDosPedidosAsync(pendentes.Select(p => p.IdPedidoVenda).ToList(), ct);
+        if (nfs.Count == 0) return; // ninguém faturou ainda
+
+        foreach (var p in pendentes)
         {
             if (ct.IsCancellationRequested) break;
-            var nf = await repo.NfDoPedidoAsync(p.IdPedidoVenda, ct);
-            if (nf is not { } n) continue; // ainda sem NF — tenta no próximo poll
+            if (!nfs.TryGetValue(p.IdPedidoVenda, out var n)) continue; // ainda sem NF — próximo ciclo
 
             (string? Forma, string? Parcelas)? pg = null;
             try { pg = await repo.PagamentoDoPedidoAsync(p.IdPedidoVenda, ct); }

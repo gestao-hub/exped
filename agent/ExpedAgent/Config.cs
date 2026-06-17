@@ -30,7 +30,17 @@ public sealed class AgentConfig
     // a janela [hwm-BackfillWindow, hwm] e re-POSTamos; o dedup do ingest (por documento_erp) recria
     // so o que falta. BackfillEveryTicks=0 desliga.
     public int BackfillWindow { get; set; } = 1000;
-    public int BackfillEveryTicks { get; set; } = 150; // ~5min a 2s de poll
+    // Roda TODA passada (era 150). O scan-pra-frente por id PULA orçamento finalizado fora de ordem
+    // de id (id já passou pelo HWM quando virou sit 2/5/7) — quem os pega é o backfill (re-scan da
+    // janela). Rodando todo tick, esses pedidos caem em ~1 poll em vez de horas. Barato: o
+    // _backfillSeen pula o que já foi conferido ANTES de buscar cliente/itens (só trabalha no que falta).
+    public int BackfillEveryTicks { get; set; } = 1;
     // ROBUSTEZ: após N falhas no MESMO pedido, pula ele (dado quebrado) em vez de travar a fila.
     public int MaxFalhasPorPedido { get; set; } = 3;
+
+    // Re-sync de NF: roda a cada N ticks (não todo ciclo) e checa em LOTE (1 query). Mantém o
+    // ciclo de pedido novo leve mesmo com a lista de NF pendente grande (venda à vista não emite
+    // NF-e → a lista acumula até o TTL). NfEveryTicks=0 desliga o throttle (roda todo ciclo).
+    public int NfEveryTicks { get; set; } = 12;
+    public int NfTtlDias { get; set; } = 7;
 }

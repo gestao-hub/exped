@@ -5,42 +5,96 @@ import { upsertCliente } from '@/lib/clientes/upsert';
 
 export type InserirPedidoResult =
   | { error: string }
-  | { id: string; numero: number }
+  | { id: string; numero: number; updated?: boolean }
   | { duplicate: true; existing_id: string; existing_numero: number };
+
+/** Insere pontos de retirada + itens de um pedido. Reusado pelo INSERT e pelo re-sync (UPSERT). */
+async function inserirPontosItens(
+  supabase: SupabaseClient<Database>,
+  pedidoId: string,
+  pontos: PedidoFormInput['pontos_retirada'],
+): Promise<string | null> {
+  for (let i = 0; i < pontos.length; i++) {
+    const ponto = pontos[i];
+    const { data: pontoRow, error: pontoErr } = await supabase
+      .from('pedido_pontos_retirada')
+      .insert({
+        pedido_id: pedidoId,
+        tipo: ponto.tipo,
+        empresa_nome: ponto.empresa_nome,
+        endereco: ponto.endereco ?? null,
+        ordem: i,
+      })
+      .select('id')
+      .single();
+    if (pontoErr || !pontoRow) return `Falha no ponto ${i + 1}: ${pontoErr?.message}`;
+
+    if (ponto.itens.length > 0) {
+      const itensPayload = ponto.itens.map((it, idx) => ({
+        ponto_retirada_id: pontoRow.id,
+        codigo: it.codigo,
+        descricao: it.descricao,
+        quantidade: it.quantidade,
+        unidade: it.unidade,
+        preco_unitario: it.preco_unitario,
+        desconto: it.desconto,
+        total: it.total,
+        // Modalidade é a fonte da verdade do item; sem isto o DEFAULT 'loja' do banco
+        // sobrescreveria itens imediato/entrega ao criar (some a info no reload).
+        modalidade: it.modalidade,
+        referencia: it.referencia ?? null,
+        saldo_estoque: it.saldo_estoque ?? null,
+        ordem: idx,
+      }));
+      const { error: itErr } = await supabase.from('pedido_itens').insert(itensPayload);
+      if (itErr) return `Falha nos itens do ponto ${i + 1}: ${itErr.message}`;
+    }
+  }
+  return null;
+}
 
 /**
  * Insere pedido (cabeçalho + pontos + itens). Reutilizada pela server action
  * (sessão de usuário) e pelo endpoint de ingestão (service_role).
  *
- * - vendedorId: explícito (a action usa auth.uid(); o ingest usa o vendedor mapeado).
+ * - vendedorId: explícito (a action usa auth.uid(); o ingest usa o vendedor mapeado, ou
+ *   `null` quando o vendedor do Hiper não está mapeado — aparece sem vendedor em vez de
+ *   rejeitar o pedido).
  * - empresaId: opcional. Na sessão de usuário, omitir → a coluna usa o DEFAULT
  *   current_empresa_id(). No ingest (service_role, sem auth.uid()) é OBRIGATÓRIO
  *   passar, senão o DEFAULT resolveria null e violaria o NOT NULL. Quando passado,
  *   também escopa a dedup por empresa (importante porque service_role ignora RLS).
+ * - upsertOnDuplicate: o ingest do Hiper passa `true` — quando o documento já existe E o
+ *   pedido ainda está em `rascunho` E intocado (1 ponto = default da ingestão), ATUALIZA
+ *   cabeçalho + itens (re-sync do Hiper: itens/cliente adicionados depois propagam). Se o
+ *   vendedor já mexeu (status ≠ rascunho, ou já dividiu em híbrido = >1 ponto), NÃO
+ *   sobrescreve — retorna duplicate. A action de usuário NÃO passa isto (mantém dedup pura).
  * `d` já deve estar validado por pedidoFormSchema.
  */
 export async function inserirPedido(
   supabase: SupabaseClient<Database>,
   d: PedidoFormInput,
-  opts: { vendedorId: string; status: 'rascunho' | 'pendente' | 'em_financeiro'; empresaId?: string },
+  opts: {
+    vendedorId: string | null;
+    status: 'rascunho' | 'pendente' | 'em_financeiro';
+    empresaId?: string;
+    upsertOnDuplicate?: boolean;
+  },
 ): Promise<InserirPedidoResult> {
+  // 1) dedup por documento_erp (não-cancelado, escopo empresa)
+  let existing: { id: string; numero_mapa: number; status: string } | null = null;
   if (d.documento_erp) {
     let q = supabase
       .from('pedidos')
-      .select('id, numero_mapa')
+      .select('id, numero_mapa, status')
       .eq('documento_erp', d.documento_erp)
       .neq('status', 'cancelado');
     if (opts.empresaId) q = q.eq('empresa_id', opts.empresaId);
-    const { data: existing } = await q.maybeSingle();
-    if (existing) {
-      return {
-        duplicate: true,
-        existing_id: existing.id as string,
-        existing_numero: existing.numero_mapa as number,
-      };
-    }
+    const { data } = await q.maybeSingle();
+    existing = (data as { id: string; numero_mapa: number; status: string } | null) ?? null;
   }
 
+  // 2) cliente (best-effort: se falhar, segue com cliente_id null)
   let cliente_id: string | null = null;
   try {
     const { id } = await upsertCliente(supabase, {
@@ -59,7 +113,9 @@ export async function inserirPedido(
     cliente_id = null;
   }
 
-  const insertRow: Database['public']['Tables']['pedidos']['Insert'] = {
+  // 3) campos de cabeçalho (compartilhados insert/update). SEM status (preservado no update)
+  //    e SEM empresa_id (não muda no re-sync).
+  const baseFields = {
     documento_erp: d.documento_erp ?? null,
     data_emissao: d.data_emissao ?? null,
     data_entrega: d.data_entrega ?? null,
@@ -85,16 +141,51 @@ export async function inserirPedido(
     nf_emitida_em: d.nf_emitida_em ?? null,
     nf_valor: d.nf_valor ?? null,
     observacoes: d.observacoes ?? null,
-    status: opts.status,
     storage_pdf_path: d.storage_pdf_path ?? null,
     vendedor_id: opts.vendedorId,
   };
+
+  // 4) Já existe (não-cancelado): re-sync (UPSERT) ou duplicate.
+  if (existing) {
+    const podeAtualizar = opts.upsertOnDuplicate === true && existing.status === 'rascunho';
+    if (podeAtualizar) {
+      // Intocado pelo vendedor? A ingestão cria SEMPRE 1 ponto; se há >1, o vendedor dividiu
+      // em híbrido → NÃO sobrescreve (preserva o trabalho dele).
+      const { count } = await supabase
+        .from('pedido_pontos_retirada')
+        .select('id', { count: 'exact', head: true })
+        .eq('pedido_id', existing.id);
+      if ((count ?? 0) <= 1) {
+        const updateObj: Database['public']['Tables']['pedidos']['Update'] = { ...baseFields };
+        if (d.exige_emissao !== undefined) updateObj.exige_emissao = d.exige_emissao;
+        const { error: upErr } = await supabase.from('pedidos').update(updateObj).eq('id', existing.id);
+        if (upErr) return { error: upErr.message };
+
+        // substitui pontos + itens pelo estado atual do Hiper
+        const { data: pontosAntigos } = await supabase
+          .from('pedido_pontos_retirada')
+          .select('id')
+          .eq('pedido_id', existing.id);
+        const ids = (pontosAntigos ?? []).map((p) => p.id as string);
+        if (ids.length) await supabase.from('pedido_itens').delete().in('ponto_retirada_id', ids);
+        await supabase.from('pedido_pontos_retirada').delete().eq('pedido_id', existing.id);
+
+        const err = await inserirPontosItens(supabase, existing.id, d.pontos_retirada);
+        if (err) return { error: err };
+        return { id: existing.id, numero: existing.numero_mapa, updated: true };
+      }
+    }
+    return { duplicate: true, existing_id: existing.id, existing_numero: existing.numero_mapa };
+  }
+
+  // 5) INSERT novo
+  const insertRow: Database['public']['Tables']['pedidos']['Insert'] = {
+    ...baseFields,
+    status: opts.status,
+  };
   if (opts.empresaId) insertRow.empresa_id = opts.empresaId;
-  // exige_emissao SÓ entra no INSERT quando o VENDEDOR marcou no form (d definido).
-  // O agente Hiper NÃO envia esse campo → fica de fora e pega o DEFAULT false do banco.
-  // Assim a INGESTÃO não referencia a coluna e fica imune ao schema cache velho do
-  // PostgREST do hub (o erro "Could not find the 'exige_emissao' column ... in the
-  // schema cache" que derrubava pedidos do Hiper). O vendedor segue podendo marcar.
+  // exige_emissao SÓ entra quando o VENDEDOR marcou (o agente Hiper não envia → pega o
+  // DEFAULT false e a ingestão fica imune ao schema cache velho do PostgREST do hub).
   if (d.exige_emissao !== undefined) insertRow.exige_emissao = d.exige_emissao;
 
   const { data: pedido, error: insErr } = await supabase
@@ -112,42 +203,8 @@ export async function inserirPedido(
     return { error: insErr?.message ?? 'Falha ao criar pedido' };
   }
 
-  for (let i = 0; i < d.pontos_retirada.length; i++) {
-    const ponto = d.pontos_retirada[i];
-    const { data: pontoRow, error: pontoErr } = await supabase
-      .from('pedido_pontos_retirada')
-      .insert({
-        pedido_id: pedido.id,
-        tipo: ponto.tipo,
-        empresa_nome: ponto.empresa_nome,
-        endereco: ponto.endereco ?? null,
-        ordem: i,
-      })
-      .select('id')
-      .single();
-    if (pontoErr || !pontoRow) return { error: `Falha no ponto ${i + 1}: ${pontoErr?.message}` };
-
-    if (ponto.itens.length > 0) {
-      const itensPayload = ponto.itens.map((it, idx) => ({
-        ponto_retirada_id: pontoRow.id,
-        codigo: it.codigo,
-        descricao: it.descricao,
-        quantidade: it.quantidade,
-        unidade: it.unidade,
-        preco_unitario: it.preco_unitario,
-        desconto: it.desconto,
-        total: it.total,
-        // Modalidade é a fonte da verdade do item; sem isto o DEFAULT 'loja' do banco
-        // sobrescreveria itens imediato/entrega ao criar (some a info no reload).
-        modalidade: it.modalidade,
-        referencia: it.referencia ?? null,
-        saldo_estoque: it.saldo_estoque ?? null,
-        ordem: idx,
-      }));
-      const { error: itErr } = await supabase.from('pedido_itens').insert(itensPayload);
-      if (itErr) return { error: `Falha nos itens do ponto ${i + 1}: ${itErr.message}` };
-    }
-  }
+  const err = await inserirPontosItens(supabase, pedido.id as string, d.pontos_retirada);
+  if (err) return { error: err };
 
   return { id: pedido.id as string, numero: pedido.numero_mapa as number };
 }
