@@ -12,9 +12,11 @@ var cfg = builder.Configuration.GetSection("Agent").Get<AgentConfig>() ?? new Ag
 builder.Services.AddSingleton(cfg);
 builder.Services.AddSingleton(new HiperRepository(cfg.SqlConnectionString));
 builder.Services.AddSingleton(new StateStore());
+builder.Services.AddSingleton<SyncGate>();
 builder.Services.AddHttpClient<IngestClient>();
 builder.Services.AddHttpClient<RemoteConfigClient>();
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<PuxarService>();
 
 var host = builder.Build();
 host.Run();

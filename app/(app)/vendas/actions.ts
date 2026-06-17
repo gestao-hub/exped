@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 import { inserirPedido } from '@/lib/pedidos/inserir';
 import { reconcileChildren, type ExistingPonto } from '@/lib/pedidos/reconcile';
@@ -493,4 +494,48 @@ export async function finalizarLoteAction(ids: string[]) {
 
 export async function redirectToVendas() {
   redirect('/vendas');
+}
+
+/**
+ * Botão "Puxar": pede ao AGENTE LOCAL (no hub) pra sincronizar AGORA os pedidos recentes do
+ * vendedor logado, sem esperar o ciclo automático. Resolve o(s) hiper_usuario_id do vendedor
+ * pelo mapa (service-role, pois o vendedor pode não ter RLS de leitura nele) e chama o agente
+ * em AGENT_SYNC_URL (só existe no hub). NÃO puxa pedido de outro vendedor.
+ */
+export async function puxarDoHiperAction(): Promise<{ ok: boolean; synced?: number; message: string }> {
+  const agentUrl = process.env.AGENT_SYNC_URL;
+  if (!agentUrl) return { ok: false, message: 'Indisponível neste ambiente.' };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, message: 'Não autenticado.' };
+
+  const admin = createAdminClient();
+  const { data: maps } = await admin
+    .from('hiper_vendedor_map')
+    .select('hiper_usuario_id')
+    .eq('vendedor_id', user.id);
+  const ids = (maps ?? [])
+    .map((m) => m.hiper_usuario_id as number)
+    .filter((n) => Number.isFinite(n));
+  if (ids.length === 0) {
+    return { ok: false, message: 'Seu usuário não está vinculado a um vendedor do Hiper.' };
+  }
+
+  try {
+    const res = await fetch(`${agentUrl}/sync-now?ids=${ids.join(',')}`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+    });
+    const json = (await res.json().catch(() => ({}))) as { synced?: number };
+    revalidatePath('/vendas');
+    const synced = typeof json.synced === 'number' ? json.synced : 0;
+    return {
+      ok: true,
+      synced,
+      message: synced > 0 ? `${synced} pedido(s) puxado(s) do Hiper.` : 'Nenhum pedido novo do Hiper agora.',
+    };
+  } catch {
+    return { ok: false, message: 'Não consegui falar com o agente local. Ele está rodando?' };
+  }
 }

@@ -50,4 +50,9 @@ public sealed class AgentConfig
     // sincroniza mesmo assim (não trava num pedido sempre-mudando).
     public int EstabilizacaoSegundos { get; set; } = 90;
     public int MaxEsperaEstabilizacaoMin { get; set; } = 15;
+
+    // Gatilho local "Puxar": o app do hub chama http://127.0.0.1:{SyncNowPort}/sync-now?ids=...
+    // pra sincronizar NA HORA só os pedidos recentes daquele(s) usuário(s) do Hiper (o vendedor
+    // que clicou). Bind só em 127.0.0.1 (só o app no mesmo servidor alcança). 0 = desligado.
+    public int SyncNowPort { get; set; } = 5005;
 }

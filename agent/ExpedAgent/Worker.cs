@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 namespace ExpedAgent;
 
-public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, RemoteConfigClient remote, ILogger<Worker> log)
+public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient client, StateStore state, RemoteConfigClient remote, SyncGate gate, ILogger<Worker> log)
     : BackgroundService
 {
     // Ids já conferidos pelo backfill NESTA execução — evita re-POSTar a janela inteira toda rodada
@@ -25,6 +25,10 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
             var rc = await remote.GetAsync(ct);
             var situacoesVenda = AgentConfig.ParseSituacoes(rc.SituacoesVenda);
 
+            // serializa o ciclo automático com o gatilho "Puxar" manual (ambos mexem no state.json)
+            await gate.Lock.WaitAsync(ct);
+            try
+            {
             try { await TickAsync(situacoesVenda, ct); }
             catch (Exception ex) { log.LogError(ex, "Erro no ciclo de sync"); }
             // Re-check periódico (~5min): limpa o "já visto" → o backfill re-envia a janela →
@@ -54,6 +58,8 @@ public sealed class Worker(AgentConfig cfg, HiperRepository repo, IngestClient c
                 try { await TickOsAsync(AgentConfig.ParseSituacoes(rc.SituacoesOs), ct); }
                 catch (Exception ex) { log.LogError(ex, "Erro no ciclo de OS"); }
             }
+            }
+            finally { gate.Lock.Release(); }
             await client.HeartbeatAsync(ct);
             if (tick % 120 == 0) await ChecarVersaoAsync(ct); // ~1x/h (120 ticks de 30s)
             tick++;

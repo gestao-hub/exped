@@ -68,6 +68,53 @@ ORDER BY pv.id_pedido_venda;";
     }
 
     /// <summary>
+    /// "Puxar" (sob demanda): pedidos RECENTES (últimas 48h) de um conjunto de usuários do Hiper
+    /// — id_usuario_vendedor OU id_usuario_geracao (mesmo COALESCE do scan). Pula a estabilização
+    /// (o vendedor clicou confirmando que terminou). Mesma projeção do NovosPedidosAsync.
+    /// </summary>
+    public async Task<List<PedidoHeader>> PedidosRecentesPorUsuarioAsync(int[] hiperIds, short[] situacoes, CancellationToken ct)
+    {
+        if (hiperIds is null || hiperIds.Length == 0 || situacoes is null || situacoes.Length == 0) return new();
+        var nomesSit = situacoes.Select((_, i) => "@s" + i).ToArray();
+        var nomesU = hiperIds.Select((_, i) => "@u" + i).ToArray();
+        string sql = $@"
+SELECT pv.id_pedido_venda, pv.codigo, pv.data_hora_geracao, pv.id_entidade_cliente,
+       COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) AS id_usuario_vendedor, pv.data_previsao_entrega_final, pv.data_previsao_entrega_inicial,
+       pv.observacao, pv.valor_frete,
+       (SELECT MAX(ipv.data_hora_cadastro) FROM item_pedido_venda ipv WITH (NOLOCK)
+          WHERE ipv.id_pedido_venda = pv.id_pedido_venda AND ipv.excluido = 0 AND ipv.cancelado = 0) AS ult_item_cadastro
+FROM pedido_venda pv WITH (NOLOCK)
+WHERE pv.excluido = 0 AND pv.situacao IN ({string.Join(",", nomesSit)})
+  AND COALESCE(NULLIF(pv.id_usuario_vendedor, 0), pv.id_usuario_geracao) IN ({string.Join(",", nomesU)})
+  AND pv.data_hora_geracao > DATEADD(hour, -48, GETDATE())
+ORDER BY pv.id_pedido_venda DESC;";
+        var list = new List<PedidoHeader>();
+        await using var cn = new SqlConnection(_cs);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(sql, cn);
+        for (int i = 0; i < situacoes.Length; i++) cmd.Parameters.AddWithValue(nomesSit[i], situacoes[i]);
+        for (int i = 0; i < hiperIds.Length; i++) cmd.Parameters.AddWithValue(nomesU[i], hiperIds[i]);
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            list.Add(new PedidoHeader
+            {
+                IdPedidoVenda = r.GetInt32(0),
+                Codigo = r.IsDBNull(1) ? "" : r.GetString(1),
+                DataHoraGeracao = r.IsDBNull(2) ? DateTime.Now : r.GetDateTime(2),
+                IdEntidadeCliente = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3)),
+                IdUsuarioVendedor = r.IsDBNull(4) ? 0 : Convert.ToInt32(r.GetValue(4)),
+                DataEntrega = !r.IsDBNull(5) ? r.GetDateTime(5) : (r.IsDBNull(6) ? null : r.GetDateTime(6)),
+                DataEntregaInicio = r.IsDBNull(6) ? null : r.GetDateTime(6),
+                Observacao = r.IsDBNull(7) ? null : r.GetString(7),
+                ValorFrete = r.IsDBNull(8) ? 0m : Convert.ToDecimal(r.GetValue(8)),
+                UltItemCadastro = r.IsDBNull(9) ? (DateTime?)null : r.GetDateTime(9),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>
     /// Backfill: pedidos elegiveis numa JANELA de id (floorExclusive, ceilingInclusive].
     /// Repesca os que so viraram elegiveis (sit 2/5/7) DEPOIS do cursor (HWM) passar — orcamento
     /// finalizado fora de ordem de id. Mesma projecao do NovosPedidosAsync.
