@@ -13,6 +13,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { PedidoItem } from '@/lib/types';
 import { CancelarPedidoButton } from './cancelar-button';
+import { CorrigirPedidoButton } from './corrigir-button';
 
 export default async function PedidoDetailPage({
   params,
@@ -109,6 +110,7 @@ export default async function PedidoDetailPage({
                 Revisar e enviar
               </Link>
             )}
+            {pedido.status === 'em_financeiro' && <CorrigirPedidoButton id={id} />}
             {podeCancelar && <CancelarPedidoButton id={id} />}
           </>
         }

@@ -268,6 +268,32 @@ export async function cancelarPedidoAction(id: string) {
 }
 
 /**
+ * Vendedor "corrige" um pedido que já está no caixa: devolve de em_financeiro → rascunho
+ * pra reabrir a edição (sai da fila do caixa). Depois ele revisa e reenvia. Transição
+ * atômica .eq('status','em_financeiro'); a RLS garante que só o dono (ou admin) faça isso
+ * e evita corrida com o financeiro liberando ao mesmo tempo.
+ */
+export async function corrigirPedidoAction(id: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('pedidos')
+    .update({ status: 'rascunho' })
+    .eq('id', id)
+    .eq('status', 'em_financeiro')
+    .select('id')
+    .single();
+  if (error || !data) {
+    return {
+      error:
+        error?.message ?? 'Pedido não está mais no caixa (talvez já liberado para a logística).',
+    };
+  }
+  revalidatePath('/vendas');
+  revalidatePath(`/vendas/${id}`);
+  return { ok: true as const };
+}
+
+/**
  * Logística: marca como em separação.
  */
 export async function iniciarSeparacaoAction(id: string) {
