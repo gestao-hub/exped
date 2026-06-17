@@ -10,8 +10,12 @@ export default function VendasPage() {
       <PageHeader
         title="Meus Pedidos"
         description="Pedidos criados por você. As atualizações de status da logística chegam em tempo real."
-        actions={podePuxar ? <PuxarButton /> : undefined}
       />
+      {podePuxar && (
+        <div className="flex justify-center">
+          <PuxarButton />
+        </div>
+      )}
       <PedidosList mode="vendas" bounded />
     </div>
   );

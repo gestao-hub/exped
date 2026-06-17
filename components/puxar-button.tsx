@@ -2,19 +2,17 @@
 
 import { useTransition } from 'react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
 import { puxarDoHiperAction } from '@/app/(app)/vendas/actions';
 
 /**
- * Botão "Puxar": pede ao agente local (no hub) pra sincronizar AGORA os pedidos do
- * vendedor logado — sem esperar o ciclo automático. Só renderizado no hub (ver vendas/page).
+ * Botão "Sincronizar": pede ao agente local (no hub) pra puxar AGORA os pedidos do vendedor
+ * logado do Hiper — sem esperar o ciclo automático. Só renderizado no hub (ver vendas/page).
  */
 export function PuxarButton() {
   const [pending, start] = useTransition();
   return (
-    <Button
+    <button
       type="button"
-      size="sm"
       disabled={pending}
       onClick={() =>
         start(async () => {
@@ -23,8 +21,9 @@ export function PuxarButton() {
           else toast.error(r.message);
         })
       }
+      className="inline-flex min-w-[220px] items-center justify-center gap-2 rounded-xl bg-[#F97316] px-10 py-3.5 text-base font-semibold text-white shadow-sm transition-colors hover:bg-[#EA580C] active:bg-[#C2410C] disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pending ? 'Puxando…' : 'Puxar'}
-    </Button>
+      {pending ? 'Sincronizando…' : 'Sincronizar'}
+    </button>
   );
 }
