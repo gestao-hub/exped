@@ -125,6 +125,34 @@ jobs:
           VER: ${{ steps.ver.outputs.ver }}
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-setup.iss'
 
+      - name: Smoke unified installer initialization
+        shell: pwsh
+        run: |
+          if (Test-Path 'C:\Exped') {
+            throw 'O runner nao esta limpo para o smoke test do instalador.'
+          }
+          $log = Join-Path $env:RUNNER_TEMP 'exped-setup-init.log'
+          $arguments = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            '/SP-',
+            "/LOG=$log"
+          )
+          $process = Start-Process -FilePath 'hub\win\Output\ExpedSetup.exe' `
+            -ArgumentList $arguments -Wait -PassThru
+          $content = Get-Content -LiteralPath $log -Raw
+          if ($content -match 'expand the "app" constant') {
+            throw 'InitializeWizard tentou expandir {app} antes da inicializacao.'
+          }
+          if ($content -notmatch 'Modo silencioso exige /credentialsfile protegido') {
+            Write-Host $content
+            throw 'O instalador nao alcancou o preflight silencioso esperado.'
+          }
+          if ($process.ExitCode -eq 0) {
+            throw 'O smoke test sem credenciais deveria encerrar antes da instalacao.'
+          }
+
       - name: Compile hub-only installer (ISCC)
         shell: cmd
         env:

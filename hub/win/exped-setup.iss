@@ -242,13 +242,18 @@ begin
     RaiseException(FailureMessage + ' (exit code ' + IntToStr(ResultCode) + ').');
 end;
 
-function OrchestratorParams(Operation, Extra: String): String;
+function OrchestratorParamsForRoot(Operation, Extra, Root: String): String;
 var
   Tail: String;
 begin
-  Tail := '-Operation ' + Operation + ' -Root ' + QuoteArg(ExpandConstant('{app}'));
+  Tail := '-Operation ' + Operation + ' -Root ' + QuoteArg(Root);
   if Extra <> '' then Tail := Tail + ' ' + Extra;
   Result := PowerShellFileParams(OrchestratorPath, Tail);
+end;
+
+function OrchestratorParams(Operation, Extra: String): String;
+begin
+  Result := OrchestratorParamsForRoot(Operation, Extra, ExpandConstant('{app}'));
 end;
 
 procedure RunOrchestratorChecked(Operation, Extra, FailureMessage: String);
@@ -288,11 +293,12 @@ begin
   else RaiseException('Consulta do ExpedHub falhou (exit code ' + IntToStr(ResultCode) + ').');
 end;
 
-function QueryProvisionedConfig: Boolean;
+function QueryProvisionedConfigAtRoot(Root: String): Boolean;
 var
   ResultCode: Integer;
 begin
-  if not Exec(PowerShellExe, OrchestratorParams('QueryProvisionedConfig', ''),
+  if not Exec(PowerShellExe,
+    OrchestratorParamsForRoot('QueryProvisionedConfig', '', Root),
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     RaiseException('Nao foi possivel validar o provisionamento existente.');
   if ResultCode = 0 then
@@ -302,6 +308,11 @@ begin
   else
     RaiseException('Validacao do provisionamento existente falhou (exit code ' +
       IntToStr(ResultCode) + ').');
+end;
+
+function QueryProvisionedConfig: Boolean;
+begin
+  Result := QueryProvisionedConfigAtRoot(ExpandConstant('{app}'));
 end;
 
 procedure RollbackAgentAfterFailure;
@@ -394,7 +405,8 @@ procedure InitializeWizard;
 begin
   ExtractTemporaryFile('installer-orchestrator.ps1');
   OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
-  ExistingProvisionedConfig := QueryProvisionedConfig;
+  { {app} ainda nao existe nesta fase do Inno; a raiz do produto e fixa. }
+  ExistingProvisionedConfig := QueryProvisionedConfigAtRoot('{#InstallRoot}');
 
   { Em modo silencioso a credencial vem somente de /credentialsfile protegido. }
   if WizardSilent() then Exit;

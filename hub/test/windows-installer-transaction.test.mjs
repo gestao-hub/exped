@@ -170,6 +170,20 @@ describe('orquestração transacional do Inno', () => {
     expect(hubPrepare).toMatch(/if\s+not\s+ExistingProvisionedConfig\s+then[\s\S]*RaiseException/i);
   });
 
+  it('nao expande {app} durante InitializeWizard e exercita essa inicializacao no CI', () => {
+    const initializeWizard = routine(unified, 'InitializeWizard');
+    const earlyQuery = routine(unified, 'QueryProvisionedConfigAtRoot');
+
+    expect(initializeWizard).toContain("QueryProvisionedConfigAtRoot('{#InstallRoot}')");
+    expect(initializeWizard).not.toContain('QueryProvisionedConfig;');
+    expect(earlyQuery).toContain('OrchestratorParamsForRoot');
+    expect(earlyQuery).not.toContain("ExpandConstant('{app}')");
+
+    expect(workflow).toContain('Smoke unified installer initialization');
+    expect(workflow).toContain('Modo silencioso exige /credentialsfile protegido');
+    expect(workflow).toMatch(/expand the ["']app["'] constant/i);
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);
