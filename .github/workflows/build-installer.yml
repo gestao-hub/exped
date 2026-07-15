@@ -2,6 +2,21 @@ name: build-installer
 on:
   push:
     tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/build-installer.yml'
+      - 'agent/**'
+      - 'app/**'
+      - 'components/**'
+      - 'hub/**'
+      - 'lib/**'
+      - 'public/**'
+      - 'scripts/local-stack/**'
+      - 'scripts/montar-payload.mjs'
+      - 'supabase/migrations/**'
+      - 'next.config.*'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -124,6 +139,103 @@ jobs:
         env:
           VER: ${{ steps.ver.outputs.ver }}
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-setup.iss'
+
+      - name: Smoke unified installer initialization
+        shell: pwsh
+        run: |
+          function Assert-SmokeHostClean([string]$Phase, [bool]$AllowRoot = $false) {
+            $problems = @()
+            if ((Test-Path 'C:\Exped') -and -not $AllowRoot) {
+              $problems += 'C:\Exped existe'
+            }
+            if (Get-Service -Name 'ExpedHub' -ErrorAction SilentlyContinue) {
+              $problems += 'servico ExpedHub existe'
+            }
+            $uninstallPaths = @(
+              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+            )
+            $uninstallEntries = @(
+              Get-ItemProperty -Path $uninstallPaths -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -in @('Exped', 'Exped Hub') }
+            )
+            if ($uninstallEntries.Count -gt 0) { $problems += 'registro de uninstall existe' }
+            $agentPaths = @(
+              (Join-Path $env:LOCALAPPDATA 'ExpedAgent'),
+              (Join-Path ([Environment]::GetFolderPath('Startup')) 'ExpedAgent.vbs')
+            )
+            if ($agentPaths | Where-Object { Test-Path -LiteralPath $_ }) {
+              $problems += 'arquivos do ExpedAgent existem'
+            }
+            if (Get-Process -Name 'ExpedAgent' -ErrorAction SilentlyContinue) {
+              $problems += 'processo ExpedAgent existe'
+            }
+            if (Get-ScheduledTask -TaskName 'ExpedAgent' -ErrorAction SilentlyContinue) {
+              $problems += 'tarefa ExpedAgent existe'
+            }
+            if ($problems.Count -gt 0) {
+              throw "Host alterado no smoke ($Phase): $($problems -join '; ')"
+            }
+          }
+
+          function Invoke-InitSmoke([string]$ExpectedState) {
+            $log = Join-Path $env:RUNNER_TEMP "exped-setup-init-$ExpectedState.log"
+            Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            $arguments = @(
+              '/VERYSILENT',
+              '/SUPPRESSMSGBOXES',
+              '/NORESTART',
+              '/SP-',
+              '/initsmoke=1',
+              "/LOG=$log"
+            )
+            $process = Start-Process -FilePath 'hub\win\Output\ExpedSetup.exe' `
+              -ArgumentList $arguments -Wait -PassThru
+            $content = Get-Content -LiteralPath $log -Raw
+            if ($content -match 'expand the "app" constant') {
+              throw 'InitializeWizard tentou expandir {app} antes da inicializacao.'
+            }
+            $marker = "EXPED_INIT_SMOKE_OK:$ExpectedState"
+            if ($content -notmatch [regex]::Escape($marker)) {
+              Write-Host $content
+              throw "O instalador nao confirmou o estado $ExpectedState."
+            }
+            if ($process.ExitCode -eq 0) {
+              throw 'O smoke deve encerrar intencionalmente dentro de InitializeWizard.'
+            }
+          }
+
+          $baselineRoot = "C:\Exped-smoke-baseline-$PID-$([Guid]::NewGuid().ToString('N'))"
+          $rootExisted = Test-Path -LiteralPath 'C:\Exped'
+          $baselineMoved = $false
+          Assert-SmokeHostClean 'antes' $rootExisted
+          try {
+            if ($rootExisted) {
+              Move-Item -LiteralPath 'C:\Exped' -Destination $baselineRoot
+              $baselineMoved = $true
+            }
+            Assert-SmokeHostClean 'isolado'
+            Invoke-InitSmoke 'clean'
+            New-Item -ItemType Directory -Path 'C:\Exped' -Force | Out-Null
+            $config = @{
+              cloud = @{
+                apiBase = 'https://smoke.invalid'
+                deviceToken = 'ci-smoke-token'
+              }
+            } | ConvertTo-Json -Depth 4
+            [IO.File]::WriteAllText(
+              'C:\Exped\config.json',
+              $config,
+              (New-Object Text.UTF8Encoding($false))
+            )
+            Invoke-InitSmoke 'provisioned'
+          } finally {
+            Remove-Item -LiteralPath 'C:\Exped' -Recurse -Force -ErrorAction SilentlyContinue
+            if ($baselineMoved) {
+              Move-Item -LiteralPath $baselineRoot -Destination 'C:\Exped'
+            }
+            Assert-SmokeHostClean 'depois' $rootExisted
+          }
 
       - name: Compile hub-only installer (ISCC)
         shell: cmd

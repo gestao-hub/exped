@@ -170,6 +170,33 @@ describe('orquestração transacional do Inno', () => {
     expect(hubPrepare).toMatch(/if\s+not\s+ExistingProvisionedConfig\s+then[\s\S]*RaiseException/i);
   });
 
+  it('nao expande {app} durante InitializeWizard e exercita essa inicializacao no CI', () => {
+    const initializeWizard = routine(unified, 'InitializeWizard');
+    const earlyQuery = routine(unified, 'QueryProvisionedConfigAtRoot');
+
+    expect(initializeWizard).toContain("QueryProvisionedConfigAtRoot('{#InstallRoot}')");
+    expect(initializeWizard).not.toContain('QueryProvisionedConfig;');
+    expect(initializeWizard).toContain("ExpandConstant('{param:initsmoke}')");
+    expect(initializeWizard).toContain('EXPED_INIT_SMOKE_OK:clean');
+    expect(initializeWizard).toContain('EXPED_INIT_SMOKE_OK:provisioned');
+    expect(earlyQuery).toContain('OrchestratorParamsForRoot');
+    expect(earlyQuery).not.toContain("ExpandConstant('{app}')");
+
+    expect(workflow).toMatch(/pull_request:\s*\n\s+paths:/);
+    expect(workflow).toContain('Smoke unified installer initialization');
+    expect(workflow).toContain('/initsmoke=1');
+    expect(workflow).toContain('$marker = "EXPED_INIT_SMOKE_OK:$ExpectedState"');
+    expect(workflow).toContain("Invoke-InitSmoke 'clean'");
+    expect(workflow).toContain("Invoke-InitSmoke 'provisioned'");
+    expect(workflow).toContain('Assert-SmokeHostClean');
+    expect(workflow).toContain('$baselineRoot');
+    expect(workflow).toContain("Move-Item -LiteralPath 'C:\\Exped' -Destination $baselineRoot");
+    expect(workflow).toContain("Move-Item -LiteralPath $baselineRoot -Destination 'C:\\Exped'");
+    expect(workflow).toContain("Get-Service -Name 'ExpedHub'");
+    expect(workflow).toContain("Microsoft\\Windows\\CurrentVersion\\Uninstall");
+    expect(workflow).toMatch(/expand the ["']app["'] constant/i);
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);
