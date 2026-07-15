@@ -3,9 +3,9 @@
 //   promote -> RPC autoriza um candidato; Storage o copia para manifest.json.
 //
 // Uso (CI ou local):
-//   SUPABASE_ANON_KEY=<publica> SUPABASE_ACCESS_TOKEN=<jwt-stage>
+//   SUPABASE_RELEASE_KEY=<sb_secret custom-role stage>
 //     PROJECT_REF=<ref> node scripts/release-hub.mjs stage [versao]
-//   SUPABASE_ANON_KEY=<publica> SUPABASE_ACCESS_TOKEN=<jwt-promote>
+//   SUPABASE_RELEASE_KEY=<sb_secret custom-role promote>
 //     PROJECT_REF=<ref> node scripts/release-hub.mjs promote [versao]
 //     --allow-downgrade --confirm-hub-version 0.3.21
 // Downgrade do app exige ExpedSetup/Hub 0.3.21+ previamente instalado. O
@@ -304,6 +304,16 @@ export function assertReleaseAccessToken(
   return claims;
 }
 
+export function assertReleaseApiKey(releaseKey) {
+  if (
+    typeof releaseKey !== 'string'
+    || !/^sb_secret_[A-Za-z0-9_-]{20,}_[A-Za-z0-9_-]{8}$/.test(releaseKey)
+  ) {
+    throw new Error('SUPABASE_RELEASE_KEY deve ser uma chave sb_secret_ dedicada');
+  }
+  return releaseKey;
+}
+
 function assertPublicAnonKey(anonKey) {
   if (typeof anonKey !== 'string' || anonKey.length === 0) {
     throw new Error('defina SUPABASE_ANON_KEY publica');
@@ -326,6 +336,12 @@ function assertReleaseCredentials(credentials, expectedRole) {
   if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) {
     throw new Error('credenciais Supabase invalidas');
   }
+  if (credentials.releaseKey) {
+    if (credentials.anonKey || credentials.accessToken) {
+      throw new Error('nao misture SUPABASE_RELEASE_KEY com credenciais JWT legadas');
+    }
+    return { releaseKey: assertReleaseApiKey(credentials.releaseKey) };
+  }
   const { anonKey, accessToken } = credentials;
   assertPublicAnonKey(anonKey);
   assertReleaseAccessToken(accessToken, expectedRole);
@@ -334,11 +350,50 @@ function assertReleaseCredentials(credentials, expectedRole) {
 
 function createReleaseClient(ref, credentials, expectedRole, fetchImpl) {
   assertProjectRef(ref);
-  const { anonKey, accessToken } = assertReleaseCredentials(credentials, expectedRole);
-  return createClient(`https://${ref}.supabase.co`, anonKey, {
-    accessToken: async () => accessToken,
+  const validated = assertReleaseCredentials(credentials, expectedRole);
+  if (validated.releaseKey) {
+    return createClient(`https://${ref}.supabase.co`, validated.releaseKey, {
+      global: { fetch: fetchImpl },
+    });
+  }
+  return createClient(`https://${ref}.supabase.co`, validated.anonKey, {
+    accessToken: async () => validated.accessToken,
     global: { fetch: fetchImpl },
   });
+}
+
+function releaseCredentialSecret(credentials) {
+  return credentials.releaseKey || credentials.accessToken;
+}
+
+function releaseRequestHeaders(credentials) {
+  const apiKey = credentials.releaseKey || credentials.anonKey;
+  const authorization = credentials.releaseKey || credentials.accessToken;
+  return {
+    apikey: apiKey,
+    authorization: `Bearer ${authorization}`,
+  };
+}
+
+async function assertReleaseClientAccess(client, credentials, expectedRole) {
+  if (!credentials.releaseKey) return;
+  const { data, error } = await client.rpc('assert_hub_release_access', {
+    p_expected_role: expectedRole,
+  });
+  if (error) {
+    const detail = redactDetail(error.message, [credentials.releaseKey]);
+    throw new Error(
+      `credencial de release nao comprovou a role ${expectedRole}`
+      + `${detail ? `: ${detail}` : ''}`,
+    );
+  }
+  if (
+    data?.role !== expectedRole
+    || typeof data?.subject !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.subject)
+  ) {
+    throw new Error(`credencial de release retornou identidade invalida para ${expectedRole}`);
+  }
 }
 
 function relativeFiles(dir, prefix = '') {
@@ -615,9 +670,15 @@ export async function uploadImmutableZip(
 ) {
   assertProjectRef(ref);
   if (!versaoValida(version)) throw new Error(`versao invalida: ${version}`);
-  const { accessToken } = assertReleaseCredentials(credentials, STAGE_ROLE);
+  const validatedCredentials = assertReleaseCredentials(credentials, STAGE_ROLE);
   if (!sourceShaValido(sourceSha)) throw new Error('source_sha invalido');
-  const releaseClient = client || createReleaseClient(ref, credentials, STAGE_ROLE, fetchImpl);
+  const releaseClient = client || createReleaseClient(
+    ref,
+    validatedCredentials,
+    STAGE_ROLE,
+    fetchImpl,
+  );
+  await assertReleaseClientAccess(releaseClient, validatedCredentials, STAGE_ROLE);
   const zipBuffer = Buffer.from(zip);
   const sha256 = sha256Buffer(zipBuffer);
   const objectPath = `${WINDOWS_ARTIFACT_PREFIX}/${version}.zip`;
@@ -647,7 +708,7 @@ export async function uploadImmutableZip(
   if (!error) return { uploaded: true, reused: false, sha256 };
 
   const status = storageErrorStatus(error);
-  const detail = redactDetail(error.message, [accessToken]);
+  const detail = redactDetail(error.message, [releaseCredentialSecret(validatedCredentials)]);
   if (status === 400 || status === 409) {
     const raced = await fetchExistingZip(ref, version, fetchImpl);
     if (raced) {
@@ -667,7 +728,7 @@ async function uploadImmutableApprovalObject(
   fetchImpl,
   client,
 ) {
-  const { accessToken } = assertReleaseCredentials(credentials, STAGE_ROLE);
+  const validatedCredentials = assertReleaseCredentials(credentials, STAGE_ROLE);
   const existing = await fetchPublicObject(ref, spec.objectPath, fetchImpl);
   if (existing.status === 200) {
     const remote = Buffer.from(await existing.arrayBuffer());
@@ -692,7 +753,7 @@ async function uploadImmutableApprovalObject(
   if (!error) return;
 
   const status = storageErrorStatus(error);
-  const detail = redactDetail(error.message, [accessToken]);
+  const detail = redactDetail(error.message, [releaseCredentialSecret(validatedCredentials)]);
   if (status === 400 || status === 409) {
     const raced = await fetchPublicObject(ref, spec.objectPath, fetchImpl);
     if (raced.status === 200) {
@@ -746,7 +807,7 @@ export async function stageRelease(
     p_release: approval,
   });
   if (error) {
-    const detail = redactDetail(error.message, [credentials.accessToken]);
+    const detail = redactDetail(error.message, [releaseCredentialSecret(credentials)]);
     throw new Error(`registro do artifact aprovado falhou${detail ? `: ${detail}` : ''}`);
   }
   if (!isDeepStrictEqual(data, approval)) {
@@ -966,8 +1027,7 @@ async function copyAuthorizedManifest(
     {
       method: 'POST',
       headers: {
-        apikey: credentials.anonKey,
-        authorization: `Bearer ${credentials.accessToken}`,
+        ...releaseRequestHeaders(credentials),
         'content-type': 'application/json',
         'x-upsert': 'true',
       },
@@ -1072,13 +1132,15 @@ export async function promoteRelease(
     artifactPath,
   });
   const client = createReleaseClient(ref, validatedCredentials, PROMOTION_ROLE, fetchImpl);
+  await assertReleaseClientAccess(client, validatedCredentials, PROMOTION_ROLE);
   await verifyApprovedReleaseObjects(ref, client, approval, artifact, fetchImpl);
+  const credentialSecret = releaseCredentialSecret(validatedCredentials);
   const observed = await observeLegacyManifest(ref, { fetchImpl });
   await initializePromotionState(
     client,
     ref,
     observed,
-    validatedCredentials.accessToken,
+    credentialSecret,
   );
   const directive = await authorizePromotion(
     client,
@@ -1086,7 +1148,7 @@ export async function promoteRelease(
     approval,
     allowDowngrade,
     minimumHubVersion,
-    validatedCredentials.accessToken,
+    credentialSecret,
   );
 
   if (directive.requiresCopy) {
@@ -1101,7 +1163,7 @@ export async function promoteRelease(
     client,
     approval,
     directive,
-    validatedCredentials.accessToken,
+    credentialSecret,
   );
   logger.log('Manifest promoted:', JSON.stringify(manifest));
   return manifest;
@@ -1122,13 +1184,18 @@ async function main() {
   );
 
   const ref = process.env.PROJECT_REF;
-  const credentials = {
-    anonKey: process.env.SUPABASE_ANON_KEY,
-    accessToken: process.env.SUPABASE_ACCESS_TOKEN,
-  };
-  if (!ref || !credentials.anonKey || !credentials.accessToken) {
+  const credentials = process.env.SUPABASE_RELEASE_KEY
+    ? { releaseKey: process.env.SUPABASE_RELEASE_KEY }
+    : {
+        anonKey: process.env.SUPABASE_ANON_KEY,
+        accessToken: process.env.SUPABASE_ACCESS_TOKEN,
+      };
+  if (
+    !ref
+    || (!credentials.releaseKey && (!credentials.anonKey || !credentials.accessToken))
+  ) {
     throw new Error(
-      'defina PROJECT_REF, SUPABASE_ANON_KEY e SUPABASE_ACCESS_TOKEN custom-role',
+      'defina PROJECT_REF e SUPABASE_RELEASE_KEY custom-role',
     );
   }
 

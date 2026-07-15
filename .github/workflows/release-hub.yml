@@ -136,8 +136,7 @@ jobs:
           RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
           RELEASE_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
-          SUPABASE_ANON_KEY: ${{ vars.HUB_STAGE_SUPABASE_ANON_KEY }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_STAGE_ACCESS_TOKEN }}
+          SUPABASE_RELEASE_KEY: ${{ secrets.HUB_STAGE_SUPABASE_RELEASE_KEY }}
         run: |
           export PATH="/usr/bin:$PATH"
           command -v zip

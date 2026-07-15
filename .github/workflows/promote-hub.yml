@@ -96,8 +96,7 @@ jobs:
           RELEASE_ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_VERSION: ${{ inputs.version }}
-          SUPABASE_ANON_KEY: ${{ vars.HUB_PROMOTION_SUPABASE_ANON_KEY }}
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_PROMOTION_ACCESS_TOKEN }}
+          SUPABASE_RELEASE_KEY: ${{ secrets.HUB_PROMOTION_SUPABASE_RELEASE_KEY }}
         run: |
           ARGS=(promote "$RELEASE_VERSION")
           if [ "$ALLOW_DOWNGRADE" = "true" ]; then
