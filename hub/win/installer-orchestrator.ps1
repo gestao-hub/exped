@@ -3,6 +3,7 @@
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet('PreflightUser', 'SnapshotHub', 'RestoreHub', 'FinalizeHub',
+        'SuspendLegacyWatchdog', 'RestoreLegacyWatchdog',
         'RollbackAgentUrlAcl', 'QueryHubRunning', 'QueryProvisionedConfig', 'StopHub', 'StartHub',
         'ProtectCredentials', 'StampHubVersion', 'IssueProvisionCapability',
         'VerifyCompleteStatus')]
@@ -11,6 +12,8 @@ param(
     [string]$TransactionDir = '',
     [string]$CredentialsFile = '',
     [string]$ServiceName = 'ExpedHub',
+    [string]$LegacyWatchdogTaskName = 'ExpedWatchdog',
+    [string]$LegacyWatchdogTaskPath = '\',
     [string]$AppVersion = '',
     [string]$InstallerTransactionId = '',
     [int]$StatusTimeoutSeconds = 180
@@ -19,7 +22,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 $script:IsWindowsPlatform = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
-$script:HubTransactionalDirectories = @('app', 'hub', 'scripts', 'supabase', 'bin', 'cert')
+$script:HubTransactionalDirectories = @('app', 'hub', 'scripts', 'supabase', 'bin', 'cert', 'agent-stage')
 $script:HubTransactionalFiles = @('config.json', 'rootCA-Exped.crt', 'watchdog.ps1')
 
 function Test-UserSid($Sid) {
@@ -296,6 +299,19 @@ function Copy-HubTreeExact($Source, $Destination) {
 function Get-HubService {
     if (-not $script:IsWindowsPlatform) { return $null }
     return Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+}
+
+function Get-LegacyWatchdogTask {
+    if (-not $script:IsWindowsPlatform) { return $null }
+    $tasks = @(
+        Get-ScheduledTask -TaskName $LegacyWatchdogTaskName `
+            -TaskPath $LegacyWatchdogTaskPath -ErrorAction SilentlyContinue
+    )
+    if ($tasks.Count -gt 1) {
+        throw "Mais de uma tarefa watchdog corresponde a $LegacyWatchdogTaskPath$LegacyWatchdogTaskName."
+    }
+    if ($tasks.Count -eq 1) { return $tasks[0] }
+    return $null
 }
 
 function Test-ProvisionedCloudConfig {
@@ -598,6 +614,69 @@ function Restore-HubServiceSnapshot($State) {
     }
 }
 
+function Suspend-LegacyWatchdogTask {
+    $state = Read-HubSnapshotState
+    Assert-LegacyWatchdogSnapshotState $state
+    if (-not $script:IsWindowsPlatform -or -not [bool]$state.LegacyWatchdogTaskExistedBefore) {
+        return
+    }
+
+    $task = Get-LegacyWatchdogTask
+    if (-not $task) {
+        throw "Tarefa watchdog preexistente desapareceu: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+    }
+    $wasRunning = "$($task.State)" -eq 'Running'
+    Disable-ScheduledTask -TaskName $LegacyWatchdogTaskName `
+        -TaskPath $LegacyWatchdogTaskPath -ErrorAction Stop | Out-Null
+
+    $task = Get-LegacyWatchdogTask
+    if ($wasRunning -or ($task -and "$($task.State)" -eq 'Running')) {
+        Stop-ScheduledTask -TaskName $LegacyWatchdogTaskName `
+            -TaskPath $LegacyWatchdogTaskPath -ErrorAction Stop
+    }
+
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $task = Get-LegacyWatchdogTask
+        if (-not $task) {
+            throw "Tarefa watchdog desapareceu durante a suspensao: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+        }
+        if ("$($task.State)" -ne 'Running') { break }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    if ("$($task.State)" -eq 'Running') {
+        throw "Tarefa watchdog continuou em execucao apos a suspensao: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+    }
+    if ("$($task.State)" -ne 'Disabled') {
+        throw "Tarefa watchdog nao ficou desabilitada: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+    }
+}
+
+function Restore-LegacyWatchdogTaskState($State) {
+    if (-not $script:IsWindowsPlatform -or -not [bool]$State.LegacyWatchdogTaskExistedBefore) {
+        return
+    }
+
+    $task = Get-LegacyWatchdogTask
+    if (-not $task) {
+        throw "Tarefa watchdog preexistente desapareceu: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+    }
+    if ([bool]$State.LegacyWatchdogTaskEnabledBefore) {
+        Enable-ScheduledTask -TaskName $LegacyWatchdogTaskName `
+            -TaskPath $LegacyWatchdogTaskPath -ErrorAction Stop | Out-Null
+    } else {
+        Disable-ScheduledTask -TaskName $LegacyWatchdogTaskName `
+            -TaskPath $LegacyWatchdogTaskPath -ErrorAction Stop | Out-Null
+    }
+
+    $task = Get-LegacyWatchdogTask
+    $enabled = "$($task.State)" -ne 'Disabled'
+    if ($enabled -ne [bool]$State.LegacyWatchdogTaskEnabledBefore) {
+        throw "Estado habilitado da tarefa watchdog nao foi restaurado: $LegacyWatchdogTaskPath$LegacyWatchdogTaskName"
+    }
+}
+
 function New-HubSnapshot {
     if (-not $TransactionDir) { throw 'TransactionDir obrigatorio para SnapshotHub.' }
     if (Test-Path -LiteralPath $TransactionDir) {
@@ -662,6 +741,11 @@ function New-HubSnapshot {
         $serviceExistedBefore -and
         $service.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running
     )
+    $legacyWatchdogTask = Get-LegacyWatchdogTask
+    $legacyWatchdogTaskExistedBefore = $null -ne $legacyWatchdogTask
+    $legacyWatchdogTaskEnabledBefore = (
+        $legacyWatchdogTaskExistedBefore -and "$($legacyWatchdogTask.State)" -ne 'Disabled'
+    )
     $registryServiceBackup = ''
     $registryServiceBackupLength = 0
     $registryServiceBackupSha256 = ''
@@ -694,6 +778,10 @@ function New-HubSnapshot {
         ConfigAclSddl = $configAclSddl
         ServiceExistedBefore = $serviceExistedBefore
         ServiceWasRunningBefore = $serviceWasRunningBefore
+        LegacyWatchdogTaskName = $LegacyWatchdogTaskName
+        LegacyWatchdogTaskPath = $LegacyWatchdogTaskPath
+        LegacyWatchdogTaskExistedBefore = $legacyWatchdogTaskExistedBefore
+        LegacyWatchdogTaskEnabledBefore = $legacyWatchdogTaskEnabledBefore
         RegistryServiceBackup = $registryServiceBackup
         RegistryServiceBackupLength = $registryServiceBackupLength
         RegistryServiceBackupSha256 = $registryServiceBackupSha256
@@ -795,7 +883,29 @@ function Assert-HubTreeBackup($Entry) {
     }
 }
 
+function Assert-LegacyWatchdogSnapshotState($State) {
+    if (-not [string]::Equals(
+        "$($State.LegacyWatchdogTaskName)", $LegacyWatchdogTaskName,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or -not [string]::Equals(
+        "$($State.LegacyWatchdogTaskPath)", $LegacyWatchdogTaskPath,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw 'Snapshot truncado: identidade da tarefa watchdog diverge.'
+    }
+    if ($null -eq $State.PSObject.Properties['LegacyWatchdogTaskExistedBefore'] -or
+        $null -eq $State.PSObject.Properties['LegacyWatchdogTaskEnabledBefore']) {
+        throw 'Snapshot truncado: estado da tarefa watchdog ausente.'
+    }
+    if (-not [bool]$State.LegacyWatchdogTaskExistedBefore -and
+        [bool]$State.LegacyWatchdogTaskEnabledBefore) {
+        throw 'Snapshot truncado: tarefa watchdog ausente nao pode estar habilitada.'
+    }
+}
+
 function Assert-HubSnapshotComplete($State) {
+    Assert-LegacyWatchdogSnapshotState $State
+
     $directories = @($State.Directories)
     if ($directories.Count -ne $script:HubTransactionalDirectories.Count) {
         throw 'Snapshot truncado: lista de diretorios transacionais incompleta.'
@@ -1006,10 +1116,17 @@ function Restore-HubSnapshot {
     } catch {
         $serviceFailure = $_
     }
-    if ($firewallFailure -or $serviceFailure) {
+    $watchdogFailure = $null
+    try {
+        Restore-LegacyWatchdogTaskState $state
+    } catch {
+        $watchdogFailure = $_
+    }
+    if ($firewallFailure -or $serviceFailure -or $watchdogFailure) {
         $firewallMessage = if ($firewallFailure) { $firewallFailure.Exception.Message } else { 'ok' }
         $serviceMessage = if ($serviceFailure) { $serviceFailure.Exception.Message } else { 'ok' }
-        throw "Rollback incompleto. Firewall=$firewallMessage Servico=$serviceMessage"
+        $watchdogMessage = if ($watchdogFailure) { $watchdogFailure.Exception.Message } else { 'ok' }
+        throw "Rollback incompleto. Firewall=$firewallMessage Servico=$serviceMessage Watchdog=$watchdogMessage"
     }
 }
 
@@ -1286,6 +1403,13 @@ try {
     switch ($Operation) {
         'PreflightUser' { Assert-OriginalInteractiveUser; break }
         'SnapshotHub' { New-HubSnapshot; break }
+        'SuspendLegacyWatchdog' { Suspend-LegacyWatchdogTask; break }
+        'RestoreLegacyWatchdog' {
+            $state = Read-HubSnapshotState
+            Assert-LegacyWatchdogSnapshotState $state
+            Restore-LegacyWatchdogTaskState $state
+            break
+        }
         'RestoreHub' { Restore-HubSnapshot; break }
         'RollbackAgentUrlAcl' { Rollback-AgentUrlAcl; break }
         'StampHubVersion' { Set-HubVersionAtomically; break }

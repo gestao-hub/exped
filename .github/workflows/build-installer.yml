@@ -127,10 +127,18 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP "exped-snapshot-root-$PID"
           $transaction = 'C:\ExpedHubTxn-smoke-' + [Guid]::NewGuid().ToString('N')
           $serviceName = "ExpedHubSmoke$PID$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+          $watchdogTaskName = "ExpedWatchdogSmoke$PID$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
           $serviceCreated = $false
+          $watchdogTaskCreated = $false
           $relativeDeepPath = 'bin\pgsql\pgAdmin 4\web\pgadmin\browser\server_groups\servers\databases\foreign_data_wrappers\foreign_servers\user_mappings\templates\user_mappings\sql'
           $deepPath = Join-Path $root $relativeDeepPath
           try {
+            $watchdogAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\cmd.exe" `
+              -Argument '/c exit 0'
+            $watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddHours(1)
+            Register-ScheduledTask -TaskName $watchdogTaskName -Action $watchdogAction `
+              -Trigger $watchdogTrigger -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+            $watchdogTaskCreated = $true
             $createOutput = @(& sc.exe create $serviceName `
               binPath= "$env:SystemRoot\System32\cmd.exe /c exit 0" `
               start= demand 2>&1 | ForEach-Object { "$_" })
@@ -152,7 +160,8 @@ jobs:
               -Operation SnapshotHub `
               -Root $root `
               -TransactionDir $transaction `
-              -ServiceName $serviceName
+              -ServiceName $serviceName `
+              -LegacyWatchdogTaskName $watchdogTaskName
             if ($LASTEXITCODE -ne 0) {
               throw "Snapshot transacional falhou com exit code $LASTEXITCODE."
             }
@@ -168,10 +177,28 @@ jobs:
             if (-not $state.ServiceExistedBefore -or $state.ServiceWasRunningBefore) {
               throw 'Snapshot nao registrou corretamente o servico descartavel parado.'
             }
+            if (-not $state.LegacyWatchdogTaskExistedBefore -or
+                -not $state.LegacyWatchdogTaskEnabledBefore) {
+              throw 'Snapshot nao registrou corretamente o watchdog descartavel habilitado.'
+            }
             $aclPath = Join-Path $transaction 'service-acl.json'
             $aclState = Get-Content -Raw -LiteralPath $aclPath | ConvertFrom-Json
             if (@($aclState.Keys).Count -lt 3) {
               throw 'Snapshot nao capturou as ACLs da arvore do servico descartavel.'
+            }
+
+            & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+              -File 'hub\win\installer-orchestrator.ps1' `
+              -Operation SuspendLegacyWatchdog `
+              -Root $root `
+              -TransactionDir $transaction `
+              -ServiceName $serviceName `
+              -LegacyWatchdogTaskName $watchdogTaskName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Suspensao do watchdog descartavel falhou com exit code $LASTEXITCODE."
+            }
+            if ((Get-ScheduledTask -TaskName $watchdogTaskName).State -ne 'Disabled') {
+              throw 'Watchdog descartavel nao ficou desabilitado durante a transacao.'
             }
 
             [IO.File]::WriteAllText($deepProbe, 'mutated')
@@ -183,7 +210,8 @@ jobs:
               -Operation RestoreHub `
               -Root $root `
               -TransactionDir $transaction `
-              -ServiceName $serviceName
+              -ServiceName $serviceName `
+              -LegacyWatchdogTaskName $watchdogTaskName
             if ($LASTEXITCODE -ne 0) {
               throw "Rollback transacional falhou com exit code $LASTEXITCODE."
             }
@@ -199,6 +227,9 @@ jobs:
             if (-not $restoredService -or $restoredService.Status -ne 'Stopped') {
               throw 'Rollback nao preservou o servico descartavel parado.'
             }
+            if ((Get-ScheduledTask -TaskName $watchdogTaskName).State -eq 'Disabled') {
+              throw 'Rollback nao restaurou o watchdog descartavel habilitado.'
+            }
           } finally {
             if ($serviceCreated -or (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
               $null = & sc.exe delete $serviceName 2>&1
@@ -210,8 +241,16 @@ jobs:
             }
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue
+            if ($watchdogTaskCreated -or
+                (Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue)) {
+              Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false `
+                -ErrorAction SilentlyContinue
+            }
             if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
               throw "Servico descartavel continuou registrado: $serviceName"
+            }
+            if (Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue) {
+              throw "Watchdog descartavel continuou registrado: $watchdogTaskName"
             }
           }
 
@@ -366,6 +405,106 @@ jobs:
           if ($process.ExitCode -eq 0) {
             throw 'O smoke Hub-only deve encerrar intencionalmente dentro de InitializeWizard.'
           }
+
+      - name: Smoke transactional installer failure and rollback
+        shell: powershell
+        run: |
+          function Remove-SmokeRegistrations {
+            foreach ($path in @(
+              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Exped_is1',
+              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Exped Hub_is1',
+              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Exped_is1',
+              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Exped Hub_is1'
+            )) {
+              Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Invoke-TransactionFailureSmoke([string]$Installer, [string]$Label) {
+            $root = 'C:\Exped'
+            $log = Join-Path $env:RUNNER_TEMP "exped-transaction-failure-$Label.log"
+            $transactionsBefore = @(Get-ChildItem 'C:\' -Directory -Filter 'ExpedHubTxn-exped-*' `
+              -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            try {
+              Remove-SmokeRegistrations
+              Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Path "$root\app" -Force | Out-Null
+              New-Item -ItemType Directory -Path "$root\data" -Force | Out-Null
+              $config = @{
+                version = 'failure-smoke-baseline'
+                cloud = @{
+                  apiBase = 'https://smoke.invalid'
+                  deviceToken = 'ci-smoke-token'
+                }
+              } | ConvertTo-Json -Depth 4
+              [IO.File]::WriteAllText("$root\config.json", $config,
+                (New-Object Text.UTF8Encoding($false)))
+              [IO.File]::WriteAllText("$root\app\baseline.txt", 'baseline-app')
+              [IO.File]::WriteAllText("$root\watchdog.ps1", '# baseline-watchdog')
+              [IO.File]::WriteAllText("$root\data\must-survive.txt", 'mutable-data')
+              $expected = @{
+                Config = (Get-FileHash "$root\config.json" -Algorithm SHA256).Hash
+                App = (Get-FileHash "$root\app\baseline.txt" -Algorithm SHA256).Hash
+                Watchdog = (Get-FileHash "$root\watchdog.ps1" -Algorithm SHA256).Hash
+                Data = (Get-FileHash "$root\data\must-survive.txt" -Algorithm SHA256).Hash
+              }
+
+              $arguments = @(
+                '/VERYSILENT',
+                '/SUPPRESSMSGBOXES',
+                '/NORESTART',
+                '/SP-',
+                '/transactionfailsmoke=1',
+                "/LOG=$log"
+              )
+              $process = Start-Process -FilePath $Installer -ArgumentList $arguments `
+                -Wait -PassThru
+              $content = Get-Content -LiteralPath $log -Raw
+              if ($content -notmatch 'EXPED_TRANSACTION_FAILURE_SMOKE') {
+                Write-Host $content
+                throw "$Label nao percorreu a falha transacional injetada."
+              }
+              if ($process.ExitCode -ne 4) {
+                Write-Host $content
+                throw "$Label retornou exit code $($process.ExitCode), esperado 4."
+              }
+              foreach ($entry in @(
+                @{ Name = 'Config'; Path = "$root\config.json" },
+                @{ Name = 'App'; Path = "$root\app\baseline.txt" },
+                @{ Name = 'Watchdog'; Path = "$root\watchdog.ps1" },
+                @{ Name = 'Data'; Path = "$root\data\must-survive.txt" }
+              )) {
+                if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf) -or
+                    (Get-FileHash $entry.Path -Algorithm SHA256).Hash -ne $expected[$entry.Name]) {
+                  throw "$Label nao restaurou os bytes de $($entry.Name)."
+                }
+              }
+              foreach ($unexpected in @('hub', 'scripts', 'supabase', 'bin', 'cert', 'agent-stage')) {
+                if (Test-Path -LiteralPath (Join-Path $root $unexpected)) {
+                  throw "$Label deixou payload novo apos rollback: $unexpected"
+                }
+              }
+              if (Get-Service -Name 'ExpedHub' -ErrorAction SilentlyContinue) {
+                throw "$Label deixou o servico ExpedHub registrado."
+              }
+              if (Get-Process -Name 'ExpedAgent' -ErrorAction SilentlyContinue) {
+                throw "$Label iniciou o ExpedAgent antes do rollback."
+              }
+            } finally {
+              Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+              $transactionsAfter = @(Get-ChildItem 'C:\' -Directory -Filter 'ExpedHubTxn-exped-*' `
+                -ErrorAction SilentlyContinue | ForEach-Object FullName)
+              foreach ($transaction in @($transactionsAfter | Where-Object {
+                $transactionsBefore -notcontains $_
+              })) {
+                Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue
+              }
+              Remove-SmokeRegistrations
+            }
+          }
+
+          Invoke-TransactionFailureSmoke 'hub\win\Output\ExpedSetup.exe' 'unified'
+          Invoke-TransactionFailureSmoke 'hub\win\Output\ExpedHubSetup.exe' 'hub-only'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

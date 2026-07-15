@@ -202,6 +202,7 @@ var
   AgentUrlAclRollbackSucceeded: Boolean;
   RollbackDone: Boolean;
   ExistingProvisionedConfig: Boolean;
+  TransactionFailureExitCode: Integer;
 
 function PowerShellExe: String;
 begin
@@ -613,6 +614,12 @@ begin
     Result := ManualCheck.Checked;
 end;
 
+function IsTransactionFailureSmoke: Boolean;
+begin
+  Result := WizardSilent() and
+    (Trim(ExpandConstant('{param:transactionfailsmoke}')) = '1');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
@@ -630,6 +637,7 @@ begin
   CredentialsFile := '';
   ProvisionCapabilityFile := '';
   ReceiptId := '';
+  TransactionFailureExitCode := 0;
   try
     if OrchestratorPath = '' then
     begin
@@ -640,8 +648,9 @@ begin
     HubTransactionDir := ExpandConstant('{sd}\ExpedHubTxn-') + GetReceiptId('');
 
     { Nenhum stop, download, escrita persistente ou redeem ocorre antes disto. }
-    RunOriginalOrchestratorChecked('PreflightUser', '',
-      'Preflight do usuario original falhou');
+    if not IsTransactionFailureSmoke then
+      RunOriginalOrchestratorChecked('PreflightUser', '',
+        'Preflight do usuario original falhou');
     ExistingProvisionedConfig := QueryProvisionedConfig;
     if WizardSilent() and (not ExistingProvisionedConfig) then
     begin
@@ -652,6 +661,9 @@ begin
       '-TransactionDir ' + QuoteArg(HubTransactionDir),
       'Snapshot do payload/config/servico falhou');
     HubSnapshotCreated := True;
+    RunOrchestratorChecked('SuspendLegacyWatchdog',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir),
+      'Nao foi possivel suspender o watchdog legado');
     RunOrchestratorChecked('StopHub', '', 'Nao foi possivel parar o ExpedHub');
     if HubWasRunning then Sleep(2000);
   except
@@ -691,6 +703,8 @@ var
 begin
   try
     try
+    if IsTransactionFailureSmoke then
+      RaiseException('EXPED_TRANSACTION_FAILURE_SMOKE');
     ConfigFile := ExpandConstant('{app}\config.json');
     RunOrchestratorChecked('StampHubVersion',
       '-AppVersion ' + QuoteArg('{#MyAppVersion}'),
@@ -774,6 +788,10 @@ begin
     ExecOriginalUserChecked(PowerShellExe, Params, ExpandConstant('{app}'),
       'Start do agente no usuario original falhou');
 
+    RunOrchestratorChecked('RestoreLegacyWatchdog',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir),
+      'Nao foi possivel restaurar o estado do watchdog legado');
+
     { Nenhum journal sai antes de /status provar toda a cadeia operacional. }
     if (not Exec(PowerShellExe, OrchestratorParams('VerifyCompleteStatus',
       '-TransactionDir ' + QuoteArg(HubTransactionDir)), ExpandConstant('{tmp}'),
@@ -801,6 +819,7 @@ begin
     InstallCompleted := True;
   except
     FailureMessage := GetExceptionMessage;
+    TransactionFailureExitCode := 4;
     if RollbackAgentUrlAclAfterFailure then
       RollbackAgentAfterFailure
     else
@@ -831,6 +850,11 @@ begin
     RollbackProvisionAfterFailure;
     RestoreHubAfterFailure;
   end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := TransactionFailureExitCode;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
