@@ -146,11 +146,13 @@ function Write-BytesAtomically($Path, [byte[]]$Bytes) {
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
     }
     $tempPath = "$fullPath.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    $replaceBackupPath = "$fullPath.$PID.$([Guid]::NewGuid().ToString('N')).replace.bak"
     try {
         [System.IO.File]::WriteAllBytes($tempPath, $Bytes)
         if (Test-Path -LiteralPath $fullPath) {
             if ($script:IsWindowsPlatform) {
-                [System.IO.File]::Replace($tempPath, $fullPath, $null)
+                [System.IO.File]::Replace($tempPath, $fullPath, $replaceBackupPath)
+                [System.IO.File]::Delete($replaceBackupPath)
             } else {
                 [System.IO.File]::Move($tempPath, $fullPath, $true)
             }
@@ -159,6 +161,9 @@ function Write-BytesAtomically($Path, [byte[]]$Bytes) {
         }
     } finally {
         if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+        if (Test-Path -LiteralPath $replaceBackupPath) {
+            Remove-Item -LiteralPath $replaceBackupPath -Force
+        }
     }
 }
 
