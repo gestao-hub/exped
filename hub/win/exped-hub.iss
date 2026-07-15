@@ -288,6 +288,7 @@ var
   Content: AnsiString;
   S: String;
   Secret: String;
+  FailureMessage: String;
   ResultCode: Integer;
 begin
   try
@@ -328,8 +329,9 @@ begin
       Log('AVISO: backup do Hub foi preservado apos instalacao concluida.');
     InstallCompleted := True;
   except
+    FailureMessage := GetExceptionMessage;
     RestoreHubAfterFailure;
-    raise;
+    RaiseException(FailureMessage);
   end;
 end;
 

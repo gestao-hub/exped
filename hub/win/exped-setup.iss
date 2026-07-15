@@ -661,6 +661,7 @@ var
   S: String;
   Secret: String;
   Params: String;
+  FailureMessage: String;
   ResultCode: Integer;
 begin
   try
@@ -774,13 +775,14 @@ begin
       Log('AVISO: receipt/backup do agente foram preservados apos instalacao concluida.');
     InstallCompleted := True;
   except
+    FailureMessage := GetExceptionMessage;
     if RollbackAgentUrlAclAfterFailure then
       RollbackAgentAfterFailure
     else
       Log('AVISO: receipt do agente foi preservado porque a URL ACL anterior nao foi restaurada.');
     RollbackProvisionAfterFailure;
     RestoreHubAfterFailure;
-    raise;
+    RaiseException(FailureMessage);
     end;
   finally
     if (CredentialsFile <> '') and FileExists(CredentialsFile) then

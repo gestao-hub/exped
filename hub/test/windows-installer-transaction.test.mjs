@@ -196,11 +196,12 @@ describe('orquestração transacional do Inno', () => {
     const install = routine(unified, 'RunTransactionalInstall');
     const restore = routine(unified, 'RestoreHubAfterFailure');
     expectOrder(install.slice(install.indexOf('except')), [
+      'GetExceptionMessage',
       'RollbackAgentUrlAclAfterFailure',
       'RollbackAgentAfterFailure',
       'RollbackProvisionAfterFailure',
       'RestoreHubAfterFailure',
-      'raise',
+      'RaiseException',
     ]);
     expectOrder(routine(unified, 'DeinitializeSetup'), [
       'RollbackAgentUrlAclAfterFailure',
@@ -219,6 +220,18 @@ describe('orquestração transacional do Inno', () => {
     expect(orchestrator).toMatch(/Restore-HubServiceSnapshot[\s\S]*Start-Service/i);
     expect(unified).toContain('SnapshotHub');
     expect(unified).toContain('FinalizeHub');
+  });
+
+  it('relanca a falha original com a API suportada pelo Pascal Script', () => {
+    for (const installer of [unified, hubOnly]) {
+      const transaction = routine(installer, 'RunTransactionalInstall');
+      expect(transaction).not.toMatch(/\braise\s*;/i);
+      expectOrder(transaction.slice(transaction.indexOf('except')), [
+        'GetExceptionMessage',
+        'RestoreHubAfterFailure',
+        'RaiseException',
+      ]);
+    }
   });
 
   it('limita o snapshot ao payload executavel/config/binarios e exclui estado mutavel', () => {
