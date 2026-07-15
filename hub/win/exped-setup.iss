@@ -408,6 +408,15 @@ begin
   { {app} ainda nao existe nesta fase do Inno; a raiz do produto e fixa. }
   ExistingProvisionedConfig := QueryProvisionedConfigAtRoot('{#InstallRoot}');
 
+  { Smoke de CI: comprova a inicializacao limpa/provisionada sem tocar no host. }
+  if Trim(ExpandConstant('{param:initsmoke}')) = '1' then
+  begin
+    if ExistingProvisionedConfig then
+      RaiseException('EXPED_INIT_SMOKE_OK:provisioned')
+    else
+      RaiseException('EXPED_INIT_SMOKE_OK:clean');
+  end;
+
   { Em modo silencioso a credencial vem somente de /credentialsfile protegido. }
   if WizardSilent() then Exit;
 

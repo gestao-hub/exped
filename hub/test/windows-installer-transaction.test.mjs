@@ -176,11 +176,21 @@ describe('orquestração transacional do Inno', () => {
 
     expect(initializeWizard).toContain("QueryProvisionedConfigAtRoot('{#InstallRoot}')");
     expect(initializeWizard).not.toContain('QueryProvisionedConfig;');
+    expect(initializeWizard).toContain("ExpandConstant('{param:initsmoke}')");
+    expect(initializeWizard).toContain('EXPED_INIT_SMOKE_OK:clean');
+    expect(initializeWizard).toContain('EXPED_INIT_SMOKE_OK:provisioned');
     expect(earlyQuery).toContain('OrchestratorParamsForRoot');
     expect(earlyQuery).not.toContain("ExpandConstant('{app}')");
 
+    expect(workflow).toMatch(/pull_request:\s*\n\s+paths:/);
     expect(workflow).toContain('Smoke unified installer initialization');
-    expect(workflow).toContain('Modo silencioso exige /credentialsfile protegido');
+    expect(workflow).toContain('/initsmoke=1');
+    expect(workflow).toContain('$marker = "EXPED_INIT_SMOKE_OK:$ExpectedState"');
+    expect(workflow).toContain("Invoke-InitSmoke 'clean'");
+    expect(workflow).toContain("Invoke-InitSmoke 'provisioned'");
+    expect(workflow).toContain('Assert-SmokeHostClean');
+    expect(workflow).toContain("Get-Service -Name 'ExpedHub'");
+    expect(workflow).toContain("Microsoft\\Windows\\CurrentVersion\\Uninstall");
     expect(workflow).toMatch(/expand the ["']app["'] constant/i);
   });
 
