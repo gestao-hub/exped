@@ -103,9 +103,12 @@ describe('hardening do instalador Windows', () => {
   });
 
   it('alinha timeout/métodos NSSM ao shutdown e pg_ctl', () => {
+    const serviceEnvironment = routine(install, 'Set-NssmServiceEnvironment');
     expect(install).toMatch(/AppStopMethodConsole['"),\s]+60000/);
     expect(install).toMatch(/AppStopMethodSkip['"),\s]+0/);
-    expect(install).toMatch(/AppKillProcessTree['"),\s]+0/);
+    expect(serviceEnvironment).toMatch(
+      /SetValue\([\s\S]*AppKillProcessTree[\s\S]*\[int\]0[\s\S]*RegistryValueKind\]::DWord/i,
+    );
     expect(install).toMatch(/AppStopMethodWindow/);
     expect(install).toMatch(/AppStopMethodThreads/);
   });

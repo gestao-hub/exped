@@ -456,6 +456,49 @@ function Restore-HubServiceRegistryAcls($Entries) {
     }
 }
 
+function Prepare-HubServiceRegistryForRestore {
+    if (-not $script:IsWindowsPlatform) { return }
+    $baseKey = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
+        )
+        $serviceSubKey = "SYSTEM\CurrentControlSet\Services\$ServiceName"
+        $writeRights = [System.Security.AccessControl.RegistryRights]::ReadKey -bor
+            [System.Security.AccessControl.RegistryRights]::ReadPermissions -bor
+            [System.Security.AccessControl.RegistryRights]::ChangePermissions
+        foreach ($relativePath in @('', 'Parameters')) {
+            $subKeyPath = if ($relativePath) {
+                "$serviceSubKey\$relativePath"
+            } else {
+                $serviceSubKey
+            }
+            $key = $null
+            try {
+                $key = $baseKey.OpenSubKey(
+                    $subKeyPath,
+                    [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+                    $writeRights
+                )
+                if ($null -eq $key) {
+                    throw "Subchave ausente ao preparar restauracao: $relativePath"
+                }
+                $security = New-Object System.Security.AccessControl.RegistrySecurity
+                $security.SetSecurityDescriptorSddlForm(
+                    'O:BAG:BAD:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)',
+                    [System.Security.AccessControl.AccessControlSections]::Access
+                )
+                $key.SetAccessControl($security)
+            } finally {
+                if ($null -ne $key) { $key.Dispose() }
+            }
+        }
+    } finally {
+        if ($null -ne $baseKey) { $baseKey.Dispose() }
+    }
+}
+
 function Export-HubServiceSnapshot($Destination, $AclDestination) {
     $serviceKey = "HKLM\SYSTEM\CurrentControlSet\Services\$ServiceName"
     $null = Invoke-NativeChecked 'reg.exe' @('export', $serviceKey, $Destination, '/y')
@@ -602,6 +645,7 @@ function Restore-HubServiceSnapshot($State) {
         throw 'Backup de ACL do registro do servico preexistente esta ausente.'
     }
     $aclState = Get-Content -Raw -LiteralPath $aclBackup | ConvertFrom-Json
+    Prepare-HubServiceRegistryForRestore
     $null = Invoke-NativeChecked 'reg.exe' @('delete', $serviceKey, '/f')
     $null = Invoke-NativeChecked 'reg.exe' @('import', $registryBackup)
     Restore-HubServiceRegistryAcls @($aclState.Keys)

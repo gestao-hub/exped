@@ -158,26 +158,46 @@ function Wait-ExpedHttpsReady($Address, $CertificatePath, [int]$TimeoutSeconds =
     if (-not (Test-Path -LiteralPath $CertificatePath -PathType Leaf)) {
         throw "Certificado HTTPS ausente para validacao: $CertificatePath"
     }
+    if (-not ('ExpedInstallerCertificateValidator' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class ExpedInstallerCertificateValidator
+{
+    public static string ExpectedThumbprint { get; set; }
+    public static readonly RemoteCertificateValidationCallback Callback = Validate;
+
+    private static bool Validate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors)
+    {
+        if (certificate == null || String.IsNullOrWhiteSpace(ExpectedThumbprint)) {
+            return false;
+        }
+        using (var presented = new X509Certificate2(certificate)) {
+            return String.Equals(
+                presented.Thumbprint,
+                ExpectedThumbprint,
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+    }
+}
+'@
+    }
     $expectedCertificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $CertificatePath
     $expectedThumbprint = $expectedCertificate.Thumbprint
     $previousCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-    $callback = {
-        param($sender, $certificate, $chain, $sslPolicyErrors)
-        if ($null -eq $certificate) { return $false }
-        try {
-            $presented = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $certificate
-            return [string]::Equals(
-                $presented.Thumbprint,
-                $expectedThumbprint,
-                [System.StringComparison]::OrdinalIgnoreCase
-            )
-        } catch { return $false }
-    }.GetNewClosure()
     $uri = "https://$Address/login"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastFailure = 'sem resposta'
     try {
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $callback
+        [ExpedInstallerCertificateValidator]::ExpectedThumbprint = $expectedThumbprint
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [ExpedInstallerCertificateValidator]::Callback
         do {
             try {
                 $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 5
@@ -190,6 +210,7 @@ function Wait-ExpedHttpsReady($Address, $CertificatePath, [int]$TimeoutSeconds =
         } while ((Get-Date) -lt $deadline)
     } finally {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCallback
+        [ExpedInstallerCertificateValidator]::ExpectedThumbprint = $null
         $expectedCertificate.Dispose()
     }
     throw "HTTPS nao ficou pronto em $uri. Ultimo erro: $lastFailure"
@@ -215,6 +236,79 @@ function Protect-ExpedNativeArgumentsForLog($Arguments) {
     return ($safe -join ' ')
 }
 
+function Protect-ExpedDiagnosticText($Text) {
+    $safe = "$Text".Replace([char]0, '')
+    if ($null -ne $envMap) {
+        foreach ($entry in @($envMap.GetEnumerator())) {
+            $value = "$($entry.Value)"
+            if ("$($entry.Key)" -match $script:SensitiveEnvNamePattern -and $value) {
+                $safe = $safe.Replace($value, '***')
+            }
+        }
+    }
+    if ($safe.Length -gt 8192) { return $safe.Substring(0, 8192) + '...[truncated]' }
+    return $safe
+}
+
+function Write-InstallFailureJournal($Failure) {
+    if (-not $TransactionDir) { return }
+
+    $transactionPath = [System.IO.Path]::GetFullPath($TransactionDir)
+    $statePath = Join-Path $transactionPath 'hub-state.json'
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
+        throw 'TransactionDir sem snapshot para registrar falha do install-service.'
+    }
+    $snapshot = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    $expectedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    if (-not [string]::Equals(
+        "$($snapshot.Root)", $expectedRoot, [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw 'TransactionDir pertence a outro Root; journal de falha recusado.'
+    }
+
+    $invocation = $Failure.InvocationInfo
+    $journal = [pscustomobject]@{
+        schema = 'exped-install-service-failure-v1'
+        capturedAt = (Get-Date).ToUniversalTime().ToString('o')
+        root = $expectedRoot
+        serviceName = $ServiceName
+        message = Protect-ExpedDiagnosticText $Failure.Exception.Message
+        fullyQualifiedErrorId = Protect-ExpedDiagnosticText $Failure.FullyQualifiedErrorId
+        category = Protect-ExpedDiagnosticText $Failure.CategoryInfo.Category
+        scriptStackTrace = Protect-ExpedDiagnosticText $Failure.ScriptStackTrace
+        invocation = [pscustomobject]@{
+            scriptName = Protect-ExpedDiagnosticText $invocation.ScriptName
+            scriptLineNumber = [int]$invocation.ScriptLineNumber
+            offsetInLine = [int]$invocation.OffsetInLine
+            positionMessage = Protect-ExpedDiagnosticText $invocation.PositionMessage
+        }
+    }
+
+    $journalPath = Join-Path $transactionPath 'install-service-failure.json'
+    $tempPath = "$journalPath.$PID.$([Guid]::NewGuid().ToString('N')).tmp"
+    $replaceBackup = "$journalPath.$PID.$([Guid]::NewGuid().ToString('N')).bak"
+    try {
+        [System.IO.File]::WriteAllText(
+            $tempPath,
+            ($journal | ConvertTo-Json -Depth 8),
+            (New-Object System.Text.UTF8Encoding $false)
+        )
+        $security = New-Object System.Security.AccessControl.FileSecurity
+        $security.SetSecurityDescriptorSddlForm('O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)')
+        Set-Acl -LiteralPath $tempPath -AclObject $security
+        if (Test-Path -LiteralPath $journalPath) {
+            [System.IO.File]::Replace($tempPath, $journalPath, $replaceBackup)
+        } else {
+            [System.IO.File]::Move($tempPath, $journalPath)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+        if (Test-Path -LiteralPath $replaceBackup) {
+            Remove-Item -LiteralPath $replaceBackup -Force
+        }
+    }
+}
+
 function Invoke-NativeChecked($FilePath, $Arguments, $AllowedExitCodes = @(0)) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -230,6 +324,45 @@ function Invoke-NativeChecked($FilePath, $Arguments, $AllowedExitCodes = @(0)) {
         throw "$FilePath falhou ($exitCode): $safeArguments - $safeOutput"
     }
     return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output -join "`n") }
+}
+
+function Start-HubServiceAndWait([int]$TimeoutSeconds = 90) {
+    $startResult = Invoke-NativeChecked -FilePath $Nssm `
+        -Arguments @('start', $ServiceName) -AllowedExitCodes @(0, 1)
+    $service = Get-Service -Name $ServiceName -ErrorAction Stop
+    $pendingDeadline = (Get-Date).AddSeconds(5)
+    do {
+        $service.Refresh()
+        if ($service.Status -in @(
+            [System.ServiceProcess.ServiceControllerStatus]::StartPending,
+            [System.ServiceProcess.ServiceControllerStatus]::Running
+        )) { break }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $pendingDeadline)
+
+    if ($startResult.ExitCode -ne 0 -and $service.Status -notin @(
+        [System.ServiceProcess.ServiceControllerStatus]::StartPending,
+        [System.ServiceProcess.ServiceControllerStatus]::Running
+    )) {
+        $startOutput = "$($startResult.Output)".Replace([char]0, '')
+        throw "NSSM nao iniciou $ServiceName. Estado=$($service.Status). $startOutput"
+    }
+
+    if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        try {
+            $service.WaitForStatus(
+                [System.ServiceProcess.ServiceControllerStatus]::Running,
+                [TimeSpan]::FromSeconds($TimeoutSeconds)
+            )
+        } catch {
+            $service.Refresh()
+            throw "$ServiceName nao ficou Running em ${TimeoutSeconds}s. Estado=$($service.Status). $($_.Exception.Message)"
+        }
+    }
+    $service.Refresh()
+    if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        throw "$ServiceName terminou o start em estado inesperado: $($service.Status)"
+    }
 }
 
 function Ensure-AgentSection($Config, [int]$Port) {
@@ -451,9 +584,16 @@ function Set-NssmServiceEnvironment($EnvironmentMap) {
         # Parameters before writing the token-bearing REG_MULTI_SZ value.
         $security = New-Object System.Security.AccessControl.RegistrySecurity
         $security.SetSecurityDescriptorSddlForm(
-            'O:SYG:SYD:P(A;;KA;;;SY)(A;;KA;;;BA)'
+            'O:SYG:SYD:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)'
         )
         $key.SetAccessControl($security)
+        # NSSM 2.24 le este REG_DWORD, mas algumas builds estaveis nao o
+        # aceitam pela CLI `nssm set`. Grave o contrato direto no registro.
+        $key.SetValue(
+            'AppKillProcessTree',
+            [int]0,
+            [Microsoft.Win32.RegistryValueKind]::DWord
+        )
         $environmentLines = [string[]]@(
             $EnvironmentMap.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }
         )
@@ -766,7 +906,6 @@ $nssmSettings = @(
     @('AppStopMethodConsole', '60000'),
     @('AppStopMethodWindow', '10000'),
     @('AppStopMethodThreads', '10000'),
-    @('AppKillProcessTree', '0'),
     @('AppThrottle', '5000'),
     @('AppRestartDelay', '5000')
 )
@@ -841,7 +980,7 @@ if (Test-Path $Mkcert) {
 # 4. Iniciar o servico
 # ---------------------------------------------------------------------------
 Write-Step "Iniciando servico $ServiceName"
-$null = Invoke-NativeChecked -FilePath $Nssm -Arguments @('start', $ServiceName)
+Start-HubServiceAndWait 90
 Wait-ExpedHttpsReady $ServerIp (Join-Path $CertDir 'server.crt') 90
 
 Write-Host ""
@@ -851,6 +990,8 @@ Write-Host "    Logs:       $LogDir  (service-out.log, service-err.log, maestro.
 Write-Host "    /status:    http://127.0.0.1:$([int]$appPort + 1)/status"
 } catch {
     $failure = $_
+    try { Write-InstallFailureJournal $failure }
+    catch { Write-Warning "Journal da falha do install-service nao foi gravado: $($_.Exception.Message)" }
     foreach ($step in $aclRollbackPlan) {
         try { Invoke-AgentUrlAclStep $step }
         catch { Write-Warning "Rollback de URL ACL falhou: $($_.Exception.Message)" }
@@ -863,7 +1004,7 @@ Write-Host "    /status:    http://127.0.0.1:$([int]$appPort + 1)/status"
     if ($TransactionDir) {
         Write-Warning 'Servico permanece parado para o rollback externo exato do ExpedSetup.'
     } elseif ($serviceExistedBefore -and $serviceWasRunningBefore) {
-        try { $null = Invoke-NativeChecked -FilePath $Nssm -Arguments @('start', $ServiceName) }
+        try { Start-HubServiceAndWait 90 }
         catch { Write-Warning "Restauracao do servico falhou: $($_.Exception.Message)" }
     } elseif (-not $serviceExistedBefore) {
         try {

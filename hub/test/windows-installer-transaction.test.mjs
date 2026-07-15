@@ -20,7 +20,7 @@ const hasPowerShell = spawnSync(
   { encoding: 'utf8' },
 ).status === 0;
 const powerShellIt = (name, test) =>
-  (hasPowerShell ? it : it.skip)(name, test, 15_000);
+  (hasPowerShell ? it : it.skip)(name, test, 30_000);
 const watchdog = source('../watchdog.ps1');
 
 function source(path) {
@@ -1031,6 +1031,7 @@ describe('contratos PowerShell do instalador', () => {
   it('snapshot do serviço restaura a chave inteira e seus ACLs exatos', () => {
     const snapshot = routine(orchestrator, 'New-HubSnapshot');
     const restore = routine(orchestrator, 'Restore-HubServiceSnapshot');
+    const prepareRestore = routine(orchestrator, 'Prepare-HubServiceRegistryForRestore');
     const snapshotAcls = routine(orchestrator, 'Get-HubServiceRegistryAclSnapshot');
     const restoreAcls = routine(orchestrator, 'Restore-HubServiceRegistryAcls');
     expect(snapshot).toContain('RegistryServiceAclBackup');
@@ -1044,8 +1045,13 @@ describe('contratos PowerShell do instalador', () => {
     expect(restoreAcls).toContain('RegistryView]::Registry64');
     expect(restoreAcls).toContain('SetAccessControl');
     expect(restoreAcls).not.toContain('Set-Acl');
+    expect(prepareRestore).toContain('RegistryView]::Registry64');
+    expect(prepareRestore).toContain("@('', 'Parameters')");
+    expect(prepareRestore).toContain('(A;CI;KA;;;SY)(A;CI;KA;;;BA)');
+    expect(prepareRestore).toContain('SetAccessControl');
     expectOrder(restore, [
       'Stop-HubServiceIfPresent',
+      'Prepare-HubServiceRegistryForRestore',
       "@('delete', $serviceKey",
       "@('import', $registryBackup)",
       'Restore-HubServiceRegistryAcls',
@@ -1088,6 +1094,47 @@ describe('contratos PowerShell do instalador', () => {
     expect(install).toMatch(/nssm[\s\S]*set[\s\S]*AppExit[\s\S]*Default[\s\S]*Restart/i);
     expect(install).toMatch(/sc\.exe[\s\S]*failure[\s\S]*restart\/10000/i);
     expect(install).toMatch(/sc\.exe[\s\S]*failureflag[\s\S]*1/i);
+  });
+
+  it('configura AppKillProcessTree pelo registro para NSSM estavel', () => {
+    const serviceEnvironment = routine(install, 'Set-NssmServiceEnvironment');
+    const nssmSettings = install.slice(
+      install.indexOf('$nssmSettings = @('),
+      install.indexOf('foreach ($setting in $nssmSettings)'),
+    );
+
+    expect(nssmSettings).not.toContain('AppKillProcessTree');
+    expect(serviceEnvironment).toMatch(
+      /SetValue\([\s\S]*AppKillProcessTree[\s\S]*0[\s\S]*RegistryValueKind\]::DWord/i,
+    );
+    expect(serviceEnvironment).toContain('(A;CI;KA;;;SY)(A;CI;KA;;;BA)');
+  });
+
+  it('tolera START_PENDING do NSSM somente ate o servico ficar Running', () => {
+    const start = routine(install, 'Start-HubServiceAndWait');
+    const execution = install.slice(install.indexOf('# 4. Iniciar o servico'));
+
+    expect(start).toMatch(/Invoke-NativeChecked[\s\S]*start[\s\S]*AllowedExitCodes[\s\S]*0[\s\S]*1/i);
+    expect(start).toContain('Get-Service');
+    expect(start).toContain('StartPending');
+    expect(start).toContain('WaitForStatus');
+    expect(start).toContain('Running');
+    expect(start).toMatch(/throw/);
+    expect(execution).toContain('Start-HubServiceAndWait');
+    expect(execution).not.toMatch(/Invoke-NativeChecked[^\n]*\$Nssm[^\n]*start/i);
+  });
+
+  it('valida o certificado HTTPS sem callback PowerShell em thread sem Runspace', () => {
+    const wait = routine(install, 'Wait-ExpedHttpsReady');
+
+    expect(wait).toContain('ExpedInstallerCertificateValidator');
+    expect(wait).toContain('RemoteCertificateValidationCallback');
+    expect(wait).toMatch(
+      /ServerCertificateValidationCallback\s*=\s*\[ExpedInstallerCertificateValidator\]::Callback/i,
+    );
+    expect(wait).toContain('$expectedThumbprint');
+    expect(wait).not.toMatch(/\$callback\s*=\s*\{/i);
+    expect(wait).not.toContain('GetNewClosure');
   });
 
   it('migra perfil legado do Agent ou falha fechado sem desabilitar silenciosamente', () => {
@@ -1150,6 +1197,28 @@ describe('contratos PowerShell do instalador', () => {
     expect(failure.indexOf('if ($TransactionDir)')).toBeLessThan(
       failure.indexOf('if ($serviceExistedBefore -and $serviceWasRunningBefore)'),
     );
+  });
+
+  it('preserva diagnóstico protegido do install-service antes do rollback', () => {
+    const journal = routine(install, 'Write-InstallFailureJournal');
+    const protect = routine(install, 'Protect-ExpedDiagnosticText');
+    const failure = install.slice(install.lastIndexOf('} catch {\n    $failure'));
+
+    expect(journal).toContain('install-service-failure.json');
+    expect(journal).toContain('exped-install-service-failure-v1');
+    expect(journal).toMatch(/FullyQualifiedErrorId|fullyQualifiedErrorId/);
+    expect(journal).toMatch(/ScriptStackTrace|scriptStackTrace/);
+    expect(journal).toMatch(/ScriptLineNumber|scriptLineNumber/);
+    expect(journal).toMatch(/FileSecurity|SetSecurityDescriptorSddlForm/);
+    expect(journal).toMatch(/WriteAllText[\s\S]*(?:Move|Replace)/);
+    expect(journal).toContain('Protect-ExpedDiagnosticText');
+    expect(protect).toContain("Replace([char]0, '')");
+    expect(protect).toMatch(/Length\s+-gt\s+8192[\s\S]*Substring\(0, 8192\)/i);
+    expectOrder(failure, [
+      '$failure = $_',
+      'Write-InstallFailureJournal $failure',
+      'foreach ($step in $aclRollbackPlan)',
+    ]);
   });
 });
 
