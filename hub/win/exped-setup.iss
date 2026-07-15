@@ -405,7 +405,7 @@ procedure InitializeWizard;
 begin
   ExtractTemporaryFile('installer-orchestrator.ps1');
   OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
-  { {app} ainda nao existe nesta fase do Inno; a raiz do produto e fixa. }
+  { O caminho de aplicativo ainda nao existe nesta fase; a raiz e fixa. }
   ExistingProvisionedConfig := QueryProvisionedConfigAtRoot('{#InstallRoot}');
 
   { Smoke de CI: comprova a inicializacao limpa/provisionada sem tocar no host. }
