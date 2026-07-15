@@ -1,16 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { PedidoStatus } from '@/lib/types';
-
-const LABELS: Record<PedidoStatus, string> = {
-  rascunho:               'Rascunho',
-  em_financeiro:          'No caixa',
-  pendente:               'Pendente',
-  em_separacao:           'Em separação',
-  em_transporte:          'Em transporte',
-  parcialmente_entregue:  'Parcialmente entregue',
-  finalizado:             'Finalizado',
-  cancelado:              'Cancelado',
-};
+import { PEDIDO_STATUS_LABELS } from '@/lib/pedidos/historico';
 
 const STYLES: Record<PedidoStatus, string> = {
   rascunho:               'bg-status-rascunho/12     text-status-rascunho     ring-status-rascunho/25',
@@ -51,7 +41,7 @@ export function StatusBadge({ status, className }: { status: PedidoStatus; class
           (status === 'em_separacao' || status === 'em_transporte' || status === 'parcialmente_entregue') && 'animate-pulse',
         )}
       />
-      {LABELS[status]}
+      {PEDIDO_STATUS_LABELS[status]}
     </span>
   );
 }

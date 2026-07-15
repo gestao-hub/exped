@@ -33,33 +33,52 @@ export default async function AdminDashboard() {
     // Tempo médio pendente→finalizado (agregado no banco)
     { data: tempoMedioRaw },
   ] = await Promise.all([
-    supabase.from('pedidos').select('id', { count: 'exact', head: true }),
-    supabase.from('pedidos').select('id', { count: 'exact', head: true }).eq('status', 'em_financeiro'),
-    supabase.from('pedidos').select('id', { count: 'exact', head: true }).eq('status', 'pendente'),
     supabase
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'em_separacao'),
+      .is('deleted_at', null),
     supabase
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'em_transporte'),
+      .eq('status', 'em_financeiro')
+      .is('deleted_at', null),
     supabase
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'parcialmente_entregue'),
+      .eq('status', 'pendente')
+      .is('deleted_at', null),
     supabase
       .from('pedidos')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'finalizado'),
+      .eq('status', 'em_separacao')
+      .is('deleted_at', null),
+    supabase
+      .from('pedidos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'em_transporte')
+      .is('deleted_at', null),
+    supabase
+      .from('pedidos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'parcialmente_entregue')
+      .is('deleted_at', null),
+    supabase
+      .from('pedidos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'finalizado')
+      .is('deleted_at', null),
     supabase.from('profiles').select('id', { count: 'exact', head: true }),
-    supabase.from('clientes').select('id', { count: 'exact', head: true }),
+    supabase
+      .from('clientes')
+      .select('id', { count: 'exact', head: true })
+      .is('deleted_at', null),
 
     // Pedidos por dia (últimos 30)
     supabase
       .from('pedidos')
       .select('created_at')
-      .gte('created_at', subDays(new Date(), 30).toISOString()),
+      .gte('created_at', subDays(new Date(), 30).toISOString())
+      .is('deleted_at', null),
 
     // Top clientes (finalizados, valor) — agregado no banco
     supabase.rpc('admin_top_clientes', { p_limit: 10 }),

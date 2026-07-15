@@ -28,8 +28,8 @@ test.describe('E2E workflow real Franzoni (4 personas)', () => {
 
   // Compartilhado entre os testes desse describe
   let pedidoId = '';
-  let docId = `QA-E2E-${Date.now()}`;
-  let pdfPath = `${SAMPLES_DIR}/${docId}.pdf`;
+  const docId = `QA-E2E-${Date.now()}`;
+  const pdfPath = `${SAMPLES_DIR}/${docId}.pdf`;
 
   test('vendas1 cria pedido (envia pra logística)', async ({ browser }) => {
     execFileSync('python3', ['scripts/make-sample-pdf.py', pdfPath, docId], {

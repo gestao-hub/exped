@@ -27,17 +27,35 @@ Há **dois instaladores** neste diretório:
 1. **[Operador, no painel]** Abra a plataforma, selecione a empresa do cliente e clique
    em **"Gerar código de instalação"**. O painel mostra um código no formato
    `EXPED-XXXX-XXXX` (uso único, expira em **24h**). Copie e envie ao cliente.
-2. **[Cliente, no Windows]** Rode `ExpedSetup.exe` **como Administrador**. No wizard,
-   na tela **"Código de instalação"**, cole o código e clique em Avançar.
-3. O instalador: copia o hub pra `C:\Exped`, gera o `jwtSecret`, baixa os binários,
-   registra o serviço `ExpedHub`, copia o **agente** pra `%LOCALAPPDATA%\ExpedAgent`
-   (com autostart no logon via `.vbs`), e por fim roda **`provision.ps1`** com o código:
-   ele chama `POST /api/provision/redeem` (que **gera o token de dispositivo só no
-   resgate**) e escreve os **2 configs** automaticamente:
+2. **[Cliente, no Windows]** Abra `ExpedSetup.exe` com **duplo clique** e aceite o
+   UAC. **Não use "Executar como administrador"**: em suporte com credenciais
+   administrativas de outra pessoa, o Setup precisa preservar o token do usuário
+   que iniciou o instalador. No wizard, cole o código e clique em Avançar.
+3. Ainda em `PrepareToInstall`, antes de parar o Hub, copiar payload, baixar binários
+   ou resgatar o código, um helper autocontido executado como usuário original prova
+   que seu SID é o mesmo do Explorer da sessão e valida a transição contra os
+   metadados persistidos. Setup iniciado já elevado ou sem token original é recusado.
+   Depois desse preflight, o instalador tira snapshot do config, para o Hub com
+   restauração em caso de falha, copia o staging e roda **`provision.ps1`** com
+   `-DeferAgent`. O helper original-user repete a defesa antes de qualquer efeito no
+   perfil. Só então ele instala em
+   `%LOCALAPPDATA%\ExpedAgent` e cria o `.vbs` desse usuário. Um recibo nonce-bound entrega ao passo elevado somente
+   o SID e o caminho exato do `appsettings.json`; então o serviço e a URL ACL são
+   configurados, e o agente é iniciado novamente como o usuário original.
+
+   Uma reinstalação que tente trocar `agent.userSid` ou `agent.settingsPath` é
+   recusada com instrução para desinstalar/migrar explicitamente. No legado que tem
+   o caminho exato mas ainda não tem `userSid`, o owner SID do arquivo precisa
+   coincidir com o usuário original; a validação é repetida no passo elevado.
+
+   O resgate chama `POST /api/provision/redeem` (que **gera o token de dispositivo
+   só no resgate**) e mantém os **2 configs** coerentes:
    - `C:\Exped\config.json` → injeta `cloud.apiBase` + `cloud.deviceToken`
      (preservando `jwtSecret`/portas já gerados);
    - `%LOCALAPPDATA%\ExpedAgent\appsettings.json` → `Agent.ApiBaseUrl =
-     http://127.0.0.1:3000` (o agente fala com o **hub local**) + `Agent.DeviceToken`.
+     http://127.0.0.1:3000` (o agente fala com o **hub local**) + `Agent.DeviceToken`;
+   - `C:\Exped\config.json` → `agent.settingsPath` + `agent.userSid` exatos,
+     além do estado da URL ACL, para reruns elevados nunca escolherem outro perfil.
 
    **Não é mais preciso editar JSON à mão** — a tela do código substitui esse passo.
 
@@ -46,9 +64,26 @@ Há **dois instaladores** neste diretório:
 No mesmo wizard há um checkbox **"Modo manual (suporte)"**. Marcado, ele esconde o
 campo do código e revela **Token de dispositivo** + **URL da nuvem**. Use quando a
 máquina do cliente **não tem internet pra resgatar** o código, ou pra recuperar uma
-instalação. Nesse modo o `provision.ps1` é chamado com `-DeviceToken`/`-CloudApi` e
-**pula o resgate**, escrevendo os 2 configs com os valores informados. (É o substituto
-controlado da antiga edição manual de `config.json`.)
+instalação. O Setup grava URL+token num arquivo temporário com ACL somente para
+SYSTEM/Administradores, passa apenas o caminho por `-CredentialsFile` e o apaga em
+`finally`; o token não entra na linha de comando nem no log. Em modo silencioso use
+`/credentialsfile=<arquivo>` com URL na linha 1 e token na linha 2; o arquivo de
+entrada também deve ser efêmero. O CLI direto de `provision.ps1 -DeviceToken` segue
+compatível apenas para suporte legado.
+
+Em uma máquina já instalada, o comando usado pelo suporte continua válido sem
+`-AgentDir`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\provision.ps1 `
+  -Code EXPED-XXXX-XXXX -CloudApi https://app-exped.vercel.app
+```
+
+Ele resolve exclusivamente `agent.settingsPath` persistido e o `agent.userSid`; em
+config legado sem SID, deriva e persiste o owner SID exato do arquivo após validar a
+conta/perfil. Ausência de caminho ou owner incoerente falha **antes de consumir o
+código**. As duas escritas são transacionais: se a segunda falhar, Hub e agente voltam
+aos bytes anteriores; nunca atualiza só o Hub.
 
 ### Pré-requisito extra do `exped-setup.iss`: publish do agente
 
@@ -137,7 +172,7 @@ via `golang.org/x/sys/unix`). Aplicamos `hub/win/gotrue-windows.patch` sobre o t
 
 ```bash
 git clone https://github.com/supabase/auth /tmp/auth
-cd /tmp/auth && git checkout v2.189.0          # commit 4fa66ba71d8c55b5c95cd5635766ed8bbae6d96a
+cd /tmp/auth && git checkout v2.189.0          # use o commit fixado no workflow
 # --ignore-whitespace: o patch falha por diferenca de line-endings (CRLF) quando
 # aplicado no Windows; este flag torna o apply tolerante a isso. O .gitattributes
 # do repo ja forca LF no .patch, mas mantenha o flag por seguranca.
@@ -249,15 +284,18 @@ ajustar paths do seu layout antes de rodar.
 
 > **Variante offline (sem download no install):** copie Postgres/PostgREST/Node/NSSM
 > pra `payload\bin\`, descomente o bloco "OFFLINE OPCIONAL" do `[Files]` no `.iss`
-> e comente o passo de `download-binaries.ps1` no `[Run]`.
+> e remova a chamada conferida de `download-binaries.ps1` em `CurStepChanged`.
 
 ---
 
 ## Fase 3 — Instalar  **[WIN]**
 
-1. Rode `ExpedHubSetup.exe` **como Administrador** (clique direito → Executar como
-   administrador). O SmartScreen vai alertar (instalador não assinado) → "Mais
-   informações" → "Executar assim mesmo". Ver troubleshooting.
+1. Para Hub + Agent, abra `ExpedSetup.exe` com **duplo clique** e aceite o UAC.
+   Não use "Executar como administrador": o instalador precisa preservar e provar
+   o usuário interativo que possui a `Trusted_Connection` do Hiper. Use
+   `ExpedHubSetup.exe` elevado somente no pacote **hub-only**, no qual o Agent fica
+   explicitamente desativado. O SmartScreen vai alertar porque o instalador ainda
+   não é assinado; veja troubleshooting.
 2. O install: copia tudo pra `C:\Exped`, gera o `jwtSecret` real no `config.json`,
    roda `download-binaries.ps1` (baixa Postgres/PostgREST/Node/NSSM), depois
    `install-service.ps1` (registra+inicia o serviço `ExpedHub` e abre o firewall
@@ -272,46 +310,78 @@ ajustar paths do seu layout antes de rodar.
    Logs em `C:\Exped\logs\` (`service-out.log`, `service-err.log`, `maestro.log`,
    e `postgres.log`/`postgrest.log`/`gotrue.log`/`gateway.log`/`app.log`).
 
-   `/status` interno: `http://127.0.0.1:3001/status` (porta = app+1) deve listar
-   todas as peças com `running:true`.
+   `/status` interno: `http://127.0.0.1:3001/status` (porta = app+1). No pacote
+   unificado, depois do login operacional, ele deve comprovar separadamente Hub,
+   Agent, endpoint `Sincronizar`, consulta read-only e contrato de schema Exped Agent v1,
+   além do sync cloud sem erro. No pacote hub-only, `agent.startupMode=disabled` é
+   o estado esperado.
 
 ---
 
 ## Fase 4 — Validar (checklist)  **[WIN] + outro PC da LAN**
 
-1. **Acesso pela LAN:** de OUTRO PC na rede, abra `http://<ip-do-servidor>:3000/login`.
-   (Descubra o IP com `ipconfig` no servidor.)
+1. **Acesso pela LAN:** de OUTRO PC na rede, abra `https://<ip-do-servidor>/login`
+   (ou a porta HTTPS fallback registrada no log). Descubra o IP com `ipconfig`.
 2. **Login:** entre com um usuário válido.
 3. **Leitura:** veja o mapa / lista de OS carregar.
 4. **PDF:** abra um PDF de uma OS (exercita o storage-local via gateway).
 5. **Escrita:** faça uma alteração que grave no banco (ex.: atualizar uma OS) e
    confirme que persiste após refresh.
-6. **Reboot:** reinicie a máquina servidor. Sem login manual, o serviço `ExpedHub`
-   deve subir sozinho; repita os passos 1–3 e veja tudo no ar (`sc query ExpedHub`
-   = RUNNING).
-7. **Auto-update + rollback:** publique um **manifesto fake** apontando uma versão
-   maior:
-   ```json
-   { "versao": "9.9.9", "url": "http://<host>/fake-release.zip", "sha256": "<hash do zip>" }
+6. **Reboot controlado:** mantenha qualquer tarefa diária das 03:00 **pausada**.
+   Instale primeiro os hooks do canário em PowerShell elevado:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File C:\Exped\hub\win\windows-canary.ps1 -Mode InstallHooks
    ```
-   Aponte `manifestUrl` no `config.json` pra ele e reinicie o serviço. O updater
-   baixa, troca o ponteiro `current`, reinicia o app e roda o health-check em
-   `/login`. Para ver o **rollback**: faça a release nova falhar o health (ex.: um
-   `server.js` que sai com erro / porta errada) — o updater reverte o ponteiro pro
-   release anterior, reinicia e o `/status`/logs registram `rolledBack:true`.
-   Depois remova o `manifestUrl` (ou volte pra `null`) e reinicie.
+   Reinicie manualmente. Antes do login, o receipt `PreLogin` deve comprovar que o
+   Hub e o sync cloud voltaram, enquanto o Agent permanece corretamente
+   `running:false`. Isso não é falha: a `Trusted_Connection` não possui token do
+   usuário antes do login.
+7. **Pós-login + Hiper 197:** entre na conta operacional. O hook `PostLogin` deve
+   comprovar heartbeat fresco do Agent, conexão, consulta read-only real e schema
+   compatível com o contrato de schema do Exped Agent. Depois valide o botão na tela correta:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File C:\Exped\hub\win\windows-canary.ps1 -Mode SyncButton
+   ```
+   O receipt só é aceito quando `agent.lastSyncNowAt` avança, o Agent publica
+   `lastSyncNowOk=true` e há um ciclo cloud posterior. O heartbeat periódico não
+   satisfaz essa prova sozinho.
+8. **Rollback:** use somente um manifesto HTTPS de canário criado pelo fluxo de
+   release aprovado; manifesto HTTP/fake não é aceito. O teste é destrutivo e exige
+   confirmação explícita:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File C:\Exped\hub\win\windows-canary.ps1 -Mode Rollback -RollbackManifestUrl "https://..." -ConfirmRollback
+   ```
+9. **Decisão das 03:00:** confira os receipts com `-Mode Report`. Reative a tarefa
+   diária somente depois de `PreLogin`, `PostLogin`, `SyncButton` e rollback passarem
+   no Windows físico. O canário registra a atualização Hiper 195→197 como contexto,
+   não como causa sem evidência. Ao concluir, remova apenas os hooks com
+   `-Mode Cleanup`; os receipts ficam preservados.
 
 ---
 
 ## Desinstalar  **[WIN]**
 
-Pelo "Adicionar/Remover programas" → "Exped Hub". O `[UninstallRun]` chama
-`uninstall-service.ps1`, que para+remove o serviço e a regra de firewall.
+Pelo "Adicionar/Remover programas" → "Exped Hub". `CurUninstallStepChanged` chama
+`uninstall-service.ps1` e confere o exit code antes de permitir que o Inno apague
+arquivos. Como o Inno não oferece `runasoriginaluser` durante
+uninstall, o script elevado cria uma tarefa one-shot com o token interativo do
+`agent.userSid` exato; ela roda `agent-user-install.ps1 -Uninstall`, para somente
+o processo do executável exato e remove o `.vbs` de Startup + diretório do agente
+naquele perfil. Depois o passo elevado remove serviço, firewall e a URL ACL apenas
+se o SDDL atual ainda for exatamente o rastreado.
+
+O SID original precisa estar com uma sessão Explorer ativa. Se outro usuário tentar
+desinstalar enquanto ele está desconectado, o cleanup do perfil recusa adivinhar,
+retorna `2` **antes** de remover serviço, URL ACL ou firewall, e o Inno preserva os
+arquivos. Entre no usuário indicado e rode a desinstalação novamente. O pacote
+hub-only sempre chama `-ManageAgent false`; somente o unificado usa `true`, portanto
+um pacote nunca instala/remove o agente pertencente ao outro.
 **`C:\Exped\data` é PRESERVADO** (banco + storage). Pra zerar tudo, rode
 manualmente como admin:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 -RemoveData $true
+powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 `
+  -ManageAgent true -RemoveData $true
 ```
 
 ---
@@ -321,11 +391,15 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
 | Arquivo | O que faz |
 |---|---|
 | `download-binaries.ps1` | Baixa PostgreSQL + PostgREST + Node + NSSM pra `C:\Exped\bin`. |
-| `install-service.ps1` | Lê `config.json`, registra o serviço `ExpedHub` (NSSM) com as env `EXPED_*`, abre firewall, inicia. Idempotente. |
-| `uninstall-service.ps1` | Para+remove o serviço e a regra de firewall. Preserva `data\` (a menos de `-RemoveData $true`). |
-| `exped-hub.iss` | Script Inno Setup 6 — empacota `payload\` + scripts e orquestra `[Run]`/`[UninstallRun]`. (Só o hub.) |
+| `install-service.ps1` | Registra `ExpedHub`, abre firewall e inicia. Só propaga porta/URL ACL/receipt com `-ManageAgent true`; o default `false` isola o hub-only. |
+| `uninstall-service.ps1` | Remove serviço/firewall; com `-ManageAgent true`, exige antes o cleanup completo no SID original e remove URL ACL exata. |
+| `agent-user-install.ps1` | Preflight, install/start/uninstall e rollback/finalize transacionais somente no perfil/SID interativo comprovado. |
+| `agent-settings.ps1` | Contrato PowerShell de porta, owner SID e escrita JSON atômica. |
+| `agent-sync-contract.mjs` | Contrato puro/testável das transições default/custom/`0` da URL ACL e da identidade/caminho dos recibos. |
+| `installer-orchestrator.ps1` | Helper autocontido de preflight, snapshot/restore, rollback de URL ACL, ACL do segredo e estado do serviço antes de `[Files]`. |
+| `exped-hub.iss` | Script Inno Setup 6 — empacota `payload\` + scripts e orquestra install/uninstall conferidos em `[Code]`. (Só o hub.) |
 | `exped-setup.iss` | Script Inno Setup 6 **unificado** (hub + agente) com wizard do **código de instalação** (e modo manual de suporte). Gera `ExpedSetup.exe`. |
-| `provision.ps1` | Resgata o código (`POST /api/provision/redeem`) ou aplica Token+URL diretos (modo manual) e escreve `config.json` (`cloud.apiBase`/`deviceToken`) + `appsettings.json` do agente. Chamado no `[Run]` do `exped-setup.iss`. |
+| `provision.ps1` | Resgata o código (`POST /api/provision/redeem`) ou aplica Token+URL por arquivo protegido e escreve transacionalmente `config.json` + `appsettings.json`. Chamado pela orquestração `[Code]` do `exped-setup.iss`. |
 | `config.example.json` | Modelo do `config.json` (portas, paths Windows, jwtSecret placeholder, manifestUrl). |
 | `gotrue-windows.patch` | Patch de portabilidade Windows do `supabase/auth` (reproduz o `auth.exe`). |
 
@@ -351,9 +425,31 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
   no `config.json` (o `install-service.ps1` reflete no firewall e nas env do
   serviço; reinstale o serviço rodando o script de novo).
 
+- **Porta do botão Sincronizar** — ajuste `agent.syncNowPort` no `config.json`
+  (`5005` por padrão, outra porta para customizar, `0` para desativar) e rode
+  `install-service.ps1 -ManageAgent true` de novo. O script atualiza o Hub e troca atomicamente
+  `Agent.SyncNowPort` no agente indicado por `agent.settingsPath`; o processo do
+  agente recarrega e reabre o listener sem ser reiniciado pela conta elevada. A
+  URL ACL é adicionada/movida/removida com SDDL do `agent.userSid`; um SDDL diferente
+  na mesma porta é conflito, nunca considerado saudável nem removido como se fosse
+  do Exped. Se uma troca de SID na mesma porta falhar depois do delete, o instalador
+  restaura e verifica o SDDL anterior. No primeiro rerun de uma instalação sem os
+  campos de tracking, a porta anterior é lida do `appsettings.json` exato para que
+  custom/`0` também movam ou removam a reserva antiga. Instalação legada com
+  `settingsPath` exato mas sem `userSid` migra pelo
+  owner SID do ACL do arquivo. Se isso não representar o usuário pretendido, rode
+  com `-AgentUserSid S-1-...`; não há descoberta por nome ou varredura de perfis.
+
 - **Serviço não sobe** — `sc query ExpedHub` ≠ RUNNING: veja
   `C:\Exped\logs\service-err.log` e `maestro.log`. Causas comuns abaixo
   (Concerns Windows-only).
+
+- **Hub sobe, mas Agent/Hiper não** — confira `agent.running`,
+  `agent.syncNowReady`, `agent.hiper.connected`, `agent.hiper.queryOk` e
+  `agent.hiper.schemaCompatible` em `/status`. Após reboot, `agent.running=false`
+  antes do login é o comportamento verdadeiro do modo `interactive_logon`; não
+  converta o Agent em serviço Windows, pois isso troca a identidade usada pela
+  `Trusted_Connection`.
 
 ---
 
@@ -374,7 +470,10 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
    abrir o PDF por URL crua sem o header de auth.
 5. **`config.json` não é lido pelo maestro** — o `install-service.ps1` traduz `config.json`
    → env `EXPED_*` do serviço. Se editar o `config.json` depois, rode o `install-service.ps1`
-   de novo pra propagar.
+   de novo pra propagar. Para `agent.syncNowPort`, esse mesmo fluxo também atualiza o
+   `appsettings.json` instalado; o agente observa a mudança sem restart. O maestro
+   deriva `AGENT_SYNC_URL` somente dessa porta canônica (inclusive `0`), ignorando
+   valor herdado; a variável continua exclusiva do Hub local e não é injetada na Vercel.
 6. **`initdb` automático no maestro — RESOLVIDO.** O maestro inicializa o cluster Postgres
    sozinho: antes do `pg_ctl start`, se `cfg.paths.pgData` ainda não é um cluster válido
    (sem o arquivo `PG_VERSION`), ele roda `initdb -D <pgData> -U <user> -E UTF8`. Idempotente
@@ -387,5 +486,6 @@ powershell -ExecutionPolicy Bypass -File C:\Exped\hub\win\uninstall-service.ps1 
    depois `.next\standalone\server.js` (dev), usando o primeiro que existir — não precisa mais
    do junction que foi usado como workaround.
 
-Todos os bloqueios cross-platform conhecidos foram corrigidos (PRs #20/#21, 40 testes hub
-verdes no Linux). O que resta é validação real no Windows (binários nativos + instalador).
+Os contratos cross-platform são validados no CI, inclusive PowerShell 5.1 e testes
+do Agent em .NET. Ainda é obrigatória a validação física no Windows para Inno Setup,
+ACL/firewall/NSSM, identidade `Trusted_Connection`, reboot pré/pós-login e rollback.

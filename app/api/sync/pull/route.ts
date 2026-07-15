@@ -16,6 +16,7 @@ export const maxDuration = 60;
  */
 const pullSchema = z.object({
   cursors: z.record(z.string(), z.string()).default({}),
+  identityOnly: z.boolean().optional().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -37,7 +38,9 @@ export async function POST(req: NextRequest) {
 
   const db = makeSupabaseSyncDb(supabase);
   try {
-    const result = await runPull(db, device.empresaId, parsed.data.cursors);
+    const result = await runPull(db, device.empresaId, parsed.data.cursors, {
+      identityOnly: parsed.data.identityOnly,
+    });
     return NextResponse.json(result, { status: 200 });
   } catch (e) {
     // Log completo no servidor; corpo genérico + requestId (não vazar detalhe interno).

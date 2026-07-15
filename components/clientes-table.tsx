@@ -98,6 +98,8 @@ export function ClientesTable() {
     let query = supabase
       .from('clientes')
       .select('*, pedidos:pedidos(count)', { count: 'exact' })
+      .is('deleted_at', null)
+      .is('pedidos.deleted_at', null)
       .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1);
@@ -287,8 +289,8 @@ function DeleteButton({
       onClick={async () => {
         const description =
           count > 0
-            ? `Cliente tem ${count} pedido${count === 1 ? '' : 's'} vinculado${count === 1 ? '' : 's'}. Os pedidos não serão apagados, mas perderão o vínculo.`
-            : 'Esta ação não pode ser desfeita.';
+            ? `Cliente tem ${count} pedido${count === 1 ? '' : 's'} vinculado${count === 1 ? '' : 's'}. O cadastro será arquivado e os vínculos históricos serão preservados.`
+            : 'O cadastro será arquivado e deixará de aparecer nas buscas.';
         const ok = await confirm({
           title: 'Excluir este cliente?',
           description,

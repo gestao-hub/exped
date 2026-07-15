@@ -23,10 +23,10 @@
         migrations\   (vem do pacote, copiado pelo instalador do hub)
 
 .NOTES
-    URLs validadas em 2026-05-31 a partir do Linux (curl -sI / -r 0-0):
+    URLs e SHA-256 validados em 2026-07-14 a partir das distribuicoes oficiais:
       - PostgreSQL : HTTP 200  (get.enterprisedb.com)
       - PostgREST  : HTTP 200  (github.com/PostgREST/postgrest releases)
-      - Node       : HTTP 200  (nodejs.org/dist/v20.18.0/node-v20.18.0-win-x64.zip)
+      - Node       : HTTP 200  (nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip)
       - NSSM       : HTTP 206  (nssm.cc bloqueia HEAD com 503, mas serve o GET - ver README)
     Se uma versao sair do ar, ajuste os parametros de versao abaixo.
 #>
@@ -34,24 +34,48 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir       = 'C:\Exped\bin',
-    [string]$PgVersion        = '16.9-1',                  # PostgreSQL EDB win-x64
+    [string]$PgVersion        = '16.14-1',                 # PostgreSQL EDB win-x64
     [string]$PostgrestVersion = 'v14.12',                  # PostgREST release tag
-    [string]$NodeVersion      = 'v20.18.0',                # Node.js LTS win-x64
+    [string]$NodeVersion      = 'v24.18.0',                # Node.js LTS win-x64
     [string]$NssmVersion      = '2.24',                    # NSSM release
-    # SHA-256 do node-v20.18.0-win-x64.zip (de nodejs.org/dist/<ver>/SHASUMS256.txt).
-    # Se mudar $NodeVersion, atualize este hash ou passe '' para pular a verificacao.
-    [string]$NodeSha256       = 'f5cea43414cc33024bbe5867f208d1c9c915d6a38e92abeee07ed9e563662297'
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$PgSha256         = '98af1417ba6a8dc30543e560e5407833a3b9e7cc7ed20e73b2006f3aa2f04663',
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$PostgrestSha256  = '0265772defae0fc24615ccb1e5a40c3f81d59f8f2fbc57ab20ac8e1d1aa7d0a3',
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$NodeSha256       = '0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821',
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$NssmSha256       = '727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743',
+    [ValidatePattern('^[0-9a-fA-F]{64}$')]
+    [string]$NssmExeSha256    = 'f689ee9af94b00e9e3f0bb072b34caaf207f32dcb4f5782fc9ca351df9a06c97'
 )
 
 $ErrorActionPreference = 'Stop'
-$ProgressPreference     = 'SilentlyContinue'  # downloads muito mais rapidos no Invoke-WebRequest
+$ProgressPreference     = 'SilentlyContinue'  # evita o overhead da barra de progresso
 
 # TLS 1.2 (Windows Server / PowerShell 5.1 antigo pode nao habilitar por padrao)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
-# Log em arquivo: o [Run] do Inno roda este script com runhidden (saida invisivel).
+function Assert-Sha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Expected
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Arquivo ausente para validacao SHA-256: $Path"
+    }
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    $normalizedExpected = $Expected.ToLowerInvariant()
+    if ($actual -ne $normalizedExpected) {
+        throw "SHA-256 nao confere para $Path. Esperado $normalizedExpected, obtido $actual."
+    }
+    Write-Host "    SHA-256 OK: $actual"
+}
+
+# Log em arquivo: o [Code] do Inno roda este script oculto (saida invisivel).
 # Start-Transcript grava tudo (passos + erros) em C:\Exped\logs\download-binaries.log
 # pra auditar depois. (InstallDir e ...\bin; o pai e a raiz C:\Exped.)
 $logDir = Join-Path (Split-Path -Parent $InstallDir) 'logs'
@@ -79,7 +103,8 @@ $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-windows-
 $pgZip = Join-Path $tmp "postgresql.zip"
 Write-Step "Baixando PostgreSQL $PgVersion ..."
 Write-Host "    $pgUrl"
-Invoke-WebRequest -Uri $pgUrl -OutFile $pgZip
+Invoke-WebRequest -Uri $pgUrl -OutFile $pgZip -UseBasicParsing
+Assert-Sha256 -Path $pgZip -Expected $PgSha256
 
 Write-Step "Extraindo PostgreSQL para $InstallDir\pgsql ..."
 # O zip da EDB contem uma pasta raiz "pgsql\". Extraimos direto em $InstallDir.
@@ -101,7 +126,8 @@ $prUrl = "https://github.com/PostgREST/postgrest/releases/download/$PostgrestVer
 $prZip = Join-Path $tmp "postgrest.zip"
 Write-Step "Baixando PostgREST $PostgrestVersion ..."
 Write-Host "    $prUrl"
-Invoke-WebRequest -Uri $prUrl -OutFile $prZip
+Invoke-WebRequest -Uri $prUrl -OutFile $prZip -UseBasicParsing
+Assert-Sha256 -Path $prZip -Expected $PostgrestSha256
 
 Write-Step "Extraindo PostgREST para $InstallDir ..."
 Expand-Archive -LiteralPath $prZip -DestinationPath $InstallDir -Force
@@ -133,15 +159,8 @@ $nodeUrl     = "https://nodejs.org/dist/$NodeVersion/$nodeDirName.zip"
 $nodeZip     = Join-Path $tmp "node.zip"
 Write-Step "Baixando Node.js $NodeVersion ..."
 Write-Host "    $nodeUrl"
-Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip
-
-if ($NodeSha256) {
-    $got = (Get-FileHash -Algorithm SHA256 -Path $nodeZip).Hash.ToLower()
-    if ($got -ne $NodeSha256.ToLower()) {
-        throw "SHA-256 do Node nao confere. Esperado $NodeSha256, obtido $got."
-    }
-    Write-Host "    SHA-256 OK"
-}
+Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
+Assert-Sha256 -Path $nodeZip -Expected $NodeSha256
 
 Write-Step "Extraindo Node.js para $InstallDir\node ..."
 # O zip contem uma pasta raiz "node-vX-win-x64\". Extraimos no tmp e movemos
@@ -169,13 +188,14 @@ Write-Host "    OK: $nodeExe"
 # 4. NSSM (Non-Sucking Service Manager) - registra o maestro como serviço Windows
 # ---------------------------------------------------------------------------
 # NOTA: nssm.cc responde 503 a requisicoes HEAD (anti-bot), mas serve o GET
-# normalmente (validado com `curl -r 0-0` -> HTTP 206). Invoke-WebRequest usa GET,
+# normalmente (validado com `curl -r 0-0` -> HTTP 206). O cmdlet usa GET,
 # entao o download funciona. Se cair, ha mirrors (ver README, secao troubleshooting).
 $nssmExe = Join-Path $InstallDir 'nssm.exe'
 if (Test-Path -LiteralPath $nssmExe) {
     # Pre-empacotado (o instalador copiou payload\bin\nssm.exe). nssm.cc e instavel
     # (503/timeout); ter o nssm.exe no payload e o caminho robusto pra producao.
     Write-Step "NSSM ja presente em $nssmExe (pre-empacotado) - pulando download."
+    Assert-Sha256 -Path $nssmExe -Expected $NssmExeSha256
 } else {
     $nssmUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
     $nssmZip = Join-Path $tmp "nssm.zip"
@@ -184,12 +204,13 @@ if (Test-Path -LiteralPath $nssmExe) {
     # nssm.cc cai com frequencia (503/timeout). Tenta 3x antes de desistir.
     $nssmOk = $false
     for ($i = 1; $i -le 3 -and -not $nssmOk; $i++) {
-        try { Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -TimeoutSec 30; $nssmOk = $true }
+        try { Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -TimeoutSec 30 -UseBasicParsing; $nssmOk = $true }
         catch { Write-Host "    tentativa $i de NSSM falhou: $($_.Exception.Message)"; Start-Sleep -Seconds 3 }
     }
     if (-not $nssmOk) {
         throw "Falha ao baixar NSSM (nssm.cc) apos 3 tentativas. Solucao robusta: pre-empacote o nssm.exe (win64) em payload\bin\nssm.exe - o instalador o copia e este download e pulado. (Ou copie um nssm.exe para $InstallDir e rode de novo.)"
     }
+    Assert-Sha256 -Path $nssmZip -Expected $NssmSha256
     Write-Step "Extraindo NSSM (nssm.exe win64) para $InstallDir ..."
     $nssmExtract = Join-Path $tmp "nssm-extract"
     if (Test-Path -LiteralPath $nssmExtract) { Remove-Item -LiteralPath $nssmExtract -Recurse -Force }
@@ -202,6 +223,7 @@ if (Test-Path -LiteralPath $nssmExe) {
         throw "nssm.exe (win64) nao encontrado no zip extraido em $nssmExtract."
     }
     Copy-Item -LiteralPath $nssmSrc.FullName -Destination $nssmExe -Force
+    Assert-Sha256 -Path $nssmExe -Expected $NssmExeSha256
     Write-Host "    OK: $nssmExe"
 }
 

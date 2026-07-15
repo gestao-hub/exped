@@ -21,13 +21,15 @@
 ;        config.json          <- gerado do config.example.json (jwtSecret trocado no install)
 ;
 ;  Postgres / PostgREST / Node / NSSM NAO vao no payload (binarios grandes):
-;  sao baixados no [Run] por download-binaries.ps1. Para fazer um instalador
+;  sao baixados em [Code] por download-binaries.ps1. Para fazer um instalador
 ;  "offline" (pre-bundlado), copie esses binarios pra payload\bin\ antes de
-;  compilar e comente o passo de download no [Run] (ver comentario la embaixo).
+;  compilar e remova a chamada de download em CurStepChanged.
 ; ============================================================================
 
 #define MyAppName "Exped Hub"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
 #define MyAppPublisher "Exped"
 ; Raiz fixa C:\Exped (convencao do hub; maestro.mjs resolve paths a partir dela).
 #define InstallRoot "C:\Exped"
@@ -35,6 +37,7 @@
 #define Payload "payload"
 
 [Setup]
+AppId=Exped Hub
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -72,6 +75,8 @@ Source: "{#Payload}\app\*";                 DestDir: "{app}\app";   Flags: recur
 
 ; --- Hub Node (maestro/supervisor/health/storage/bootstrap/config/updater) ---
 Source: "{#Payload}\hub\*";                 DestDir: "{app}\hub";   Flags: recursesubdirs createallsubdirs ignoreversion
+; Substitui o watchdog legado em C:\Exped por uma versao somente diagnostica.
+Source: "{#Payload}\hub\watchdog.ps1";      DestDir: "{app}";       Flags: ignoreversion
 
 ; --- Local-stack: SQL de bootstrap + gateway + scripts auxiliares -----------
 ; Inclui o gotrue.env (lido por hub/bootstrap.mjs em scripts\local-stack\gotrue.env
@@ -92,6 +97,9 @@ Source: "{#Payload}\bin\migrations\*";      DestDir: "{app}\bin\migrations"; Fla
 Source: "download-binaries.ps1";            DestDir: "{app}\hub\win"; Flags: ignoreversion
 Source: "install-service.ps1";              DestDir: "{app}\hub\win"; Flags: ignoreversion
 Source: "uninstall-service.ps1";            DestDir: "{app}\hub\win"; Flags: ignoreversion
+Source: "agent-settings.ps1";               DestDir: "{app}\hub\win"; Flags: ignoreversion
+Source: "windows-canary.ps1";               DestDir: "{app}\hub\win"; Flags: ignoreversion
+Source: "installer-orchestrator.ps1";       Flags: dontcopy
 
 ; --- config.json default ----------------------------------------------------
 ; onlyifdoesntexist: preserva o config de uma instalacao anterior (nao sobrescreve).
@@ -99,38 +107,21 @@ Source: "{#Payload}\config.json";           DestDir: "{app}";       Flags: onlyi
 
 ; --- (OFFLINE OPCIONAL) Postgres/PostgREST/Node/NSSM pre-bundlados ----------
 ; Se voce montou payload\bin com pgsql\, postgrest.exe, node\+node.exe e nssm.exe,
-; descomente as linhas abaixo E comente o passo de download no [Run].
+; descomente as linhas abaixo E remova a chamada de download em CurStepChanged.
 ; Source: "{#Payload}\bin\pgsql\*";    DestDir: "{app}\bin\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; Source: "{#Payload}\bin\postgrest.exe"; DestDir: "{app}\bin";   Flags: ignoreversion
 ; Source: "{#Payload}\bin\node\*";     DestDir: "{app}\bin\node"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; Source: "{#Payload}\bin\node.exe";   DestDir: "{app}\bin";      Flags: ignoreversion
 ; Source: "{#Payload}\bin\nssm.exe";   DestDir: "{app}\bin";      Flags: ignoreversion
 
-[Run]
-; A ORDEM importa:
-;   1. download-binaries.ps1  -> baixa Postgres/PostgREST/Node/NSSM pra bin\
-;      (COMENTE este passo se voce pre-bundlou os binarios — ver [Files] acima)
-;   2. (gerar jwtSecret real no config.json — feito em [Code] PrepareToInstall)
-;   3. install-service.ps1    -> registra+inicia o serviço ExpedHub e abre o firewall
-; O bootstrap do banco (criar DB/auth/schema) é feito pelo MAESTRO no 1o start;
-; nao ha passo de bootstrap aqui.
-Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\download-binaries.ps1"" -InstallDir ""{app}\bin"""; \
-    StatusMsg: "Baixando binarios (PostgreSQL, PostgREST, Node, NSSM)..."; \
-    Flags: runhidden
+; Ultima entrada: mantem as operacoes faliveis dentro da transacao [Files].
+Source: "install-transaction.marker"; DestDir: "{tmp}"; Flags: deleteafterinstall; AfterInstall: RunTransactionalInstall
 
-Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\install-service.ps1"" -Root ""{app}"" -ConfigPath ""{app}\config.json"""; \
-    StatusMsg: "Registrando e iniciando o serviço ExpedHub..."; \
-    Flags: runhidden
+[Run]
+; Vazio: passos criticos rodam em [Code] e conferem ResultCode.
 
 [UninstallRun]
-; Para+remove o serviço e a regra de firewall ANTES de apagar os arquivos.
-; Preserva C:\Exped\data por padrao (uninstall-service.ps1 sem -RemoveData).
-Filename: "powershell.exe"; \
-    Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\hub\win\uninstall-service.ps1"" -Root ""{app}"""; \
-    RunOnceId: "RemoveExpedHubService"; \
-    Flags: runhidden
+; Vazio: CurUninstallStepChanged aborta antes de apagar arquivos se o teardown falhar.
 
 [UninstallDelete]
 ; Limpa o que foi baixado/gerado em runtime (nao versionado). data\ NAO entra
@@ -140,10 +131,145 @@ Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\releases"
 
 [Code]
-{ Gera um jwtSecret aleatorio (>=32 chars) e o grava no config.json antes do
-  install-service.ps1 rodar, substituindo o placeholder do config.example.json.
-  Assim cada instalacao tem um segredo unico. Se o config.json ja existir
-  (reinstalacao), preservamos o jwtSecret existente. }
+var
+  OrchestratorPath: String;
+  HubTransactionDir: String;
+  HubExisted: Boolean;
+  HubWasRunning: Boolean;
+  HubSnapshotCreated: Boolean;
+  InstallCompleted: Boolean;
+  ServiceInstallAttempted: Boolean;
+  RollbackDone: Boolean;
+  ExistingProvisionedConfig: Boolean;
+
+function PowerShellExe: String;
+begin
+  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
+function QuoteArg(Value: String): String;
+begin
+  if (Pos('"', Value) > 0) or (Pos(#13, Value) > 0) or (Pos(#10, Value) > 0) then
+    RaiseException('Parametro contem caractere inseguro para linha de comando.');
+  Result := '"' + Value + '"';
+end;
+
+function PowerShellFileParams(ScriptPath, Tail: String): String;
+begin
+  Result := '-NoProfile -ExecutionPolicy Bypass -File ' + QuoteArg(ScriptPath);
+  if Tail <> '' then Result := Result + ' ' + Tail;
+end;
+
+procedure ExecChecked(Filename, Params, WorkingDir, FailureMessage: String);
+var
+  ResultCode: Integer;
+begin
+  if not Exec(Filename, Params, WorkingDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException(FailureMessage + ' (processo nao iniciado).');
+  if ResultCode <> 0 then
+    RaiseException(FailureMessage + ' (exit code ' + IntToStr(ResultCode) + ').');
+end;
+
+function OrchestratorParams(Operation, Extra: String): String;
+var
+  Tail: String;
+begin
+  Tail := '-Operation ' + Operation + ' -Root ' + QuoteArg(ExpandConstant('{app}'));
+  if Extra <> '' then Tail := Tail + ' ' + Extra;
+  Result := PowerShellFileParams(OrchestratorPath, Tail);
+end;
+
+procedure RunOrchestratorChecked(Operation, Extra, FailureMessage: String);
+begin
+  ExecChecked(PowerShellExe, OrchestratorParams(Operation, Extra),
+    ExpandConstant('{tmp}'), FailureMessage);
+end;
+
+function QueryHubRunning: Boolean;
+var
+  ResultCode: Integer;
+begin
+  if not Exec(PowerShellExe, OrchestratorParams('QueryHubRunning', ''),
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException('Nao foi possivel consultar o servico ExpedHub.');
+  if ResultCode = 0 then
+  begin
+    HubExisted := True;
+    Result := True;
+  end
+  else if ResultCode = 3 then
+  begin
+    HubExisted := True;
+    Result := False;
+  end
+  else if ResultCode = 4 then
+  begin
+    HubExisted := False;
+    Result := False;
+  end
+  else RaiseException('Consulta do ExpedHub falhou (exit code ' + IntToStr(ResultCode) + ').');
+end;
+
+function QueryProvisionedConfig: Boolean;
+var
+  ResultCode: Integer;
+begin
+  if not Exec(PowerShellExe, OrchestratorParams('QueryProvisionedConfig', ''),
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException('Nao foi possivel validar o provisionamento existente.');
+  if ResultCode = 0 then
+    Result := True
+  else if ResultCode = 4 then
+    Result := False
+  else
+    RaiseException('Validacao do provisionamento existente falhou (exit code ' +
+      IntToStr(ResultCode) + ').');
+end;
+
+procedure RestoreHubAfterFailure;
+var
+  ResultCode: Integer;
+begin
+  if RollbackDone then Exit;
+  RollbackDone := True;
+  if HubSnapshotCreated then
+  begin
+    if (not Exec(PowerShellExe, OrchestratorParams('RestoreHub',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir)), ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+      Log('AVISO: rollback byte-a-byte do Hub/servico nao foi concluido.');
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  RollbackDone := False;
+  HubSnapshotCreated := False;
+  HubExisted := False;
+  HubWasRunning := False;
+  InstallCompleted := False;
+  ServiceInstallAttempted := False;
+  try
+    ExtractTemporaryFile('installer-orchestrator.ps1');
+    OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
+    HubTransactionDir := ExpandConstant('{tmp}\ExpedHubTransaction-') +
+      GetDateTimeString('yyyymmddhhnnss', '', '') + '-' + IntToStr(Random(1000000000));
+    HubWasRunning := QueryHubRunning;
+    ExistingProvisionedConfig := QueryProvisionedConfig;
+    if not ExistingProvisionedConfig then
+      RaiseException('ExpedHubSetup e somente para upgrade ja provisionado. Use ExpedSetup para a instalacao inicial.');
+    RunOrchestratorChecked('SnapshotHub',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir),
+      'Snapshot do payload/config/servico falhou');
+    HubSnapshotCreated := True;
+    RunOrchestratorChecked('StopHub', '', 'Nao foi possivel parar o ExpedHub');
+    if HubWasRunning then Sleep(2000);
+  except
+    Result := GetExceptionMessage;
+    RestoreHubAfterFailure;
+  end;
+end;
 
 function RandomSecret(Len: Integer): String;
 var
@@ -156,19 +282,19 @@ begin
     Result := Result + Copy(Chars, Random(Length(Chars)) + 1, 1);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure RunTransactionalInstall;
 var
   ConfigFile: String;
   Content: AnsiString;
   S: String;
   Secret: String;
+  ResultCode: Integer;
 begin
-  { ssPostInstall roda DEPOIS de [Files] (config.json ja copiado) e ANTES de [Run]. }
-  if CurStep = ssPostInstall then
-  begin
-    { Inno Setup 6.7.3+ removeu a chamada explicita Randomize (o Random ja e
-      auto-semeado pelo runtime). Nao chamar Randomize aqui — quebra a compilacao. }
+  try
     ConfigFile := ExpandConstant('{app}\config.json');
+    RunOrchestratorChecked('StampHubVersion',
+      '-AppVersion ' + QuoteArg('{#MyAppVersion}'),
+      'Carimbo atomico de config.version falhou');
     if LoadStringFromFile(ConfigFile, Content) then
     begin
       S := String(Content);
@@ -177,8 +303,63 @@ begin
       begin
         Secret := RandomSecret(48);
         StringChangeEx(S, 'TROCAR-no-install-por-segredo-aleatorio-min-32-chars', Secret, True);
-        SaveStringToFile(ConfigFile, AnsiString(S), False);
+        if not SaveStringToFile(ConfigFile, AnsiString(S), False) then
+          RaiseException('Nao foi possivel escrever jwtSecret em config.json.');
       end;
     end;
+
+    ExecChecked(PowerShellExe,
+      PowerShellFileParams(ExpandConstant('{app}\hub\win\download-binaries.ps1'),
+        '-InstallDir ' + QuoteArg(ExpandConstant('{app}\bin'))),
+      ExpandConstant('{app}'), 'Download de binarios falhou');
+    ServiceInstallAttempted := True;
+    ExecChecked(PowerShellExe,
+      PowerShellFileParams(ExpandConstant('{app}\hub\win\install-service.ps1'),
+        '-Root ' + QuoteArg(ExpandConstant('{app}')) +
+        ' -ConfigPath ' + QuoteArg(ConfigFile) + ' -ManageAgent false'),
+      ExpandConstant('{app}'), 'Registro do servico ExpedHub falhou');
+    if (not Exec(PowerShellExe, OrchestratorParams('VerifyCompleteStatus',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir)), ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+      RaiseException('Health final incompleto; snapshot de rollback foi preservado.');
+    if (not Exec(PowerShellExe, OrchestratorParams('FinalizeHub',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir)), ExpandConstant('{tmp}'),
+      SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+      Log('AVISO: backup do Hub foi preservado apos instalacao concluida.');
+    InstallCompleted := True;
+  except
+    RestoreHubAfterFailure;
+    raise;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  { Operacoes faliveis pertencem ao callback AfterInstall da ultima entrada [Files]. }
+end;
+
+procedure DeinitializeSetup;
+begin
+  if not InstallCompleted then RestoreHubAfterFailure;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Params: String;
+  ResultCode: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Params := PowerShellFileParams(ExpandConstant('{app}\hub\win\uninstall-service.ps1'),
+    '-Root ' + QuoteArg(ExpandConstant('{app}')) + ' -ManageAgent false');
+  if not Exec(PowerShellExe, Params, ExpandConstant('{app}'), SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('Nao foi possivel iniciar a remocao do ExpedHub. Arquivos preservados.', mbError, MB_OK);
+    Abort;
+  end;
+  if ResultCode <> 0 then
+  begin
+    MsgBox('A remocao do servico/firewall falhou. Arquivos preservados.', mbError, MB_OK);
+    Abort;
   end;
 end;

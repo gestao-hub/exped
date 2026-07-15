@@ -1,12 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { format } from 'date-fns';
 import { createClient } from '@/lib/supabase/server';
-import type { PedidoStatus } from '@/lib/types';
+import { HISTORICO_EXPORT_STATUS } from '@/lib/pedidos/historico';
 
-const VALID_STATUS: PedidoStatus[] = ['rascunho', 'em_financeiro', 'pendente', 'em_separacao', 'em_transporte', 'parcialmente_entregue', 'finalizado', 'cancelado'];
-// Status "terminais" (finitos) podem exportar sem período; os demais (e 'todos') exigem from+to
-// pra não varrer a base inteira em volume.
-const TERMINAL = new Set(['finalizado', 'cancelado']);
 const PAGE = 1000;
 
 const SELECT = `numero_mapa, documento_erp, data_emissao, data_entrega,
@@ -28,7 +24,7 @@ export const runtime = 'nodejs';
  * GET /historico/export?from=YYYY-MM-DD&to=YYYY-MM-DD&status=finalizado
  *
  * CSV em STREAMING (páginas de 1000) — não carrega tudo em memória. Respeita RLS
- * (vendedor vê só os dele; logística/admin veem todos). Status não-terminal exige período.
+ * (vendedor vê só os dele; logística/admin veem todos). O CSV é sempre de finalizados.
  */
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -51,11 +47,11 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const from = sp.get('from');
   const to = sp.get('to');
-  const status = sp.get('status') ?? 'finalizado';
+  const requestedStatus = sp.get('status');
 
-  if (!TERMINAL.has(status) && !(from && to)) {
+  if (requestedStatus !== null && requestedStatus !== HISTORICO_EXPORT_STATUS) {
     return NextResponse.json(
-      { error: 'Informe um período (from e to) para exportar este status.' },
+      { error: 'O histórico exporta apenas pedidos finalizados.' },
       { status: 400 },
     );
   }
@@ -64,12 +60,11 @@ export async function GET(req: NextRequest) {
     let q = supabase
       .from('pedidos')
       .select(SELECT)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE - 1);
     if (empresaId) q = q.eq('empresa_id', empresaId);
-    if (status !== 'todos' && (VALID_STATUS as string[]).includes(status)) {
-      q = q.eq('status', status as PedidoStatus);
-    }
+    q = q.eq('status', HISTORICO_EXPORT_STATUS);
     if (from) q = q.gte('data_entrega', from);
     if (to) q = q.lte('data_entrega', to);
     return q;

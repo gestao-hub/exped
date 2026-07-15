@@ -3,18 +3,46 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch: {}
+permissions:
+  contents: read
 jobs:
   installer:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '24'
+          node-version: '24.18.0'
       - run: npm ci
       - run: npm run typecheck
+      - run: npm test
+      - name: Validate Windows PowerShell 5.1 scripts
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            throw "Expected Windows PowerShell 5.1, got $($PSVersionTable.PSVersion)"
+          }
+          $failed = $false
+          $scripts = @(
+            Get-ChildItem hub -Filter *.ps1 -File
+            Get-ChildItem hub/win -Filter *.ps1 -File
+          )
+          $scripts | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Error "$($_.Name): $($errors.Message -join '; ')"
+            }
+          }
+          if ($failed) { exit 1 }
       - name: Versao
         id: ver
         shell: bash
@@ -25,37 +53,52 @@ jobs:
           SUPABASE_URL: http://127.0.0.1:54320
           SUPABASE_ANON_KEY: build-placeholder-anon
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '8.0.423'
+      - name: Test Agent readiness contract
+        run: dotnet test agent/ExpedAgent.Tests/ExpedAgent.Tests.csproj --configuration Release
       - name: Publish agente (win-x64, self-contained)
         run: dotnet publish agent/ExpedAgent -c Release -o agent/installer/publish
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.22'
-      - name: Cache auth.exe (GoTrue)
-        id: cache-auth
-        uses: actions/cache@v4
-        with:
-          path: gotrue-build
-          key: authexe-v2.189.0-${{ hashFiles('hub/win/gotrue-windows.patch') }}
+          go-version: '1.25.8'
       - name: Build GoTrue auth.exe
-        if: steps.cache-auth.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          AUTH_COMMIT_1: 4fa66ba7
+          AUTH_COMMIT_2: 1d8c55b5
+          AUTH_COMMIT_3: c95cd563
+          AUTH_COMMIT_4: 5766ed8b
+          AUTH_COMMIT_5: bae6d96a
+          AUTH_VERSION: v2.189.0
         run: |
-          set -e
-          git clone --depth 1 --branch v2.189.0 https://github.com/supabase/auth /tmp/auth
+          set -euo pipefail
+          AUTH_COMMIT="${AUTH_COMMIT_1}${AUTH_COMMIT_2}${AUTH_COMMIT_3}${AUTH_COMMIT_4}${AUTH_COMMIT_5}"
+          rm -rf /tmp/auth
+          git init /tmp/auth
           cd /tmp/auth
+          git remote add origin https://github.com/supabase/auth
+          git fetch --depth 1 origin "$AUTH_COMMIT"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$AUTH_COMMIT"
           git apply --ignore-whitespace "$GITHUB_WORKSPACE/hub/win/gotrue-windows.patch"
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-X github.com/supabase/auth/internal/utilities.Version=v2.189.0" -o auth.exe .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/supabase/auth/internal/utilities.Version=$AUTH_VERSION" -o auth.exe .
           mkdir -p "$GITHUB_WORKSPACE/gotrue-build"
           cp auth.exe "$GITHUB_WORKSPACE/gotrue-build/auth.exe"
           cp -r migrations "$GITHUB_WORKSPACE/gotrue-build/migrations"
 
-      - name: Baixar mkcert.exe (HTTPS na LAN)
-        shell: bash
-        run: curl -L -o mkcert.exe https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe
+      - name: Baixar e validar mkcert.exe (HTTPS na LAN)
+        shell: pwsh
+        run: |
+          function Assert-Sha256($Path, $Expected) {
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+            if ($actual -ne $Expected) { throw "SHA-256 invalido para ${Path}: $actual" }
+          }
+          curl.exe -fL --retry 3 -o mkcert.exe https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-windows-amd64.exe
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao baixar mkcert.exe" }
+          Assert-Sha256 'mkcert.exe' 'd2660b50a9ed59eada480750561c96abc2ed4c9a38c6a24d93e30e0977631398'
 
       - name: Montar payload
         shell: bash
@@ -63,17 +106,35 @@ jobs:
           VER: ${{ steps.ver.outputs.ver }}
         run: node scripts/montar-payload.mjs --auth gotrue-build/auth.exe --auth-migrations gotrue-build/migrations --mkcert mkcert.exe --version "$VER"
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+      - name: Instalar Inno Setup 6.7.3 verificado
+        shell: pwsh
+        run: |
+          function Assert-Sha256($Path, $Expected) {
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+            if ($actual -ne $Expected) { throw "SHA-256 invalido para ${Path}: $actual" }
+          }
+          curl.exe -fL --retry 3 -o innosetup.exe https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao baixar Inno Setup" }
+          Assert-Sha256 'innosetup.exe' '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          $process = Start-Process -FilePath .\innosetup.exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Instalador do Inno Setup terminou com codigo $($process.ExitCode)" }
 
-      - name: Compile installer (ISCC)
+      - name: Compile unified installer (ISCC)
         shell: cmd
         env:
           VER: ${{ steps.ver.outputs.ver }}
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-setup.iss'
 
-      - uses: actions/upload-artifact@v4
+      - name: Compile hub-only installer (ISCC)
+        shell: cmd
+        env:
+          VER: ${{ steps.ver.outputs.ver }}
+        run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-hub.iss'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ExpedSetup-${{ steps.ver.outputs.ver }}
-          path: hub/win/Output/ExpedSetup.exe
+          path: |
+            hub/win/Output/ExpedSetup.exe
+            hub/win/Output/ExpedHubSetup.exe
           if-no-files-found: error

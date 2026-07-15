@@ -154,7 +154,8 @@ export async function inserirPedido(
       const { count } = await supabase
         .from('pedido_pontos_retirada')
         .select('id', { count: 'exact', head: true })
-        .eq('pedido_id', existing.id);
+        .eq('pedido_id', existing.id)
+        .is('deleted_at', null);
       if ((count ?? 0) <= 1) {
         const updateObj: Database['public']['Tables']['pedidos']['Update'] = { ...baseFields };
         if (d.exige_emissao !== undefined) updateObj.exige_emissao = d.exige_emissao;
@@ -165,10 +166,24 @@ export async function inserirPedido(
         const { data: pontosAntigos } = await supabase
           .from('pedido_pontos_retirada')
           .select('id')
-          .eq('pedido_id', existing.id);
+          .eq('pedido_id', existing.id)
+          .is('deleted_at', null);
         const ids = (pontosAntigos ?? []).map((p) => p.id as string);
-        if (ids.length) await supabase.from('pedido_itens').delete().in('ponto_retirada_id', ids);
-        await supabase.from('pedido_pontos_retirada').delete().eq('pedido_id', existing.id);
+        if (ids.length) {
+          const now = new Date().toISOString();
+          const { error: itemArchiveError } = await supabase
+            .from('pedido_itens')
+            .update({ deleted_at: now })
+            .in('ponto_retirada_id', ids)
+            .is('deleted_at', null);
+          if (itemArchiveError) return { error: `Falha ao arquivar itens: ${itemArchiveError.message}` };
+
+          const { error: pointArchiveError } = await supabase
+            .from('pedido_pontos_retirada')
+            .update({ deleted_at: now })
+            .in('id', ids);
+          if (pointArchiveError) return { error: `Falha ao arquivar pontos: ${pointArchiveError.message}` };
+        }
 
         const err = await inserirPontosItens(supabase, existing.id, d.pontos_retirada);
         if (err) return { error: err };

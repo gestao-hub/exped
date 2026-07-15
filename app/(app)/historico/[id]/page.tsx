@@ -9,6 +9,7 @@ import { PedidoComentarios } from '@/components/pedido-comentarios';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 import type { PedidoItem } from '@/lib/types';
+import { historicoDetailDescription } from '@/lib/pedidos/historico';
 
 export default async function HistoricoDetail({
   params,
@@ -28,7 +29,7 @@ export default async function HistoricoDetail({
     { data: logistica },
     { data: comentarios },
   ] = await Promise.all([
-    supabase.from('pedidos').select('*').eq('id', id).single(),
+    supabase.from('pedidos').select('*').eq('id', id).is('deleted_at', null).single(),
     supabase
       .from('pedido_pontos_retirada')
       .select('*, itens:pedido_itens(*)')
@@ -78,7 +79,7 @@ export default async function HistoricoDetail({
             {pedido.cliente_nome}
           </>
         }
-        description="Pedido finalizado (somente leitura)."
+        description={historicoDetailDescription(pedido.status)}
         actions={
           <>
             <Link

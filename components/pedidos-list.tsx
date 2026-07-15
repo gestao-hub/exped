@@ -43,6 +43,7 @@ import { useConfirm } from '@/components/providers/confirm-provider';
 import { createClient } from '@/lib/supabase/client';
 import { useLiveUpdates } from '@/lib/realtime/use-live-updates';
 import type { Pedido, PedidoStatus } from '@/lib/types';
+import { applyPedidoListQueryPolicy } from '@/lib/pedidos/query-policy';
 import {
   iniciarSeparacaoLoteAction,
   finalizarLoteAction,
@@ -165,7 +166,10 @@ export function PedidosList({
     const pageTo = pageFrom + PAGE_SIZE - 1;
     let query = supabase
       .from('pedidos')
-      .select('*', { count: 'exact' })
+      .select('*', { count: 'exact' });
+
+    query = applyPedidoListQueryPolicy(query, { empresaId, status, search });
+    query = query
       .order(sortBy, { ascending: sortDir === 'asc', nullsFirst: false })
       .order('id', { ascending: true })
       .range(pageFrom, pageTo);
@@ -175,14 +179,6 @@ export function PedidosList({
     // (empresa_id, status, data_entrega) → Seq Scan que cresce com o total de TODAS as
     // empresas. Com o empresa_id explícito, o planner usa o índice (Index Scan, escala
     // flat). Medido em carga (100k pedidos): ~34ms → ~2ms. Redundante com a RLS, nunca a afrouxa.
-    if (empresaId) query = query.eq('empresa_id', empresaId);
-    if (status !== 'todos') query = query.eq('status', status);
-    if (search.trim()) {
-      const q = `%${search.trim()}%`;
-      query = query.or(
-        `cliente_nome.ilike.${q},documento_erp.ilike.${q},cliente_bairro.ilike.${q}`,
-      );
-    }
     const range = computeRange(dateRange, customFrom, customTo);
     if (range) {
       query = query
@@ -225,6 +221,7 @@ export function PedidosList({
   useEffect(() => {
     const ids = idsParciais ? idsParciais.split(',') : [];
     if (ids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setItensParciais({});
       return;
     }
@@ -295,7 +292,7 @@ export function PedidosList({
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
-                placeholder="Buscar por cliente, documento ou bairro…"
+                placeholder="Buscar por mapa, cliente, documento ou bairro…"
                 className="pl-9 bg-white/60 dark:bg-white/5"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}

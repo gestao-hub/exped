@@ -13,6 +13,15 @@ const BRL = (n: number) => Number(n).toLocaleString('pt-BR', { style: 'currency'
 const dt = (s: string | null) => (s ? format(new Date(s), "dd/MM/yyyy HH:mm", { locale: ptBR }) : '—');
 const d = (s: string | null) => (s ? format(new Date(s), 'dd/MM/yyyy', { locale: ptBR }) : '—');
 
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm">{children}</p>
+    </div>
+  );
+}
+
 export default async function OsDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
@@ -41,13 +50,6 @@ export default async function OsDetailPage({ params }: { params: Promise<{ id: s
 
   const itens = (os.itens ?? []) as Array<{ id: string; codigo: string | null; descricao: string; quantidade: number; preco_unitario: number; total: number }>;
   const servicos = (os.servicos ?? []) as Array<{ id: string; descricao: string; quantidade: number; valor_unitario: number; total: number; tecnico_nome: string | null }>;
-
-  const Campo = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="text-sm">{children}</p>
-    </div>
-  );
 
   return (
     <>

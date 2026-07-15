@@ -30,6 +30,19 @@ export type Endereco = {
   is_padrao: boolean;
 };
 
+export function deriveEnderecosManagerView<T>(
+  clienteId: string,
+  loadedClienteId: string | null,
+  loadedEnderecos: T[],
+  refreshing: boolean,
+): { enderecos: T[]; loading: boolean } {
+  const hasCurrentCliente = loadedClienteId === clienteId;
+  return {
+    enderecos: hasCurrentCliente ? loadedEnderecos : [],
+    loading: refreshing || !hasCurrentCliente,
+  };
+}
+
 export function EnderecosManager({
   clienteId,
   canEdit = true,
@@ -38,14 +51,23 @@ export function EnderecosManager({
   canEdit?: boolean;
 }) {
   const supabase = useMemo(() => createClient(), []);
-  const [enderecos, setEnderecos] = useState<Endereco[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState<{
+    clienteId: string | null;
+    enderecos: Endereco[];
+  }>({ clienteId: null, enderecos: [] });
+  const [refreshing, setRefreshing] = useState(true);
   const [editingId, setEditingId] = useState<string | 'new' | null>(null);
   const [pending, start] = useTransition();
   const confirm = useConfirm();
+  const { enderecos, loading } = deriveEnderecosManagerView(
+    clienteId,
+    loaded.clienteId,
+    loaded.enderecos,
+    refreshing,
+  );
 
   const fetchList = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     const { data, error } = await supabase
       .from('cliente_enderecos')
       .select('*')
@@ -53,13 +75,31 @@ export function EnderecosManager({
       .order('is_padrao', { ascending: false })
       .order('created_at');
     if (error) toast.error(error.message);
-    setEnderecos((data ?? []) as Endereco[]);
-    setLoading(false);
+    setLoaded({ clienteId, enderecos: (data ?? []) as Endereco[] });
+    setRefreshing(false);
   }, [supabase, clienteId]);
 
   useEffect(() => {
-    fetchList();
-  }, [fetchList]);
+    let cancelled = false;
+
+    async function fetchInitialList() {
+      const { data, error } = await supabase
+        .from('cliente_enderecos')
+        .select('*')
+        .eq('cliente_id', clienteId)
+        .order('is_padrao', { ascending: false })
+        .order('created_at');
+      if (cancelled) return;
+      if (error) toast.error(error.message);
+      setLoaded({ clienteId, enderecos: (data ?? []) as Endereco[] });
+      setRefreshing(false);
+    }
+
+    void fetchInitialList();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, clienteId]);
 
   function handleSave(input: EnderecoInput, id: string | null) {
     start(async () => {

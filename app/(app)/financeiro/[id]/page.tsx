@@ -24,8 +24,16 @@ export default async function FinanceiroDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: pedido }, { data: pontosRaw }, { data: comentarios }] = await Promise.all([
-    supabase.from('pedidos').select('*').eq('id', id).single(),
+  const { data: pedido } = await supabase
+    .from('pedidos')
+    .select('*')
+    .eq('id', id)
+    .is('deleted_at', null)
+    .single();
+
+  if (!pedido) notFound();
+
+  const [{ data: pontosRaw }, { data: comentarios }] = await Promise.all([
     supabase
       .from('pedido_pontos_retirada')
       .select('*, itens:pedido_itens(*)')
@@ -39,8 +47,6 @@ export default async function FinanceiroDetailPage({
       .eq('pedido_id', id)
       .order('created_at', { ascending: true }),
   ]);
-
-  if (!pedido) notFound();
 
   const vendedor = pedido.vendedor_id
     ? (

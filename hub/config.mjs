@@ -41,6 +41,17 @@ const DEFAULTS = {
     deviceToken: null, // EXPED_DEVICE_TOKEN — token do dispositivo (Bearer)
     syncIntervalMs: 10000, // EXPED_SYNC_INTERVAL_MS
   },
+  agent: {
+    // Porta do listener loopback /sync-now do ExpedAgent. Zero desativa o
+    // botão e a chamada sob demanda sem desligar o ciclo automático.
+    syncNowPort: 5005,
+    healthPath: 'C:\\ProgramData\\ExpedAgent\\health.json',
+    healthMaxAgeMs: 90000,
+    // O instalador atual executa o agente no perfil que possui acesso Windows
+    // ao SQL do Hiper. `disabled` e usado pelo pacote hub-only sem agente.
+    startupMode: 'interactive_logon',
+    survivesRebootWithoutLogon: false,
+  },
 };
 
 /** Placeholder histórico (segredo conhecido) — NUNCA aceitar como secret real. */
@@ -66,6 +77,7 @@ function shallowMerge(base, over = {}) {
   out.ports = { ...base.ports, ...(over.ports || {}) };
   out.paths = { ...base.paths, ...(over.paths || {}) };
   out.cloud = { ...base.cloud, ...(over.cloud || {}) };
+  out.agent = { ...base.agent, ...(over.agent || {}) };
   return out;
 }
 
@@ -103,14 +115,54 @@ export function loadConfig(overrides = {}) {
   if (process.env.EXPED_DEVICE_TOKEN) cloud.deviceToken = process.env.EXPED_DEVICE_TOKEN;
   if (process.env.EXPED_SYNC_INTERVAL_MS) cloud.syncIntervalMs = Number(process.env.EXPED_SYNC_INTERVAL_MS);
 
+  const agent = {};
+  if (process.env.EXPED_AGENT_SYNC_PORT !== undefined) {
+    agent.syncNowPort = Number(process.env.EXPED_AGENT_SYNC_PORT);
+  }
+  if (process.env.EXPED_AGENT_HEALTH_PATH) {
+    agent.healthPath = process.env.EXPED_AGENT_HEALTH_PATH;
+  }
+  if (process.env.EXPED_AGENT_HEALTH_MAX_AGE_MS !== undefined) {
+    agent.healthMaxAgeMs = Number(process.env.EXPED_AGENT_HEALTH_MAX_AGE_MS);
+  }
+  if (process.env.EXPED_AGENT_STARTUP_MODE !== undefined) {
+    agent.startupMode = process.env.EXPED_AGENT_STARTUP_MODE;
+  }
+  if (process.env.EXPED_AGENT_SURVIVES_REBOOT_WITHOUT_LOGON !== undefined) {
+    agent.survivesRebootWithoutLogon =
+      process.env.EXPED_AGENT_SURVIVES_REBOOT_WITHOUT_LOGON === 'true';
+  }
+
   if (Object.keys(ports).length) env.ports = ports;
   if (Object.keys(paths).length) env.paths = paths;
   if (Object.keys(cloud).length) env.cloud = cloud;
+  if (Object.keys(agent).length) env.agent = agent;
 
   // jwtSecret é obrigatório e validado — sem default fixo (segredo por instalação).
   const jwtSecret = resolveJwtSecret(overrides);
 
   const cfg = shallowMerge(shallowMerge(DEFAULTS, env), overrides);
+  if (
+    !Number.isInteger(cfg.agent.syncNowPort) ||
+    cfg.agent.syncNowPort < 0 ||
+    cfg.agent.syncNowPort > 65535
+  ) {
+    throw new Error('agent.syncNowPort deve ser um inteiro entre 0 e 65535');
+  }
+  if (!['interactive_logon', 'disabled'].includes(cfg.agent.startupMode)) {
+    throw new Error(
+      `agent.startupMode=${JSON.stringify(cfg.agent.startupMode)} recusado: ` +
+      'Trusted_Connection exige a identidade interativa comprovada; windows_service nao e suportado',
+    );
+  }
+  if (cfg.agent.survivesRebootWithoutLogon !== false) {
+    throw new Error(
+      'agent.survivesRebootWithoutLogon deve ser false: nao ha recuperacao garantida sem login',
+    );
+  }
+  if (!Number.isInteger(cfg.agent.healthMaxAgeMs) || cfg.agent.healthMaxAgeMs < 1000) {
+    throw new Error('agent.healthMaxAgeMs deve ser um inteiro >= 1000');
+  }
   cfg.jwtSecret = jwtSecret;
   return cfg;
 }

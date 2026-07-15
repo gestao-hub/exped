@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { SyncSchemaUnavailableError } from '@/lib/sync/engine';
 
 /**
  * Testes de rota: focam no comportamento HTTP (auth/escopo/status), com o SyncDb
@@ -29,6 +30,7 @@ const fakeDb = {
     }
     return s;
   }),
+  mergeAndUpsert: vi.fn(),
   upsertRaw: vi.fn(),
   setSyncReplica: vi.fn(async () => {}),
   selectAuthUsers: vi.fn(async (): Promise<Record<string, unknown>[]> => []),
@@ -37,7 +39,7 @@ const fakeDb = {
 // Supabase admin mock: suporta a cadeia de resolveDevice (from('dispositivos')...).
 function makeAdminMock() {
   return {
-    from(_t: string) {
+    from() {
       return {
         select() {
           return this;
@@ -81,6 +83,18 @@ beforeEach(() => {
   vi.clearAllMocks();
   fakeDb.findCanonicalGlobal.mockResolvedValue(null);
   fakeDb.selectAuthUsers.mockResolvedValue([]);
+  fakeDb.mergeAndUpsert.mockImplementation(
+    async (_table: unknown, empresaId: string, row: Record<string, unknown>) => {
+      const timestamps = Object.values(
+        (row.field_updated_at ?? {}) as Record<string, string>,
+      ).filter((value): value is string => typeof value === 'string').sort();
+      return {
+        ...row,
+        ...(row.empresa_id !== undefined ? { empresa_id: empresaId } : {}),
+        updated_at: timestamps.at(-1) ?? '1970-01-01T00:00:00Z',
+      };
+    },
+  );
   deviceRow = { id: 'D1', empresa_id: 'E1', ativo: true };
 });
 
@@ -127,9 +141,66 @@ describe('POST /api/sync/pull', () => {
     // escopo: empresa do device (E1) é passada ao db, nunca o que vem do payload.
     expect(fakeDb.selectAuthUsers).toHaveBeenCalledWith('E1', '2026-01-01T00:00:00Z', 500);
   });
+
+  it('identityOnly limita o pull a profiles e auth.users', async () => {
+    fakeDb.selectChanges.mockImplementation(async (table: string) => (
+      table === 'profiles'
+        ? [{ id: 'u1', empresa_id: 'E1', updated_at: '2026-07-14T11:00:00Z' }]
+        : []
+    ));
+    fakeDb.selectAuthUsers.mockResolvedValue([
+      { id: 'u1', email: 'u1@example.test', updated_at: '2026-07-14T12:00:00Z' },
+    ]);
+
+    const res = await pullPOST(req({ cursors: {}, identityOnly: true }, 'tok') as never);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.identityOnly).toBe(true);
+    expect(Object.keys(json.tables)).toEqual(['profiles']);
+    expect(fakeDb.selectChanges).toHaveBeenCalledTimes(1);
+    expect(fakeDb.selectChanges).toHaveBeenCalledWith(
+      'profiles',
+      'E1',
+      '1970-01-01T00:00:00Z',
+      500,
+    );
+    expect(fakeDb.selectAuthUsers).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('POST /api/sync/push', () => {
+  it('503 preserva retry quando a migration atomica ainda nao esta disponivel', async () => {
+    fakeDb.mergeAndUpsert.mockRejectedValue(
+      new SyncSchemaUnavailableError('sync_merge_upsert indisponivel'),
+    );
+    const res = await pushPOST(
+      req({ rows: { pedidos: [{ id: 'p-4079', field_updated_at: {} }] } }, 'tok') as never,
+    );
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    expect(await res.json()).toEqual({
+      error: 'Sincronizacao aguardando atualizacao do banco',
+      blockedRow: { table: 'pedidos', pk: 'p-4079' },
+    });
+  });
+
+  it('500 conhecido devolve somente tabela/PK sanitizadas', async () => {
+    fakeDb.findCanonical.mockResolvedValue(null);
+    fakeDb.mergeAndUpsert.mockRejectedValue(
+      new Error('duplicate key value violates users_email_partial_key'),
+    );
+    const res = await pushPOST(
+      req({ rows: { pedidos: [{ id: 'p-4079', field_updated_at: {} }] } }, 'tok') as never,
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: 'Falha ao gravar linha de sync',
+      blockedRow: { table: 'pedidos', pk: 'p-4079' },
+    });
+  });
+
   it('sem token → 401', async () => {
     const res = await pushPOST(req({ rows: {} }) as never);
     expect(res.status).toBe(401);
@@ -138,41 +209,41 @@ describe('POST /api/sync/push', () => {
   it('push em tabela down → 403', async () => {
     const res = await pushPOST(req({ rows: { empresas: [{ id: 'x' }] } }, 'tok') as never);
     expect(res.status).toBe(403);
-    expect(fakeDb.upsertRaw).not.toHaveBeenCalled();
+    expect(fakeDb.mergeAndUpsert).not.toHaveBeenCalled();
   });
 
   it('linha nova → INSERT (empresa_id forçado ao escopo)', async () => {
     fakeDb.findCanonical.mockResolvedValue(null);
-    fakeDb.upsertRaw.mockImplementation(async (_t: string, row: Record<string, unknown>) => row);
     const res = await pushPOST(
       req({ rows: { clientes: [{ id: 'c1', empresa_id: 'HACK', nome: 'N', field_updated_at: { nome: '2026-03-01T00:00:00Z' } }] } }, 'tok') as never,
     );
     expect(res.status).toBe(200);
-    const [, written] = fakeDb.upsertRaw.mock.calls[0];
+    const [, tenant, written] = fakeDb.mergeAndUpsert.mock.calls[0];
+    expect(tenant).toBe('E1');
     expect(written.empresa_id).toBe('E1'); // forçado, ignora HACK
-    expect(written.updated_at).toBe('2026-03-01T00:00:00Z');
+    expect((await res.json()).tables.clientes[0].updated_at).toBe('2026-03-01T00:00:00Z');
   });
 
-  it('SEGURANÇA: PK existente em outra empresa → 403 propaga na rota (sem upsert)', async () => {
-    fakeDb.findCanonical.mockResolvedValue(null); // não enxerga (escopado em E1)
-    fakeDb.findCanonicalGlobal.mockResolvedValue({ id: 'c1', empresa_id: 'E2', nome: 'B' }); // existe global, da E2
+  it('SEGURANÇA: PK existente em outra empresa → 403 propaga na rota', async () => {
+    fakeDb.mergeAndUpsert.mockResolvedValue(null);
     const res = await pushPOST(
       req({ rows: { clientes: [{ id: 'c1', nome: 'HACK', field_updated_at: { nome: '2026-09-01T00:00:00Z' } }] } }, 'tok') as never,
     );
     expect(res.status).toBe(403);
-    expect(fakeDb.upsertRaw).not.toHaveBeenCalled();
+    expect(fakeDb.mergeAndUpsert).toHaveBeenCalledTimes(1);
+    expect(fakeDb.mergeAndUpsert.mock.calls[0][1]).toBe('E1');
   });
 
-  it('linha existente com field_updated_at mais novo em 1 coluna → merge aplica essa coluna', async () => {
-    fakeDb.findCanonical.mockResolvedValue({
+  it('linha existente recebe a canônica mergeada pela operação atômica', async () => {
+    fakeDb.mergeAndUpsert.mockResolvedValue({
       id: 'c1',
       empresa_id: 'E1',
-      endereco: 'CANON',
+      endereco: 'NOVO',
       telefone: 'T-CANON',
-      field_updated_at: { endereco: '2026-01-01T00:00:00Z', telefone: '2026-01-10T00:00:00Z' },
+      updated_at: '2026-02-01T00:00:00Z',
+      field_updated_at: { endereco: '2026-02-01T00:00:00Z', telefone: '2026-01-10T00:00:00Z' },
     });
-    fakeDb.upsertRaw.mockImplementation(async (_t: string, row: Record<string, unknown>) => row);
-    await pushPOST(
+    const res = await pushPOST(
       req(
         {
           rows: {
@@ -189,9 +260,13 @@ describe('POST /api/sync/push', () => {
         'tok',
       ) as never,
     );
-    const [, written] = fakeDb.upsertRaw.mock.calls[0];
-    expect(written.endereco).toBe('NOVO'); // incoming mais novo
-    expect(written.telefone).toBe('T-CANON'); // canon mais novo
-    expect(written.updated_at).toBe('2026-02-01T00:00:00Z');
+    const [, tenant, incoming] = fakeDb.mergeAndUpsert.mock.calls[0];
+    expect(tenant).toBe('E1');
+    expect(incoming.endereco).toBe('NOVO');
+    expect(incoming.telefone).toBe('T-VELHO');
+    const canonical = (await res.json()).tables.clientes[0];
+    expect(canonical.endereco).toBe('NOVO');
+    expect(canonical.telefone).toBe('T-CANON');
+    expect(canonical.updated_at).toBe('2026-02-01T00:00:00Z');
   });
 });

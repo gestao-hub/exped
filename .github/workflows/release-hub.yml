@@ -1,30 +1,154 @@
 name: release-hub
+
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Immutable source tag to build (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-hub
+  cancel-in-progress: false
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: windows-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout source tag without credentials
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          node-version: '24'
-      - run: npm ci
-      - name: Guard tag == package.json version
+          ref: refs/tags/${{ inputs.tag }}
+          path: source
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+      - name: Validate immutable source tag
+        id: source
+        shell: bash
+        working-directory: source
+        env:
+          SOURCE_TAG: ${{ inputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(node -p "require('./package.json').version")
-          test "$TAG" = "$PKG" || { echo "tag $TAG != package.json $PKG"; exit 1; }
-      - run: npm run typecheck
-      - run: npm run test
-      - name: Build app (standalone)
+          [[ "$SOURCE_TAG" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]] || {
+            echo "invalid release tag: $SOURCE_TAG" >&2
+            exit 1
+          }
+          EXPECTED_TAG_REF="refs/tags/$SOURCE_TAG"
+          git show-ref --verify --quiet "$EXPECTED_TAG_REF" || {
+            echo "source ref is not an immutable tag: $EXPECTED_TAG_REF" >&2
+            exit 1
+          }
+          TAG_COMMIT=$(git rev-parse "$EXPECTED_TAG_REF^{commit}")
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          test "$TAG_COMMIT" = "$HEAD_COMMIT" || {
+            echo "checked out commit does not match $EXPECTED_TAG_REF" >&2
+            exit 1
+          }
+          git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH" || {
+            echo "default branch ref is unavailable: origin/$DEFAULT_BRANCH" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$TAG_COMMIT" "origin/$DEFAULT_BRANCH" || {
+            echo "release tag $SOURCE_TAG is not contained in $DEFAULT_BRANCH" >&2
+            exit 1
+          }
+          VERSION="${SOURCE_TAG#v}"
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          test "$VERSION" = "$PACKAGE_VERSION" || {
+            echo "tag $SOURCE_TAG != package.json $PACKAGE_VERSION" >&2
+            exit 1
+          }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$HEAD_COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Install source dependencies
+        working-directory: source
+        run: npm ci
+      - name: Typecheck source
+        working-directory: source
+        run: npm run typecheck
+      - name: Test source
+        working-directory: source
+        run: npm run test
+      - name: Build app without release credentials
+        working-directory: source
         run: npm run build
         env:
+          EXPED_BUILD_ID: ${{ steps.source.outputs.sha }}
           SUPABASE_URL: http://127.0.0.1:54320
           SUPABASE_ANON_KEY: build-placeholder-anon
-      - name: Publish release
-        run: node scripts/release-hub.mjs
+      - name: Upload inert build output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hub-stage-${{ steps.source.outputs.sha }}
+          path: |
+            source/.next/standalone
+            source/.next/static
+            source/public
+            source/supabase/migrations
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  stage:
+    if: github.ref_name == github.event.repository.default_branch
+    needs: build
+    runs-on: windows-latest
+    environment: hub-stage
+    steps:
+      - name: Checkout trusted release tooling
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: tooling
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+      - name: Install trusted tooling dependencies
+        working-directory: tooling
+        run: npm ci --ignore-scripts
+      - name: Download inert build output
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hub-stage-${{ needs.build.outputs.source_sha }}
+          path: source
+      - name: Install pinned Info-ZIP
+        shell: powershell
+        run: choco install zip --version=3.0.0.20251001 --yes --no-progress --force
+      - name: Stage release ZIP
+        shell: bash
+        working-directory: tooling
         env:
-          SR: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          PROJECT_REF: ${{ vars.HUB_STAGE_SUPABASE_PROJECT_REF }}
+          RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source
+          RELEASE_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          SUPABASE_ANON_KEY: ${{ vars.HUB_STAGE_SUPABASE_ANON_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_STAGE_ACCESS_TOKEN }}
+        run: |
+          export PATH="/usr/bin:$PATH"
+          command -v zip
+          node scripts/release-hub.mjs stage "$RELEASE_VERSION"
+      - name: Preserve approved release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hub-release-${{ needs.build.outputs.source_sha }}
+          path: |
+            source/releases/${{ needs.build.outputs.version }}.zip
+            source/releases/${{ needs.build.outputs.version }}.release.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

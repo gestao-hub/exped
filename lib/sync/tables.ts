@@ -20,14 +20,25 @@
  */
 
 export type SyncDir = 'two-way' | 'down';
+export type SyncPrimaryKey = string | readonly string[];
 
-export type SyncTable = {
+type SyncTableBase = {
   name: string;
-  pk: string;
-  dir: SyncDir;
   /** Quando a tabela NÃO tem `empresa_id` direto, aponta o pai pra escopo via JOIN/subquery. */
   parent?: { table: string; fk: string };
 };
+
+export type TwoWaySyncTable = SyncTableBase & {
+  dir: 'two-way';
+  pk: string;
+};
+
+export type DownSyncTable = SyncTableBase & {
+  dir: 'down';
+  pk: SyncPrimaryKey;
+};
+
+export type SyncTable = TwoWaySyncTable | DownSyncTable;
 
 export const SYNC_TABLES: SyncTable[] = [
   { name: 'clientes', pk: 'id', dir: 'two-way' },
@@ -40,7 +51,7 @@ export const SYNC_TABLES: SyncTable[] = [
   { name: 'os_notificacoes', pk: 'id', dir: 'two-way' },
   { name: 'empresas', pk: 'id', dir: 'down' },
   { name: 'profiles', pk: 'id', dir: 'down' },
-  { name: 'hiper_vendedor_map', pk: 'id', dir: 'down' },
+  { name: 'hiper_vendedor_map', pk: ['empresa_id', 'hiper_usuario_id'], dir: 'down' },
   { name: 'dispositivos', pk: 'id', dir: 'down' },
 ];
 
@@ -48,6 +59,11 @@ const BY_NAME = new Map(SYNC_TABLES.map((t) => [t.name, t]));
 
 export function getSyncTable(name: string): SyncTable | undefined {
   return BY_NAME.get(name);
+}
+
+/** Coluna estável usada como desempate do cursor de pull dentro do escopo da empresa. */
+export function pullCursorColumn(table: SyncTable): string {
+  return typeof table.pk === 'string' ? table.pk : table.pk[table.pk.length - 1];
 }
 
 /** Tabelas que têm `empresa_id` diretamente (escopo direto). */

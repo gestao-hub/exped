@@ -18,6 +18,12 @@ const clienteSchema = z.object({
   observacoes:     z.string().max(5000).nullable().optional(),
 });
 
+const clienteIdSchema = z.uuid();
+const mergeClienteSchema = z.object({
+  sourceId: clienteIdSchema,
+  targetId: clienteIdSchema,
+});
+
 export type UpdateClienteInput = z.infer<typeof clienteSchema>;
 
 export async function updateClienteAction(input: UpdateClienteInput) {
@@ -26,7 +32,11 @@ export async function updateClienteAction(input: UpdateClienteInput) {
 
   const supabase = await createClient();
   const { id, ...patch } = parsed.data;
-  const { error } = await supabase.from('clientes').update(patch).eq('id', id);
+  const { error } = await supabase
+    .from('clientes')
+    .update(patch)
+    .eq('id', id)
+    .is('deleted_at', null);
   if (error) return { error: error.message };
 
   revalidatePath('/admin/clientes');
@@ -34,31 +44,35 @@ export async function updateClienteAction(input: UpdateClienteInput) {
 }
 
 /**
- * Merge: copia todos os pedidos de `sourceId` pra `targetId` e apaga o source.
+ * Merge: move os pedidos ativos de `sourceId` pra `targetId` e arquiva o source.
  * Útil quando 2 cadastros do mesmo cliente foram criados sem CNPJ.
  */
 export async function mergeClienteAction(input: { sourceId: string; targetId: string }) {
-  if (input.sourceId === input.targetId) return { error: 'Source e target iguais' };
+  const parsed = mergeClienteSchema.safeParse(input);
+  if (!parsed.success) return { error: 'Clientes inválidos' };
+  if (parsed.data.sourceId === parsed.data.targetId) return { error: 'Source e target iguais' };
 
   const supabase = await createClient();
-
-  const { error: e1 } = await supabase
-    .from('pedidos')
-    .update({ cliente_id: input.targetId })
-    .eq('cliente_id', input.sourceId);
-  if (e1) return { error: `Falha ao migrar pedidos: ${e1.message}` };
-
-  const { error: e2 } = await supabase.from('clientes').delete().eq('id', input.sourceId);
-  if (e2) return { error: `Falha ao remover origem: ${e2.message}` };
+  const { error } = await supabase.rpc('merge_clientes' as never, {
+    p_source_id: parsed.data.sourceId,
+    p_target_id: parsed.data.targetId,
+  } as never);
+  if (error) return { error: `Falha ao mesclar clientes: ${error.message}` };
 
   revalidatePath('/admin/clientes');
   return { ok: true as const };
 }
 
 export async function deleteClienteAction(id: string) {
+  const parsed = clienteIdSchema.safeParse(id);
+  if (!parsed.success) return { error: 'Cliente inválido' };
+
   const supabase = await createClient();
-  // Quebra link em pedidos antes (set null automático pela FK on delete set null)
-  const { error } = await supabase.from('clientes').delete().eq('id', id);
+  const { error } = await supabase
+    .from('clientes')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', parsed.data)
+    .is('deleted_at', null);
   if (error) return { error: error.message };
   revalidatePath('/admin/clientes');
   return { ok: true as const };

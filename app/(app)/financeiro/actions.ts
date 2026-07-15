@@ -38,6 +38,7 @@ export async function salvarFinanceiroAction(
     })
     .eq('id', id)
     .eq('status', 'em_financeiro')
+    .is('deleted_at', null)
     .select('id')
     .single();
   if (error || !data) {
@@ -77,6 +78,7 @@ export async function liberarParaLogisticaAction(
     })
     .eq('id', id)
     .eq('status', 'em_financeiro')
+    .is('deleted_at', null)
     .select('id')
     .single();
   if (error || !data) {

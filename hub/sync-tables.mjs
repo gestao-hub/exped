@@ -11,7 +11,7 @@
  * 8 two-way + 4 down (12 no total), igual à nuvem.
  */
 
-/** @typedef {{ name: string, pk: string, dir: 'two-way'|'down', parent?: { table: string, fk: string } }} SyncTable */
+/** @typedef {{ name: string, pk: string|string[], dir: 'two-way'|'down', parent?: { table: string, fk: string } }} SyncTable */
 
 /** @type {SyncTable[]} */
 export const SYNC_TABLES = [

@@ -1,125 +1,180 @@
 // hub/force-update.mjs — FORÇA o auto-update do hub AGORA (sem esperar o timer de 1h).
 //
-// Por quê: o maestro só checa update num setInterval (default 1h) e NÃO checa no
-// boot — então reiniciar o serviço não força. Este script roda o MESMO updater
-// testado (checkAndUpdate, com rollback) uma vez, na hora.
-//
-// Uso no SERVIDOR da loja (PowerShell, como Administrador):
-//   C:\Exped\bin\node.exe C:\Exped\hub\force-update.mjs
-//   (opcional: caminho do config.json como 1º arg; default C:\Exped\config.json)
-//
-// O que faz: baixa a versão do manifest, valida sha256, aplica as migrations no
-// Postgres LOCAL (idempotentes — pula as já aplicadas), troca o ponteiro `current`,
-// reinicia o serviço ExpedHub e roda health (/login). Se o health falhar, REVERTE
-// o ponteiro e reinicia (rollback). Seguro de rodar mais de uma vez.
-//
-// Reaproveita os módulos do próprio hub (config/updater/bootstrap) — não duplica lógica.
+// Usa a versão real do ponteiro `current`, com fallback para cfg.version. A opção
+// forceSameVersion reinstala a versão atual sem autorizar versões inferiores;
+// downgrade continua dependendo do contrato explícito do manifest.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const CONFIG_PATH =
-  process.argv[2] ||
-  (process.platform === 'win32' ? 'C:\\Exped\\config.json' : '/tmp/exped/config.json');
-const ROOT = path.dirname(CONFIG_PATH); // C:\Exped
-const SERVICE = process.env.EXPED_SERVICE_NAME || 'ExpedHub';
-const NSSM = path.join(ROOT, 'bin', 'nssm.exe');
-
-// 1) Carrega config.json e injeta as EXPED_* (mesmo mapeamento do install-service.ps1),
-//    pra loadConfig() montar a config IGUAL à do serviço.
-const raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
-const setIf = (k, v) => {
-  if (v !== undefined && v !== null && v !== '') process.env[k] = String(v);
-};
-const pgBin = path.join(ROOT, 'bin', 'pgsql', 'bin');
-process.env.PATH = `${pgBin};${path.join(ROOT, 'bin', 'node')};${process.env.PATH || ''}`;
-setIf('EXPED_PG_BIN', pgBin);
-setIf('EXPED_CERT_DIR', path.join(ROOT, 'cert'));
-if (raw.ports) {
-  setIf('EXPED_PG_PORT', raw.ports.pg);
-  setIf('EXPED_POSTGREST_PORT', raw.ports.postgrest);
-  setIf('EXPED_GOTRUE_PORT', raw.ports.gotrue);
-  setIf('EXPED_GATEWAY_PORT', raw.ports.gateway);
-  setIf('EXPED_STORAGE_PORT', raw.ports.storage);
-  setIf('EXPED_APP_PORT', raw.ports.app);
-}
-setIf('EXPED_PG_DATA', (raw.paths && raw.paths.pgData) || path.join(ROOT, 'data', 'pg'));
-setIf('EXPED_PG_HOST', (raw.paths && raw.paths.pgHost) || '127.0.0.1');
-if (raw.paths) {
-  setIf('EXPED_DB', raw.paths.db);
-  setIf('EXPED_DB_USER', raw.paths.user);
-}
-setIf('EXPED_JWT_SECRET', raw.jwtSecret);
-setIf('EXPED_MANIFEST_URL', raw.manifestUrl);
-setIf('EXPED_VERSION', raw.version);
-if (raw.cloud) {
-  setIf('EXPED_CLOUD_API', raw.cloud.apiBase);
-  setIf('EXPED_DEVICE_TOKEN', raw.cloud.deviceToken);
-  setIf('EXPED_SYNC_INTERVAL_MS', raw.cloud.syncIntervalMs);
-}
-
-// 2) imports do hub (módulos de função — sem efeito colateral no import)
-const { loadConfig } = await import('./config.mjs');
-const { checkAndUpdate } = await import('./updater.mjs');
-const { applyPendingMigrations } = await import('./bootstrap.mjs');
-
-const cfg = loadConfig();
-if (!cfg.manifestUrl) {
-  console.error('config.json sem manifestUrl — nada a forçar.');
-  process.exit(1);
-}
-
-// 3) Ponteiro: usa EXATAMENTE o que o maestro lê (cfg.paths.releasesPtr || <releasesDir>/current),
-//    pra o que escrevemos aqui ser o que o app carrega no restart.
-const releasesDir = cfg.paths.releasesDir || path.join(ROOT, 'releases');
-const ptrPath = cfg.paths.releasesPtr || path.join(releasesDir, 'current');
-cfg.paths.releasesDir = releasesDir;
-cfg.paths.releasesPtr = ptrPath;
-
-async function waitForHttp(url, ms = 90000) {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (r.status >= 200 && r.status < 500) return; // app de pé (200/3xx/401 contam)
-    } catch {
-      /* ainda subindo */
-    }
-    if (Date.now() > deadline) throw new Error(`timeout esperando ${url}`);
-    await new Promise((r) => setTimeout(r, 1500));
+export function currentVersionForForceUpdate(
+  pointerPath,
+  configVersion,
+  read = readFileSync,
+) {
+  try {
+    const pointer = String(read(pointerPath, 'utf8')).trim();
+    if (pointer) return pointer;
+  } catch {
+    // Instalações anteriores podem ainda não ter criado o ponteiro.
   }
+  if (typeof configVersion === 'string' && configVersion.trim()) {
+    return configVersion.trim();
+  }
+  return '0.0.0';
 }
 
-const res = await checkAndUpdate(
-  cfg,
-  {
-    // FORÇA: trata o atual como 0.0.0 → isNewer(manifest, 0.0.0) sempre true.
-    getCurrentVersion: () => '0.0.0',
-    restart: async () => {
-      execFileSync(NSSM, ['restart', SERVICE], { stdio: 'inherit' });
-    },
-    health: async () => {
-      await waitForHttp(`http://127.0.0.1:${cfg.ports.app}/login`, 90000);
-    },
-    migrate: async (releaseDir) =>
-      applyPendingMigrations(cfg, cfg.paths.db, path.join(releaseDir, 'supabase', 'migrations')),
-    logger: console,
-  },
-  {
-    getPointer: async () => {
-      try {
-        return readFileSync(ptrPath, 'utf8').trim() || null;
-      } catch {
-        return null;
-      }
-    },
-    setPointer: async (v) => {
-      mkdirSync(path.dirname(ptrPath), { recursive: true });
-      writeFileSync(ptrPath, String(v), 'utf8');
-    },
-  },
-);
+export function resolveForceUpdatePaths({
+  platform = process.platform,
+  root,
+  configPath,
+  releasesDir,
+  releasesPtr,
+} = {}) {
+  const pathApi = platform === 'win32' ? path.win32 : path;
+  const defaultRoot = platform === 'win32' ? 'C:\\Exped' : '/tmp/exped';
+  const resolvedRoot = root
+    ? (pathApi.isAbsolute(root) ? pathApi.normalize(root) : pathApi.resolve(defaultRoot, root))
+    : (configPath && pathApi.isAbsolute(configPath)
+      ? pathApi.dirname(pathApi.normalize(configPath))
+      : defaultRoot);
+  const fromRoot = (value, fallback) => {
+    const selected = value || fallback;
+    return pathApi.isAbsolute(selected)
+      ? pathApi.normalize(selected)
+      : pathApi.resolve(resolvedRoot, selected);
+  };
 
-console.log('RESULTADO:', JSON.stringify(res));
-process.exit(res.updated ? 0 : 1);
+  return {
+    root: resolvedRoot,
+    configPath: fromRoot(configPath, 'config.json'),
+    releasesDir: fromRoot(releasesDir, 'releases'),
+    pointerPath: fromRoot(releasesPtr, pathApi.join('releases', 'current')),
+    nssm: pathApi.join(resolvedRoot, 'bin', 'nssm.exe'),
+  };
+}
+
+async function main() {
+  const initialPaths = resolveForceUpdatePaths({
+    configPath: process.argv[2],
+    root: process.env.EXPED_ROOT,
+  });
+  const { configPath, root } = initialPaths;
+  const service = process.env.EXPED_SERVICE_NAME || 'ExpedHub';
+  const nssm = initialPaths.nssm;
+
+  const raw = JSON.parse(readFileSync(configPath, 'utf8'));
+  const setIf = (key, value) => {
+    if (value !== undefined && value !== null && value !== '') {
+      process.env[key] = String(value);
+    }
+  };
+  const pgBin = path.join(root, 'bin', 'pgsql', 'bin');
+  process.env.PATH = `${pgBin};${path.join(root, 'bin', 'node')};${process.env.PATH || ''}`;
+  setIf('EXPED_PG_BIN', pgBin);
+  setIf('EXPED_CERT_DIR', path.join(root, 'cert'));
+  if (raw.ports) {
+    setIf('EXPED_PG_PORT', raw.ports.pg);
+    setIf('EXPED_POSTGREST_PORT', raw.ports.postgrest);
+    setIf('EXPED_GOTRUE_PORT', raw.ports.gotrue);
+    setIf('EXPED_GATEWAY_PORT', raw.ports.gateway);
+    setIf('EXPED_STORAGE_PORT', raw.ports.storage);
+    setIf('EXPED_APP_PORT', raw.ports.app);
+    setIf('EXPED_FRONTDOOR_PORT', raw.ports.frontdoor);
+    setIf('EXPED_EVENTS_PORT', raw.ports.events);
+  }
+  setIf('EXPED_PG_DATA', (raw.paths && raw.paths.pgData) || path.join(root, 'data', 'pg'));
+  setIf('EXPED_PG_HOST', (raw.paths && raw.paths.pgHost) || '127.0.0.1');
+  if (raw.paths) {
+    setIf('EXPED_DB', raw.paths.db);
+    setIf('EXPED_DB_USER', raw.paths.user);
+  }
+  setIf('EXPED_JWT_SECRET', raw.jwtSecret);
+  setIf('EXPED_MANIFEST_URL', raw.manifestUrl);
+  setIf('EXPED_VERSION', raw.version);
+  if (raw.cloud) {
+    setIf('EXPED_CLOUD_API', raw.cloud.apiBase);
+    setIf('EXPED_DEVICE_TOKEN', raw.cloud.deviceToken);
+    setIf('EXPED_SYNC_INTERVAL_MS', raw.cloud.syncIntervalMs);
+  }
+  if (raw.agent) {
+    setIf('EXPED_AGENT_SYNC_PORT', raw.agent.syncNowPort);
+    setIf('EXPED_AGENT_HEALTH_PATH', raw.agent.healthPath);
+    setIf('EXPED_AGENT_HEALTH_MAX_AGE_MS', raw.agent.healthMaxAgeMs);
+    setIf('EXPED_AGENT_STARTUP_MODE', raw.agent.startupMode);
+    if (raw.agent.survivesRebootWithoutLogon !== undefined) {
+      setIf(
+        'EXPED_AGENT_SURVIVES_REBOOT_WITHOUT_LOGON',
+        raw.agent.survivesRebootWithoutLogon,
+      );
+    }
+  }
+
+  const { loadConfig } = await import('./config.mjs');
+  const { checkAndUpdate } = await import('./updater.mjs');
+  const { applyPendingMigrations } = await import('./bootstrap.mjs');
+  const { waitForCompleteHubStatus } = await import('./health.mjs');
+
+  const cfg = loadConfig(raw);
+  if (!cfg.manifestUrl) throw new Error('config.json sem manifestUrl — nada a forçar.');
+
+  const resolvedPaths = resolveForceUpdatePaths({
+    root,
+    configPath,
+    releasesDir: cfg.paths.releasesDir,
+    releasesPtr: cfg.paths.releasesPtr,
+  });
+  const { releasesDir, pointerPath } = resolvedPaths;
+  cfg.paths.releasesDir = releasesDir;
+  cfg.paths.releasesPtr = pointerPath;
+
+  const result = await checkAndUpdate(
+    cfg,
+    {
+      getCurrentVersion: () => currentVersionForForceUpdate(pointerPath, cfg.version),
+      forceSameVersion: true,
+      restart: async () => {
+        execFileSync(nssm, ['restart', service], { stdio: 'inherit' });
+      },
+      health: async (expectedVersion) => {
+        const actualVersion = currentVersionForForceUpdate(pointerPath, cfg.version);
+        if (actualVersion !== expectedVersion) {
+          throw new Error(`health da versao ${actualVersion}; esperado ${expectedVersion}`);
+        }
+        const statusPort = cfg.ports.status || cfg.ports.app + 1;
+        await waitForCompleteHubStatus(
+          `http://127.0.0.1:${statusPort}/status`,
+          90000,
+        );
+      },
+      migrate: async (releaseDir) => applyPendingMigrations(
+        cfg,
+        cfg.paths.db,
+        path.join(releaseDir, 'supabase', 'migrations'),
+      ),
+      logger: console,
+    },
+  );
+
+  console.log('RESULTADO:', JSON.stringify(result));
+  return result.updated ? 0 : 1;
+}
+
+const isMain = (() => {
+  try {
+    return path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
+
+if (isMain) {
+  main()
+    .then((exitCode) => { process.exitCode = exitCode; })
+    .catch((error) => {
+      console.error('FALHOU:', error?.message || error);
+      process.exitCode = 1;
+    });
+}

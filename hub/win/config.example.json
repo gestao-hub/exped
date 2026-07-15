@@ -10,6 +10,13 @@
     "app": 3000
   },
 
+  "agent": {
+    "_comment_syncNowPort": "Porta loopback do botao Sincronizar. Use 0 para desativar apenas o sync sob demanda.",
+    "_comment_settingsPath": "O instalador grava settingsPath e userSid exatos pelo recibo do usuario original; provision/install-service reutilizam esses metadados e nunca procuram perfis.",
+    "_comment_urlAcl": "install-service rastreia urlAclPort/urlAclUserSid e exige o SDDL exato; estes campos sao gerados na maquina e nao devem ser copiados.",
+    "syncNowPort": 5005
+  },
+
   "paths": {
     "_comment_pgData": "DIRETORIO DE DADOS do cluster Postgres. O maestro faz pg_ctl -D <pgData> start. No Windows nao ha socket Unix, entao data dir e host de conexao sao SEPARADOS.",
     "pgData": "C:\\Exped\\data\\pg",
