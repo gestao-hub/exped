@@ -141,6 +141,7 @@ var
   ServiceInstallAttempted: Boolean;
   RollbackDone: Boolean;
   ExistingProvisionedConfig: Boolean;
+  ReceiptId: String;
 
 function PowerShellExe: String;
 begin
@@ -241,6 +242,20 @@ begin
   end;
 end;
 
+function GetReceiptId(Param: String): String;
+begin
+  if ReceiptId = '' then
+    ReceiptId := 'exped-' + GetDateTimeString('yyyymmddhhnnss', '-', ':') + '-' +
+      IntToStr(Random(1000000000));
+  Result := ReceiptId;
+end;
+
+procedure InitializeWizard;
+begin
+  if Trim(ExpandConstant('{param:initsmoke}')) = '1' then
+    RaiseException('EXPED_HUB_INIT_SMOKE_OK:' + GetReceiptId(''));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
@@ -250,11 +265,12 @@ begin
   HubWasRunning := False;
   InstallCompleted := False;
   ServiceInstallAttempted := False;
+  ReceiptId := '';
   try
     ExtractTemporaryFile('installer-orchestrator.ps1');
     OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
     HubTransactionDir := ExpandConstant('{tmp}\ExpedHubTransaction-') +
-      GetDateTimeString('yyyymmddhhnnss', '', '') + '-' + IntToStr(Random(1000000000));
+      GetReceiptId('');
     HubWasRunning := QueryHubRunning;
     ExistingProvisionedConfig := QueryProvisionedConfig;
     if not ExistingProvisionedConfig then
