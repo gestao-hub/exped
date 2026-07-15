@@ -825,7 +825,7 @@ describe('updater.checkAndUpdate migrate', () => {
     const iRes = order.indexOf('restart');
     expect(iMig).toBeGreaterThan(order.indexOf('extract'));
     expect(iMig).toBeLessThan(iRes);
-    expect(order[iMig]).toBe('migrate:/r/1.1.0');
+    expect(order[iMig]).toBe(`migrate:${path.join('/r', '1.1.0')}`);
   });
   it('rollback no health-fail NÃO chama migrate de novo', async () => {
     let migrates = 0;

@@ -1196,7 +1196,10 @@ describe('release-hub limite do pacote', () => {
 
 describe('workflows de release', () => {
   it('stage manual isola build da tag e executa tooling confiavel com segredo no step', () => {
-    const workflow = readFileSync(path.join(ROOT, '.github/workflows/release-hub.yml'), 'utf8');
+    const workflow = readFileSync(
+      path.join(ROOT, '.github/workflows/release-hub.yml'),
+      'utf8',
+    ).replace(/\r\n?/g, '\n');
     const buildSection = workflow.match(/\n  build:\n([\s\S]*?)\n  stage:\n/)?.[1] || '';
     const stageSection = workflow.split('\n  stage:\n')[1] || '';
 

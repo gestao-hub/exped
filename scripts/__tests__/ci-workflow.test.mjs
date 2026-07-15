@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
+const workflow = readFileSync('.github/workflows/ci.yml', 'utf8').replace(/\r\n?/g, '\n');
 const dbScriptPath = 'scripts/test-supabase-local.sh';
 
 describe('CI do banco e supply chain', () => {
@@ -15,7 +15,7 @@ describe('CI do banco e supply chain', () => {
     expect(workflow).toContain('version: 2.109.1');
     expect(workflow).toContain(`run: ${dbScriptPath}`);
 
-    const script = readFileSync(dbScriptPath, 'utf8');
+    const script = readFileSync(dbScriptPath, 'utf8').replace(/\r\n?/g, '\n');
     expect(script).toContain('supabase/migrations/*.sql');
     expect(script).toContain('supabase test db');
     expect(script).toContain('supabase db lint');
@@ -33,6 +33,10 @@ describe('CI do banco e supply chain', () => {
     expect(workflow).toContain("dotnet-version: '8.0.423'");
     expect(workflow).toContain(
       'dotnet test agent/ExpedAgent.Tests/ExpedAgent.Tests.csproj --configuration Release',
+    );
+    expect(workflow).toContain('Test release contracts on Windows');
+    expect(workflow).toContain(
+      'npx vitest run scripts/__tests__/release-hub.test.mjs scripts/__tests__/ci-workflow.test.mjs hub/test/windows-installer-transaction.test.mjs hub/test/updater.test.mjs',
     );
     expect(workflow).toContain('shell: powershell');
     expect(workflow).toContain('$PSVersionTable.PSVersion.Major -ne 5');

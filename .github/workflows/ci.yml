@@ -71,6 +71,17 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.18.0'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Test release contracts on Windows
+        run: npx vitest run scripts/__tests__/release-hub.test.mjs scripts/__tests__/ci-workflow.test.mjs hub/test/windows-installer-transaction.test.mjs hub/test/updater.test.mjs
+
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: '8.0.423'

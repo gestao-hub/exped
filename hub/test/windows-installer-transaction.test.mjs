@@ -24,7 +24,7 @@ const powerShellIt = (name, test) =>
 const watchdog = source('../watchdog.ps1');
 
 function source(path) {
-  return readFileSync(new URL(path, import.meta.url), 'utf8');
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n');
 }
 
 function sectionEntries(text, section) {
@@ -245,6 +245,20 @@ describe('orquestração transacional do Inno', () => {
     }
     expect(orchestrator).toContain("'StampHubVersion'");
     expect(orchestrator).toMatch(/function Set-HubVersionAtomically[\s\S]*Write-BytesAtomically/i);
+  });
+
+  it('usa backup temporario nao vazio ao substituir arquivos no Windows', () => {
+    const agentSettings = source('../win/agent-settings.ps1');
+    const nullBackup = /\[System\.IO\.File\]::Replace\(\s*\$tempPath,\s*\$fullPath,\s*\$null\s*\)/g;
+
+    expect(orchestrator).not.toMatch(nullBackup);
+    expect(agentSettings).not.toMatch(nullBackup);
+    expect(orchestrator).toMatch(
+      /\$replaceBackupPath[\s\S]*\[System\.IO\.File\]::Replace\(\$tempPath, \$fullPath, \$replaceBackupPath\)/,
+    );
+    expect(agentSettings.match(
+      /\[System\.IO\.File\]::Replace\(\$tempPath, \$fullPath, \$replaceBackupPath\)/g,
+    )).toHaveLength(2);
   });
 
   it('mantém código e token fora da linha de comando e apaga o arquivo protegido', () => {
