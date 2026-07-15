@@ -269,7 +269,8 @@ begin
   try
     ExtractTemporaryFile('installer-orchestrator.ps1');
     OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
-    HubTransactionDir := ExpandConstant('{tmp}\ExpedHubTransaction-') +
+    { Raiz curta: o payload inclui paths profundos do pgAdmin e PowerShell 5 limita MAX_PATH. }
+    HubTransactionDir := ExpandConstant('{sd}\ExpedHubTxn-') +
       GetReceiptId('');
     HubWasRunning := QueryHubRunning;
     ExistingProvisionedConfig := QueryProvisionedConfig;

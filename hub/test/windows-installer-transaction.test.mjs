@@ -219,6 +219,17 @@ describe('orquestração transacional do Inno', () => {
     expect(workflow).toContain('EXPED_HUB_INIT_SMOKE_OK:');
   });
 
+  it('mantem o snapshot em raiz curta e exercita paths profundos no Windows', () => {
+    for (const installer of [unified, hubOnly]) {
+      const prepare = routine(installer, 'PrepareToInstall');
+      expect(prepare).toContain("ExpandConstant('{sd}\\ExpedHubTxn-')");
+      expect(prepare).not.toContain("ExpandConstant('{tmp}\\ExpedHubTransaction-')");
+    }
+    expect(workflow).toContain('Smoke transactional snapshot with deep paths');
+    expect(workflow).toContain('foreign_servers\\user_mappings\\templates\\user_mappings\\sql');
+    expect(workflow).toContain("$transaction = 'C:\\ExpedHubTxn-smoke-'");
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);

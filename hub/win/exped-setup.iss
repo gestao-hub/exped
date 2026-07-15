@@ -636,7 +636,8 @@ begin
       ExtractTemporaryFile('installer-orchestrator.ps1');
       OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
     end;
-    HubTransactionDir := ExpandConstant('{tmp}\ExpedHubTransaction-') + GetReceiptId('');
+    { Raiz curta: o payload inclui paths profundos do pgAdmin e PowerShell 5 limita MAX_PATH. }
+    HubTransactionDir := ExpandConstant('{sd}\ExpedHubTxn-') + GetReceiptId('');
 
     { Nenhum stop, download, escrita persistente ou redeem ocorre antes disto. }
     RunOriginalOrchestratorChecked('PreflightUser', '',
