@@ -1074,9 +1074,8 @@ describe('release-hub promote via RPC canonica', () => {
         '0.3.21',
         { ...fixture.options, fetchImpl: network.fetchImpl },
       );
-      const accessCall = network.calls.find(({ url }) => (
-        url.endsWith('/rest/v1/rpc/assert_hub_release_access')
-      ));
+      const [accessCall] = network.calls;
+      expect(accessCall.url).toContain('/rest/v1/rpc/assert_hub_release_access');
       expect(JSON.parse(accessCall.init.body)).toEqual({
         p_expected_role: PROMOTION_ROLE,
       });
@@ -1086,6 +1085,29 @@ describe('release-hub promote via RPC canonica', () => {
       expect(requestHeader(copyCall.init, 'authorization')).toBe(
         `Bearer ${PROMOTION_RELEASE_KEY}`,
       );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('promocao falha fechado sem tocar o Storage quando a prova opaca falha', async () => {
+    const fixture = approvalFixture();
+    const calls = [];
+    try {
+      await expect(promoteRelease(
+        PROJECT_REF,
+        { releaseKey: PROMOTION_RELEASE_KEY },
+        '0.3.21',
+        {
+          ...fixture.options,
+          fetchImpl: async (url, init = {}) => {
+            calls.push({ url, init });
+            return fakeResponse(403, JSON.stringify({ message: 'permission denied' }));
+          },
+        },
+      )).rejects.toThrow('credencial de release nao comprovou');
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toContain('/rest/v1/rpc/assert_hub_release_access');
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
