@@ -18,6 +18,7 @@ import * as releaseHub from '../release-hub.mjs';
 import {
   PROMOTION_ROLE,
   STAGE_ROLE,
+  assertReleaseApiKey,
   assertReleaseAccessToken,
   buildManifest,
   compareSemver,
@@ -35,9 +36,15 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT_REF = 'abcdefghijklmnopqrst';
 const ANON_KEY = 'anon-publica';
+const RELEASE_KEY = `sb_secret_${'a'.repeat(22)}_${'b'.repeat(8)}`;
+const PROMOTION_RELEASE_KEY = `sb_secret_${'c'.repeat(22)}_${'d'.repeat(8)}`;
 const SOURCE_SHA = '7'.repeat(40);
 const promotionMigration = readFileSync(
   path.join(ROOT, 'supabase/migrations/20260714223000_hub_release_promotion_rpc.sql'),
+  'utf8',
+);
+const apiKeyMigration = readFileSync(
+  path.join(ROOT, 'supabase/migrations/20260715115548_hub_release_api_key_auth.sql'),
   'utf8',
 );
 
@@ -73,6 +80,20 @@ describe('contrato transacional da promocao', () => {
   it('mantem promocao copiada em recovery e bloqueia identidade concorrente', () => {
     expect(promotionMigration).toMatch(/promocao copiada aguarda recovery da mesma identidade/i);
     expect(promotionMigration).toMatch(/versao atual legada possui identidade imutavel desconhecida/i);
+  });
+});
+
+describe('credencial opaca de release', () => {
+  it('expoe RPC minima e revoga explicitamente service_role', () => {
+    expect(apiKeyMigration).toMatch(
+      /assert_hub_release_access\(\s*p_expected_role text\s*\)[\s\S]*private\.hub_release_subject\(p_expected_role\)/i,
+    );
+    expect(apiKeyMigration).toMatch(
+      /revoke all on function public\.assert_hub_release_access\(text\)[\s\S]*service_role/i,
+    );
+    expect(apiKeyMigration).toMatch(
+      /grant execute on function public\.assert_hub_release_access\(text\)[\s\S]*exped_hub_release_stage[\s\S]*exped_hub_release_promote/i,
+    );
   });
 });
 
@@ -160,6 +181,13 @@ describe('release-hub (partes puras)', () => {
       STAGE_ROLE,
     )).toThrow('claim sub UUID valida');
     expect(() => assertReleaseAccessToken('nao-e-jwt', STAGE_ROLE)).toThrow('JWT');
+  });
+
+  it('aceita somente chave opaca secreta moderna para a credencial restrita', () => {
+    expect(assertReleaseApiKey(RELEASE_KEY)).toBe(RELEASE_KEY);
+    expect(() => assertReleaseApiKey(tokenForRole('service_role'))).toThrow('sb_secret_');
+    expect(() => assertReleaseApiKey('sb_publishable_publica')).toThrow('sb_secret_');
+    expect(() => assertReleaseApiKey('sb_secret_curta')).toThrow('sb_secret_');
   });
 
   it('stage e promote exigem modo explicito', () => {
@@ -441,6 +469,53 @@ describe('release-hub ZIP imutavel', () => {
     expect(requestHeader(calls[1].init, 'authorization')).toBe(
       `Bearer ${credentials.accessToken}`,
     );
+  });
+
+  it('valida a role da chave opaca antes de enviar o ZIP', async () => {
+    const calls = [];
+    const credentials = { releaseKey: RELEASE_KEY };
+    await uploadImmutableZip(PROJECT_REF, credentials, '0.3.21', Buffer.from('novo'), {
+      sourceSha: SOURCE_SHA,
+      fetchImpl: async (url, init = {}) => {
+        calls.push({ url, init });
+        if (url.endsWith('/rest/v1/rpc/assert_hub_release_access')) {
+          return fakeResponse(200, JSON.stringify({
+            role: STAGE_ROLE,
+            subject: '00000000-0000-0000-0000-000000000001',
+          }));
+        }
+        return calls.length === 2
+          ? fakeResponse(404)
+          : fakeResponse(200, JSON.stringify({ Id: 'id', Key: 'key' }));
+      },
+    });
+
+    expect(calls).toHaveLength(3);
+    expect(calls[0].url).toContain('/rest/v1/rpc/assert_hub_release_access');
+    expect(JSON.parse(calls[0].init.body)).toEqual({ p_expected_role: STAGE_ROLE });
+    expect(requestHeader(calls[0].init, 'apikey')).toBe(RELEASE_KEY);
+    expect(requestHeader(calls[0].init, 'authorization')).toBe(`Bearer ${RELEASE_KEY}`);
+    expect(calls[2].url).toContain('/hub-releases/windows/0.3.21.zip');
+    expect(calls[2].init.method).toBe('POST');
+  });
+
+  it('falha fechado quando a chave opaca nao comprova a role minima', async () => {
+    const calls = [];
+    await expect(uploadImmutableZip(
+      PROJECT_REF,
+      { releaseKey: RELEASE_KEY },
+      '0.3.21',
+      Buffer.from('novo'),
+      {
+        sourceSha: SOURCE_SHA,
+        fetchImpl: async (url, init = {}) => {
+          calls.push({ url, init });
+          return fakeResponse(403, JSON.stringify({ message: 'permission denied' }));
+        },
+      },
+    )).rejects.toThrow('credencial de release nao comprovou');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('/rest/v1/rpc/assert_hub_release_access');
   });
 
   it('reconsulta e aceita corrida 409 somente com o mesmo hash', async () => {
@@ -863,6 +938,12 @@ describe('release-hub promote via RPC canonica', () => {
 
     const fetchImpl = async (url, init = {}) => {
       calls.push({ url, init });
+      if (url.endsWith('/rest/v1/rpc/assert_hub_release_access')) {
+        return fakeResponse(200, JSON.stringify({
+          role: PROMOTION_ROLE,
+          subject: '00000000-0000-0000-0000-000000000002',
+        }));
+      }
       if (url.endsWith('/rest/v1/rpc/initialize_hub_release_promotion')) {
         return fakeResponse(200, JSON.stringify({ initialized: true }));
       }
@@ -978,6 +1059,33 @@ describe('release-hub promote via RPC canonica', () => {
       expect(JSON.parse(completeCall.init.body)).toEqual({
         p_promotion_id: PROMOTION_ID,
       });
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('promocao comprova a role opaca antes de ler objetos autenticados', async () => {
+    const fixture = approvalFixture();
+    const network = promotionFetch(fixture);
+    try {
+      await promoteRelease(
+        PROJECT_REF,
+        { releaseKey: PROMOTION_RELEASE_KEY },
+        '0.3.21',
+        { ...fixture.options, fetchImpl: network.fetchImpl },
+      );
+      const accessCall = network.calls.find(({ url }) => (
+        url.endsWith('/rest/v1/rpc/assert_hub_release_access')
+      ));
+      expect(JSON.parse(accessCall.init.body)).toEqual({
+        p_expected_role: PROMOTION_ROLE,
+      });
+      expect(requestHeader(accessCall.init, 'apikey')).toBe(PROMOTION_RELEASE_KEY);
+      const copyCall = network.calls.find(({ url }) => url.endsWith('/object/copy'));
+      expect(requestHeader(copyCall.init, 'apikey')).toBe(PROMOTION_RELEASE_KEY);
+      expect(requestHeader(copyCall.init, 'authorization')).toBe(
+        `Bearer ${PROMOTION_RELEASE_KEY}`,
+      );
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -1213,7 +1321,7 @@ describe('workflows de release', () => {
     expect(workflow).toContain('git rev-parse "$EXPECTED_TAG_REF^{commit}"');
     expect(workflow).toContain('git rev-parse HEAD');
     expect(buildSection).not.toContain('secrets.');
-    expect(buildSection).not.toContain('SUPABASE_ACCESS_TOKEN');
+    expect(buildSection).not.toContain('SUPABASE_RELEASE_KEY');
     expect(stageSection).toContain('needs: build');
     expect(stageSection).toContain('environment: hub-stage');
     expect(stageSection).toContain('ref: ${{ github.sha }}');
@@ -1224,11 +1332,10 @@ describe('workflows de release', () => {
     expect(stageSection).toContain('working-directory: tooling');
     expect(stageSection).toContain('RELEASE_SOURCE_ROOT: ${{ github.workspace }}/source');
     expect(stageSection).toContain(
-      'SUPABASE_ANON_KEY: ${{ vars.HUB_STAGE_SUPABASE_ANON_KEY }}',
+      'SUPABASE_RELEASE_KEY: ${{ secrets.HUB_STAGE_SUPABASE_RELEASE_KEY }}',
     );
-    expect(stageSection).toContain(
-      'SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_STAGE_ACCESS_TOKEN }}',
-    );
+    expect(stageSection).not.toContain('SUPABASE_ACCESS_TOKEN');
+    expect(stageSection).not.toContain('SUPABASE_ANON_KEY');
     expect(workflow).toContain('runs-on: windows-latest');
     expect(workflow).toContain('actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5');
     expect(workflow).toContain('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020');
@@ -1263,12 +1370,11 @@ describe('workflows de release', () => {
     expect(workflow).toContain('run-id: ${{ inputs.stage_run_id }}');
     expect(workflow).toContain('name: hub-release-${{ inputs.source_sha }}');
     expect(workflow).toContain(
-      'SUPABASE_ANON_KEY: ${{ vars.HUB_PROMOTION_SUPABASE_ANON_KEY }}',
+      'SUPABASE_RELEASE_KEY: ${{ secrets.HUB_PROMOTION_SUPABASE_RELEASE_KEY }}',
     );
-    expect(workflow).toContain(
-      'SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_PROMOTION_ACCESS_TOKEN }}',
-    );
-    expect(workflow).not.toContain('HUB_STAGE_ACCESS_TOKEN');
+    expect(workflow).not.toContain('SUPABASE_ACCESS_TOKEN');
+    expect(workflow).not.toContain('SUPABASE_ANON_KEY');
+    expect(workflow).not.toContain('HUB_STAGE_SUPABASE_RELEASE_KEY');
     expect(workflow).not.toMatch(/SERVICE_ROLE|\bSR:/);
     expect(workflow).toContain('ALLOW_DOWNGRADE');
     expect(workflow).toContain('--allow-downgrade');
