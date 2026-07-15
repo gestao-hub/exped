@@ -233,6 +233,65 @@ describe('orquestração transacional do Inno', () => {
     expect(workflow).toContain("Join-Path $transaction 'service-acl.json'");
   });
 
+  it('suspende o watchdog legado durante toda a transacao e restaura o estado exato', () => {
+    expect(orchestrator).toContain("[string]$LegacyWatchdogTaskName = 'ExpedWatchdog'");
+    expect(orchestrator).toContain("'SuspendLegacyWatchdog'");
+    expect(orchestrator).toContain("'RestoreLegacyWatchdog'");
+
+    const snapshot = routine(orchestrator, 'New-HubSnapshot');
+    expect(snapshot).toContain('LegacyWatchdogTaskExistedBefore');
+    expect(snapshot).toContain('LegacyWatchdogTaskEnabledBefore');
+    expect(snapshot).toContain('Get-LegacyWatchdogTask');
+
+    const suspend = routine(orchestrator, 'Suspend-LegacyWatchdogTask');
+    expectOrder(suspend, ['Read-HubSnapshotState', 'Disable-ScheduledTask', 'Stop-ScheduledTask']);
+    expect(suspend).toMatch(/State[\s\S]*Running[\s\S]*Deadline/i);
+
+    for (const installer of [unified, hubOnly]) {
+      const prepare = routine(installer, 'PrepareToInstall');
+      expectOrder(prepare, ['SnapshotHub', 'SuspendLegacyWatchdog', 'StopHub']);
+
+      const install = routine(installer, 'RunTransactionalInstall');
+      expectOrder(install, ['RestoreLegacyWatchdog', 'VerifyCompleteStatus', 'FinalizeHub']);
+    }
+
+    expectOrder(routine(orchestrator, 'Restore-HubSnapshot'), [
+      'Restore-HubServiceSnapshot',
+      'Restore-LegacyWatchdogTaskState',
+    ]);
+    expect(workflow).toContain('$watchdogTaskName =');
+    expect(workflow).toContain('Register-ScheduledTask');
+    expect(workflow).toContain('-LegacyWatchdogTaskName $watchdogTaskName');
+    expect(workflow).toContain('-Operation SuspendLegacyWatchdog');
+    expect(workflow).toContain('LegacyWatchdogTaskEnabledBefore');
+  });
+
+  it('propaga falha transacional como exit code nao zero nos dois instaladores', () => {
+    for (const installer of [unified, hubOnly]) {
+      expect(installer).toContain('TransactionFailureExitCode: Integer');
+      expect(routine(installer, 'IsTransactionFailureSmoke'))
+        .toContain("ExpandConstant('{param:transactionfailsmoke}')");
+
+      const transaction = routine(installer, 'RunTransactionalInstall');
+      expect(transaction).toContain('EXPED_TRANSACTION_FAILURE_SMOKE');
+      expectOrder(transaction.slice(transaction.indexOf('except')), [
+        'GetExceptionMessage',
+        'TransactionFailureExitCode := 4',
+        'RestoreHubAfterFailure',
+        'RaiseException',
+      ]);
+
+      const customExit = routine(installer, 'GetCustomSetupExitCode');
+      expect(customExit).toContain('TransactionFailureExitCode');
+      expect(customExit).toMatch(/Result\s*:=\s*TransactionFailureExitCode/);
+    }
+
+    expect(workflow).toContain('Smoke transactional installer failure and rollback');
+    expect(workflow).toContain('/transactionfailsmoke=1');
+    expect(workflow).toContain('EXPED_TRANSACTION_FAILURE_SMOKE');
+    expect(workflow).toMatch(/ExitCode[\s\S]*-ne\s+4/i);
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);

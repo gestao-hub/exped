@@ -142,6 +142,7 @@ var
   RollbackDone: Boolean;
   ExistingProvisionedConfig: Boolean;
   ReceiptId: String;
+  TransactionFailureExitCode: Integer;
 
 function PowerShellExe: String;
 begin
@@ -250,6 +251,12 @@ begin
   Result := ReceiptId;
 end;
 
+function IsTransactionFailureSmoke: Boolean;
+begin
+  Result := WizardSilent() and
+    (Trim(ExpandConstant('{param:transactionfailsmoke}')) = '1');
+end;
+
 procedure InitializeWizard;
 begin
   if Trim(ExpandConstant('{param:initsmoke}')) = '1' then
@@ -266,6 +273,7 @@ begin
   InstallCompleted := False;
   ServiceInstallAttempted := False;
   ReceiptId := '';
+  TransactionFailureExitCode := 0;
   try
     ExtractTemporaryFile('installer-orchestrator.ps1');
     OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
@@ -280,6 +288,9 @@ begin
       '-TransactionDir ' + QuoteArg(HubTransactionDir),
       'Snapshot do payload/config/servico falhou');
     HubSnapshotCreated := True;
+    RunOrchestratorChecked('SuspendLegacyWatchdog',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir),
+      'Nao foi possivel suspender o watchdog legado');
     RunOrchestratorChecked('StopHub', '', 'Nao foi possivel parar o ExpedHub');
     if HubWasRunning then Sleep(2000);
   except
@@ -309,6 +320,8 @@ var
   ResultCode: Integer;
 begin
   try
+    if IsTransactionFailureSmoke then
+      RaiseException('EXPED_TRANSACTION_FAILURE_SMOKE');
     ConfigFile := ExpandConstant('{app}\config.json');
     RunOrchestratorChecked('StampHubVersion',
       '-AppVersion ' + QuoteArg('{#MyAppVersion}'),
@@ -336,6 +349,9 @@ begin
         '-Root ' + QuoteArg(ExpandConstant('{app}')) +
         ' -ConfigPath ' + QuoteArg(ConfigFile) + ' -ManageAgent false'),
       ExpandConstant('{app}'), 'Registro do servico ExpedHub falhou');
+    RunOrchestratorChecked('RestoreLegacyWatchdog',
+      '-TransactionDir ' + QuoteArg(HubTransactionDir),
+      'Nao foi possivel restaurar o estado do watchdog legado');
     if (not Exec(PowerShellExe, OrchestratorParams('VerifyCompleteStatus',
       '-TransactionDir ' + QuoteArg(HubTransactionDir)), ExpandConstant('{tmp}'),
       SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
@@ -347,6 +363,7 @@ begin
     InstallCompleted := True;
   except
     FailureMessage := GetExceptionMessage;
+    TransactionFailureExitCode := 4;
     RestoreHubAfterFailure;
     RaiseException(FailureMessage);
   end;
@@ -360,6 +377,11 @@ end;
 procedure DeinitializeSetup;
 begin
   if not InstallCompleted then RestoreHubAfterFailure;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := TransactionFailureExitCode;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
