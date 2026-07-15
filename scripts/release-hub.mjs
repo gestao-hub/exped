@@ -515,9 +515,23 @@ function storageErrorStatus(error) {
   return Number.isInteger(status) ? status : null;
 }
 
+async function isPublicStorageObjectMissing(response) {
+  if (response.status === 404) return true;
+  if (response.status !== 400) return false;
+
+  try {
+    const body = await response.json();
+    return String(body?.statusCode) === '404'
+      && body?.error === 'not_found'
+      && body?.message === 'Object not found';
+  } catch {
+    return false;
+  }
+}
+
 async function fetchExistingZip(ref, version, fetchImpl) {
   const response = await fetchImpl(publicZipUrl(ref, version), { cache: 'no-store' });
-  if (response.status === 404) return null;
+  if (await isPublicStorageObjectMissing(response)) return null;
   if (response.status !== 200) {
     throw new Error(`consulta ${version}.zip HTTP ${response.status}`);
   }
@@ -736,7 +750,7 @@ async function uploadImmutableApprovalObject(
     await assertImmutableObjectInfo(client, spec.objectPath, spec);
     return;
   }
-  if (existing.status !== 404) {
+  if (!(await isPublicStorageObjectMissing(existing))) {
     throw new Error(`consulta objeto ${spec.objectPath} HTTP ${existing.status}`);
   }
 

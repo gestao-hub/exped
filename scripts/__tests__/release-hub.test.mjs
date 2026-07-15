@@ -117,6 +117,14 @@ function fakeResponse(status, body = '') {
   };
 }
 
+function storageObjectNotFoundResponse() {
+  return fakeResponse(400, JSON.stringify({
+    statusCode: '404',
+    error: 'not_found',
+    message: 'Object not found',
+  }));
+}
+
 function artifactAttestation(version, zip, sourceSha = SOURCE_SHA) {
   return {
     expedRelease: {
@@ -471,6 +479,46 @@ describe('release-hub ZIP imutavel', () => {
     );
   });
 
+  it('trata o 400/not_found do Storage publico como objeto ausente', async () => {
+    const calls = [];
+    const result = await uploadImmutableZip(
+      PROJECT_REF,
+      stageCredentials(),
+      '0.3.21',
+      Buffer.from('novo'),
+      {
+        sourceSha: SOURCE_SHA,
+        fetchImpl: async (url, init = {}) => {
+          calls.push({ url, init });
+          return calls.length === 1
+            ? storageObjectNotFoundResponse()
+            : fakeResponse(200, JSON.stringify({ Id: 'id', Key: 'key' }));
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ uploaded: true, reused: false });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].init.method).toBe('POST');
+  });
+
+  it('continua rejeitando outros retornos HTTP 400 do Storage publico', async () => {
+    await expect(uploadImmutableZip(
+      PROJECT_REF,
+      stageCredentials(),
+      '0.3.21',
+      Buffer.from('novo'),
+      {
+        sourceSha: SOURCE_SHA,
+        fetchImpl: async () => fakeResponse(400, JSON.stringify({
+          statusCode: '400',
+          error: 'bad_request',
+          message: 'Invalid request',
+        })),
+      },
+    )).rejects.toThrow('consulta 0.3.21.zip HTTP 400');
+  });
+
   it('valida a role da chave opaca antes de enviar o ZIP', async () => {
     const calls = [];
     const credentials = { releaseKey: RELEASE_KEY };
@@ -688,7 +736,7 @@ describe('release-hub ZIP imutavel', () => {
           );
           return objects.has(objectPath)
             ? fakeResponse(200, objects.get(objectPath).bytes)
-            : fakeResponse(404);
+            : storageObjectNotFoundResponse();
         }
         const objectPath = decodeURIComponent(url.split('/object/hub-releases/')[1]);
         uploads.push({ objectPath, init });
