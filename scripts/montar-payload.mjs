@@ -25,6 +25,7 @@ export function planoDeCopias() {
     { de: '.next/static', para: 'app/.next/static', tipo: 'dir' },
     { de: 'public', para: 'app/public', tipo: 'dir-opcional' },
     { de: 'hub', para: 'hub', tipo: 'mjs' },
+    { de: 'hub/watchdog.ps1', para: 'hub/watchdog.ps1', tipo: 'arquivo' },
     ...LOCAL_STACK_FILES.map((f) => ({ de: `scripts/local-stack/${f}`, para: `scripts/local-stack/${f}`, tipo: 'arquivo' })),
     { de: 'supabase/migrations', para: 'supabase/migrations', tipo: 'sql' },
   ];

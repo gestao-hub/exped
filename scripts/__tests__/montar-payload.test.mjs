@@ -17,4 +17,11 @@ describe('montar-payload planoDeCopias', () => {
     }
     expect(LOCAL_STACK_FILES).toHaveLength(6);
   });
+  it('inclui o watchdog exigido pelos dois instaladores', () => {
+    expect(planoDeCopias()).toContainEqual({
+      de: 'hub/watchdog.ps1',
+      para: 'hub/watchdog.ps1',
+      tipo: 'arquivo',
+    });
+  });
 });
