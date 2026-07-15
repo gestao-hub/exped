@@ -45,12 +45,13 @@ necessarios para a release.
 ## Emissao
 
 Crie uma chave Supabase do tipo `secret` para cada ambiente pela Management
-API, com nomes distintos e `secret_jwt_template` dedicado:
+API, com nomes distintos e `secret_jwt_template` dedicado. O nome da chave deve
+usar apenas letras minusculas, numeros e sublinhado:
 
 ```json
 {
   "type": "secret",
-  "name": "hub-release-stage",
+  "name": "hub_release_stage",
   "secret_jwt_template": {
     "role": "exped_hub_release_stage",
     "sub": "<uuid-exclusivo-do-stage>"
@@ -58,7 +59,7 @@ API, com nomes distintos e `secret_jwt_template` dedicado:
 }
 ```
 
-Para promocao, use outro UUID, o nome `hub-release-promote` e a role
+Para promocao, use outro UUID, o nome `hub_release_promote` e a role
 `exped_hub_release_promote`. Solicite `reveal=true` somente durante a criacao,
 grave a resposta em arquivo temporario com permissao restrita e envie a chave
 ao GitHub por entrada padrao. Nunca imprima a chave, passe-a na linha de comando
