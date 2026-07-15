@@ -200,7 +200,7 @@ jobs:
               Write-Host $content
               throw "O instalador nao confirmou o estado $ExpectedState."
             }
-            $receiptPattern = [regex]::Escape($marker + ':') + 'exped-\d{14}-\d{1,9}'
+            $receiptPattern = [regex]::Escape($marker + ':') + 'exped-\d{14}-\d{1,9}(?![A-Za-z0-9_-])'
             if ($content -notmatch $receiptPattern) {
               Write-Host $content
               throw "O instalador nao gerou um receipt valido no estado $ExpectedState."
@@ -247,6 +247,31 @@ jobs:
         env:
           VER: ${{ steps.ver.outputs.ver }}
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=%VER% hub\win\exped-hub.iss'
+
+      - name: Smoke hub-only installer initialization
+        shell: powershell
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'exped-hub-init.log'
+          Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+          $arguments = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            '/SP-',
+            '/initsmoke=1',
+            "/LOG=$log"
+          )
+          $process = Start-Process -FilePath 'hub\win\Output\ExpedHubSetup.exe' `
+            -ArgumentList $arguments -Wait -PassThru
+          $content = Get-Content -LiteralPath $log -Raw
+          $receiptPattern = 'EXPED_HUB_INIT_SMOKE_OK:exped-\d{14}-\d{1,9}(?![A-Za-z0-9_-])'
+          if ($content -notmatch $receiptPattern) {
+            Write-Host $content
+            throw 'O instalador Hub-only nao gerou um receipt valido.'
+          }
+          if ($process.ExitCode -eq 0) {
+            throw 'O smoke Hub-only deve encerrar intencionalmente dentro de InitializeWizard.'
+          }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

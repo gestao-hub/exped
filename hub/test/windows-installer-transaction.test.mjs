@@ -201,14 +201,22 @@ describe('orquestração transacional do Inno', () => {
     const initializeWizard = routine(unified, 'InitializeWizard');
     const receipt = routine(unified, 'GetReceiptId');
     const hubPrepare = routine(hubOnly, 'PrepareToInstall');
+    const hubInitializeWizard = routine(hubOnly, 'InitializeWizard');
+    const hubReceipt = routine(hubOnly, 'GetReceiptId');
 
     expectOrder(initializeWizard, ["ExpandConstant('{param:initsmoke}')", "GetReceiptId('')", 'EXPED_INIT_SMOKE_OK']);
     expect(receipt).toContain("GetDateTimeString('yyyymmddhhnnss', '-', ':')");
     expect(receipt).not.toContain("GetDateTimeString('yyyymmddhhnnss', '', '')");
-    expect(hubPrepare).toContain("GetDateTimeString('yyyymmddhhnnss', '-', ':')");
+    expect(hubReceipt).toContain("GetDateTimeString('yyyymmddhhnnss', '-', ':')");
+    expect(hubInitializeWizard).toContain("ExpandConstant('{param:initsmoke}')");
+    expect(hubInitializeWizard).toContain('EXPED_HUB_INIT_SMOKE_OK:');
+    expect(hubPrepare).toContain("GetReceiptId('')");
     expect(hubPrepare).not.toContain("GetDateTimeString('yyyymmddhhnnss', '', '')");
     expect(workflow).toContain('$receiptPattern =');
     expect(workflow).toContain('$content -notmatch $receiptPattern');
+    expect(workflow).toContain("'exped-\\d{14}-\\d{1,9}(?![A-Za-z0-9_-])'");
+    expect(workflow).toContain('Smoke hub-only installer initialization');
+    expect(workflow).toContain('EXPED_HUB_INIT_SMOKE_OK:');
   });
 
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
