@@ -254,7 +254,7 @@ begin
     ExtractTemporaryFile('installer-orchestrator.ps1');
     OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
     HubTransactionDir := ExpandConstant('{tmp}\ExpedHubTransaction-') +
-      GetDateTimeString('yyyymmddhhnnss', '', '') + '-' + IntToStr(Random(1000000000));
+      GetDateTimeString('yyyymmddhhnnss', '-', ':') + '-' + IntToStr(Random(1000000000));
     HubWasRunning := QueryHubRunning;
     ExistingProvisionedConfig := QueryProvisionedConfig;
     if not ExistingProvisionedConfig then

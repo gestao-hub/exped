@@ -197,6 +197,20 @@ describe('orquestração transacional do Inno', () => {
     expect(workflow).toMatch(/expand the ["']app["'] constant/i);
   });
 
+  it('gera o receipt no smoke com separadores Char validos do Inno', () => {
+    const initializeWizard = routine(unified, 'InitializeWizard');
+    const receipt = routine(unified, 'GetReceiptId');
+    const hubPrepare = routine(hubOnly, 'PrepareToInstall');
+
+    expectOrder(initializeWizard, ["ExpandConstant('{param:initsmoke}')", "GetReceiptId('')", 'EXPED_INIT_SMOKE_OK']);
+    expect(receipt).toContain("GetDateTimeString('yyyymmddhhnnss', '-', ':')");
+    expect(receipt).not.toContain("GetDateTimeString('yyyymmddhhnnss', '', '')");
+    expect(hubPrepare).toContain("GetDateTimeString('yyyymmddhhnnss', '-', ':')");
+    expect(hubPrepare).not.toContain("GetDateTimeString('yyyymmddhhnnss', '', '')");
+    expect(workflow).toContain('$receiptPattern =');
+    expect(workflow).toContain('$content -notmatch $receiptPattern');
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);

@@ -200,6 +200,11 @@ jobs:
               Write-Host $content
               throw "O instalador nao confirmou o estado $ExpectedState."
             }
+            $receiptPattern = [regex]::Escape($marker + ':') + 'exped-\d{14}-\d{1,9}'
+            if ($content -notmatch $receiptPattern) {
+              Write-Host $content
+              throw "O instalador nao gerou um receipt valido no estado $ExpectedState."
+            }
             if ($process.ExitCode -eq 0) {
               throw 'O smoke deve encerrar intencionalmente dentro de InitializeWizard.'
             }

@@ -401,7 +401,17 @@ begin
   CodePage.Edits[0].Visible        := not ManualCheck.Checked;
 end;
 
+function GetReceiptId(Param: String): String;
+begin
+  if ReceiptId = '' then
+    ReceiptId := 'exped-' + GetDateTimeString('yyyymmddhhnnss', '-', ':') + '-' +
+      IntToStr(Random(1000000000));
+  Result := ReceiptId;
+end;
+
 procedure InitializeWizard;
+var
+  SmokeReceiptId: String;
 begin
   ExtractTemporaryFile('installer-orchestrator.ps1');
   OrchestratorPath := ExpandConstant('{tmp}\installer-orchestrator.ps1');
@@ -411,10 +421,11 @@ begin
   { Smoke de CI: comprova a inicializacao limpa/provisionada sem tocar no host. }
   if Trim(ExpandConstant('{param:initsmoke}')) = '1' then
   begin
+    SmokeReceiptId := GetReceiptId('');
     if ExistingProvisionedConfig then
-      RaiseException('EXPED_INIT_SMOKE_OK:provisioned')
+      RaiseException('EXPED_INIT_SMOKE_OK:provisioned:' + SmokeReceiptId)
     else
-      RaiseException('EXPED_INIT_SMOKE_OK:clean');
+      RaiseException('EXPED_INIT_SMOKE_OK:clean:' + SmokeReceiptId);
   end;
 
   { Em modo silencioso a credencial vem somente de /credentialsfile protegido. }
@@ -576,14 +587,6 @@ begin
   end
   else
     Result := Trim(CodePage.Values[2]);
-end;
-
-function GetReceiptId(Param: String): String;
-begin
-  if ReceiptId = '' then
-    ReceiptId := 'exped-' + GetDateTimeString('yyyymmddhhnnss', '', '') + '-' +
-      IntToStr(Random(1000000000));
-  Result := ReceiptId;
 end;
 
 { --- Seleciona o modo de provisionamento ------------------------------------ }
