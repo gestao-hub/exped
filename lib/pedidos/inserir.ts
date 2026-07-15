@@ -8,6 +8,13 @@ export type InserirPedidoResult =
   | { id: string; numero: number; updated?: boolean }
   | { duplicate: true; existing_id: string; existing_numero: number };
 
+type ExistingPedido = {
+  id: string;
+  numero_mapa: number;
+  status: string;
+  cliente_id: string | null;
+};
+
 /** Insere pontos de retirada + itens de um pedido. Reusado pelo INSERT e pelo re-sync (UPSERT). */
 async function inserirPontosItens(
   supabase: SupabaseClient<Database>,
@@ -82,35 +89,38 @@ export async function inserirPedido(
   },
 ): Promise<InserirPedidoResult> {
   // 1) dedup por documento_erp (não-cancelado, escopo empresa)
-  let existing: { id: string; numero_mapa: number; status: string } | null = null;
+  let existing: ExistingPedido | null = null;
   if (d.documento_erp) {
     let q = supabase
       .from('pedidos')
-      .select('id, numero_mapa, status')
+      .select('id, numero_mapa, status, cliente_id')
       .eq('documento_erp', d.documento_erp)
       .neq('status', 'cancelado');
     if (opts.empresaId) q = q.eq('empresa_id', opts.empresaId);
     const { data } = await q.maybeSingle();
-    existing = (data as { id: string; numero_mapa: number; status: string } | null) ?? null;
+    existing = (data as ExistingPedido | null) ?? null;
   }
 
-  // 2) cliente (best-effort: se falhar, segue com cliente_id null)
-  let cliente_id: string | null = null;
-  try {
-    const { id } = await upsertCliente(supabase, {
-      cnpj_cpf: d.cliente_cnpj_cpf,
-      codigo_erp: d.cliente_codigo,
-      nome: d.cliente_nome,
-      endereco: d.cliente_endereco,
-      bairro: d.cliente_bairro,
-      cidade: d.cliente_cidade,
-      uf: d.cliente_uf,
-      cep: d.cliente_cep,
-      telefone: d.cliente_telefone,
-    }, opts.empresaId);
-    cliente_id = id;
-  } catch {
-    cliente_id = null;
+  // 2) cliente. Re-sync nunca cria outro cadastro: preserva o vínculo atual (inclusive
+  // null). Criar cliente antes de decidir se o pedido seria atualizado gerava órfãos.
+  let cliente_id: string | null = existing?.cliente_id ?? null;
+  if (!existing && !cliente_id) {
+    try {
+      const { id } = await upsertCliente(supabase, {
+        cnpj_cpf: d.cliente_cnpj_cpf,
+        codigo_erp: d.cliente_codigo,
+        nome: d.cliente_nome,
+        endereco: d.cliente_endereco,
+        bairro: d.cliente_bairro,
+        cidade: d.cliente_cidade,
+        uf: d.cliente_uf,
+        cep: d.cliente_cep,
+        telefone: d.cliente_telefone,
+      }, opts.empresaId);
+      cliente_id = id;
+    } catch {
+      cliente_id = null;
+    }
   }
 
   // 3) campos de cabeçalho (compartilhados insert/update). SEM status (preservado no update)

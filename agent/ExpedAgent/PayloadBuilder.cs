@@ -39,6 +39,7 @@ public static class PayloadBuilder
             FormaPagamento = h.FormaPagamento,
             Parcelas = h.Parcelas,
             HiperUsuarioId = h.IdUsuarioVendedor,
+            ClienteCodigo = h.IdEntidadeCliente > 0 ? h.IdEntidadeCliente.ToString() : null,
             ClienteNome = Cut(string.IsNullOrWhiteSpace(c?.Nome) ? "Cliente" : c!.Nome, 250)!,
             ClienteCnpjCpf = Cut(string.IsNullOrWhiteSpace(c?.CpfCnpj) ? null : c!.CpfCnpj, 80),
             ClienteEndereco = Cut(string.IsNullOrWhiteSpace(endereco) ? null : endereco, 1000),

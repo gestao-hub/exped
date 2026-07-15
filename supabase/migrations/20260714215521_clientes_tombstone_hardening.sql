@@ -1,6 +1,89 @@
 -- Clientes removidos permanecem como referencia historica. A chave natural pode
 -- ser reutilizada somente depois do tombstone, sem reativar o cadastro antigo.
+begin;
+set local exped.sync = 'on';
+
 drop index if exists public.clientes_cnpj_cpf_uniq;
+
+-- Instalacoes locais antigas aceitavam o mesmo documento com e sem mascara. O
+-- indice normalizado abaixo nao pode ser criado enquanto ambas estiverem ativas.
+-- Mantemos a linha mais antiga, repontamos todas as FKs e arquivamos os aliases.
+create temporary table clientes_documento_reconciliation as
+with ranked as (
+  select
+    cliente.id as source_id,
+    first_value(cliente.id) over (
+      partition by cliente.empresa_id,
+        pg_catalog.regexp_replace(cliente.cnpj_cpf, '\D', '', 'g')
+      order by cliente.created_at, cliente.id
+    ) as target_id,
+    row_number() over (
+      partition by cliente.empresa_id,
+        pg_catalog.regexp_replace(cliente.cnpj_cpf, '\D', '', 'g')
+      order by cliente.created_at, cliente.id
+    ) as position
+  from public.clientes cliente
+  where cliente.deleted_at is null
+    and cliente.cnpj_cpf is not null
+    and pg_catalog.regexp_replace(cliente.cnpj_cpf, '\D', '', 'g') <> ''
+)
+select source_id, target_id
+from ranked
+where position > 1;
+
+create unique index clientes_documento_reconciliation_source_idx
+  on clientes_documento_reconciliation(source_id);
+
+update public.pedidos pedido
+set cliente_id = reconciliation.target_id
+from clientes_documento_reconciliation reconciliation
+where pedido.cliente_id = reconciliation.source_id;
+
+update public.ordens_servico ordem
+set cliente_id = reconciliation.target_id
+from clientes_documento_reconciliation reconciliation
+where ordem.cliente_id = reconciliation.source_id;
+
+-- Evita colisao do indice parcial de endereco padrao durante o repontamento.
+update public.cliente_enderecos endereco
+set is_padrao = false
+from clientes_documento_reconciliation reconciliation
+where endereco.cliente_id = reconciliation.source_id
+  and endereco.is_padrao = true;
+
+update public.cliente_enderecos endereco
+set cliente_id = reconciliation.target_id
+from clientes_documento_reconciliation reconciliation
+where endereco.cliente_id = reconciliation.source_id;
+
+with target_without_default as (
+  select distinct reconciliation.target_id
+  from clientes_documento_reconciliation reconciliation
+  where not exists (
+    select 1
+    from public.cliente_enderecos endereco
+    where endereco.cliente_id = reconciliation.target_id
+      and endereco.is_padrao = true
+  )
+), chosen_default as (
+  select
+    target.target_id,
+    (pg_catalog.array_agg(endereco.id order by endereco.id))[1] as endereco_id
+  from target_without_default target
+  join public.cliente_enderecos endereco
+    on endereco.cliente_id = target.target_id
+  group by target.target_id
+)
+update public.cliente_enderecos endereco
+set is_padrao = true
+from chosen_default chosen
+where endereco.id = chosen.endereco_id;
+
+update public.clientes cliente
+set deleted_at = coalesce(cliente.deleted_at, pg_catalog.clock_timestamp())
+from clientes_documento_reconciliation reconciliation
+where cliente.id = reconciliation.source_id;
+
 create unique index clientes_cnpj_cpf_uniq
   on public.clientes (
     empresa_id,
@@ -174,3 +257,5 @@ revoke all on function public.sync_push_upsert(text, jsonb)
   from public, anon, authenticated;
 grant execute on function public.sync_push_upsert(text, jsonb)
   to service_role;
+
+commit;
