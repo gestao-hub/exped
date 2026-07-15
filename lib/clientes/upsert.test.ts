@@ -30,10 +30,57 @@ describe('upsertCliente', () => {
       upsertCliente(
         supabase,
         { nome: 'Cliente ativo', cnpj_cpf: '12.345.678/0001-90' },
-        '20000000-0000-4000-8000-000000000010',
       ),
     ).resolves.toEqual({ id: '20000000-0000-4000-8000-000000000001', criou: false });
 
     expect(calls).toContainEqual({ method: 'is', args: ['deleted_at', null] });
+  });
+
+  it('resolve o cliente do ingest de forma atomica por documento normalizado ou codigo ERP', async () => {
+    const canonicalId = '20000000-0000-4000-8000-000000000002';
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: canonicalId, criou: false },
+      error: null,
+    });
+    const insertResult = {
+      select: () => ({
+        single: vi.fn().mockResolvedValue({
+          data: { id: '20000000-0000-4000-8000-000000000099' },
+          error: null,
+        }),
+      }),
+    };
+    const query = {
+      select: () => query,
+      eq: () => query,
+      is: () => query,
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      insert: vi.fn().mockReturnValue(insertResult),
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn().mockReturnValue(query),
+    } as unknown as Parameters<typeof upsertCliente>[0];
+
+    await expect(
+      upsertCliente(
+        supabase,
+        {
+          nome: 'Cliente Hiper',
+          cnpj_cpf: '067.203.989-38',
+          codigo_erp: '1000373',
+        },
+        '20000000-0000-4000-8000-000000000010',
+      ),
+    ).resolves.toEqual({ id: canonicalId, criou: false });
+
+    expect(rpc).toHaveBeenCalledWith('resolve_cliente_ingest', {
+      p_empresa: '20000000-0000-4000-8000-000000000010',
+      p_cliente: expect.objectContaining({
+        cnpj_cpf: '067.203.989-38',
+        codigo_erp: '1000373',
+        nome: 'Cliente Hiper',
+      }),
+    });
   });
 });
