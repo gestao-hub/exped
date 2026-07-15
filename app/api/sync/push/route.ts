@@ -6,19 +6,18 @@ import { makeSupabaseSyncDb } from '@/lib/sync/supabase-db';
 import { runPush, PushError, type Row } from '@/lib/sync/engine';
 
 export const runtime = 'nodejs';
-// Lote de push faz uma chamada por linha (até SYNC_LIMIT); em catch-up de backlog
-// grande isso passa do timeout padrão e o hub vê "fetch failed". Estende a janela.
+// Cada linha usa uma RPC atomica; o engine limita a concorrencia do lote para
+// reduzir o catch-up sem saturar o banco. A janela maior cobre backlogs extensos.
 export const maxDuration = 60;
 
 /**
  * Push de lote do hub. Auth por token de dispositivo → empresa_id. A nuvem é a
- * autoridade de merge: pra cada linha de tabela two-way, mergeia campo-a-campo
- * contra a canônica (mergeRow) e grava o resultado. Tabelas `down` → 403.
- * Escopo por empresa SEMPRE server-side (empresa_id forçado; filhas validam o pai).
+ * autoridade de merge: cada linha two-way vai para uma RPC que trava a PK e faz
+ * leitura, merge e escrita na mesma transacao. Tabelas `down` → 403. Escopo por
+ * empresa SEMPRE server-side (empresa_id forçado; filhas travam/validam o pai).
  *
- * O resultado do merge é gravado com o trigger de stamp desligado (via RPC
- * sync_push_upsert) pra preservar field_updated_at/updated_at exatamente como
- * calculados. Idempotente por PK.
+ * A RPC `sync_merge_upsert` preserva field_updated_at/updated_at e devolve a
+ * canonica resultante. Idempotente por PK.
  */
 const pushSchema = z.object({
   rows: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))).default({}),
@@ -47,7 +46,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, { status: 200 });
   } catch (e) {
     if (e instanceof PushError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return NextResponse.json(
+        { error: e.message, ...(e.blockedRow ? { blockedRow: e.blockedRow } : {}) },
+        {
+          status: e.status,
+          ...(e.status === 503 ? { headers: { 'Retry-After': '30' } } : {}),
+        },
+      );
     }
     console.error('[sync/push] erro:', e);
     return NextResponse.json({ error: 'Falha no push de sync' }, { status: 500 });

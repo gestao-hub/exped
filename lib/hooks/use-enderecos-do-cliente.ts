@@ -36,6 +36,8 @@ export function useEnderecosDoCliente(cnpjCpf: string | null | undefined) {
   useEffect(() => {
     const key = (cnpjCpf ?? '').trim();
     if (!key) {
+      // The lookup key was cleared, so stale results must disappear immediately.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCliente(null);
       setEnderecos([]);
       return;
@@ -47,6 +49,7 @@ export function useEnderecosDoCliente(cnpjCpf: string | null | undefined) {
         .from('clientes')
         .select('id, nome')
         .eq('cnpj_cpf', key)
+        .is('deleted_at', null)
         .maybeSingle();
       if (cancel) return;
       if (!c) {

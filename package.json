@@ -1,6 +1,6 @@
 {
   "name": "exped",
-  "version": "0.3.20",
+  "version": "0.3.21",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -41,13 +41,19 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vitest/ui": "^4.1.6",
+    "@vitest/ui": "4.1.10",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "tsx": "^4.22.2",
     "typescript": "^5",
-    "vitest": "^4.1.6"
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "esbuild": "0.28.1",
+    "hono": "4.12.30",
+    "js-yaml": "4.3.0"
   }
 }

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
 import { runPull, runPush, type SyncDb, type Row } from '../engine';
-import type { SyncTable } from '../tables';
+import { mergeRow } from '../merge';
+import type { SyncTable, TwoWaySyncTable } from '../tables';
 // hub client é .mjs (contrato estável — ver hub/sync.mjs).
-import { syncOnce } from '../../../hub/sync.mjs';
+import { getState, syncOnce } from '../../../hub/sync.mjs';
 
 /**
  * Simulação E2E em memória: uma "nuvem" (db in-memory que roda a lógica REAL de
@@ -37,8 +38,14 @@ function makeCloud(seed: Record<string, Row[]> = {}) {
     return undefined;
   }
 
+  const pullPk = (table: string, row: Row) => {
+    const pk = TABLE_BY_NAME[table]?.pk ?? 'id';
+    const column = Array.isArray(pk) ? pk[pk.length - 1] : pk;
+    return String(row[column] ?? '');
+  };
+
   const db: SyncDb = {
-    async selectChanges(table, empresaId, cursor, limit) {
+    async selectChanges(table, empresaId, cursor, limit, cursorPk?: string) {
       const rows = (store[table] ?? []).filter((r) => {
         let inScope: boolean;
         if (r.empresa_id !== undefined) inScope = r.empresa_id === empresaId;
@@ -49,12 +56,19 @@ function makeCloud(seed: Record<string, Row[]> = {}) {
             ? parentEmpresaOf(t.parent.table, r[t.parent.fk]) === empresaId
             : true;
         }
-        return inScope && String(r.updated_at ?? '') > cursor;
+        const updatedAt = String(r.updated_at ?? '');
+        return inScope && (
+          updatedAt > cursor ||
+          (cursorPk !== undefined && updatedAt === cursor && pullPk(table, r) > cursorPk)
+        );
       });
-      rows.sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
+      rows.sort((a, b) => (
+        String(a.updated_at).localeCompare(String(b.updated_at)) ||
+        pullPk(table, a).localeCompare(pullPk(table, b))
+      ));
       return rows.slice(0, limit).map((r) => ({ ...r }));
     },
-    async findCanonical(table: SyncTable, empresaId, pk) {
+    async findCanonical(table: TwoWaySyncTable, empresaId, pk) {
       const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
       if (!found) return null;
       if (found.empresa_id !== undefined && found.empresa_id !== empresaId) return null;
@@ -63,14 +77,14 @@ function makeCloud(seed: Record<string, Row[]> = {}) {
       }
       return { ...found };
     },
-    async findCanonicalGlobal(table: SyncTable, pk) {
+    async findCanonicalGlobal(table: TwoWaySyncTable, pk) {
       const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
       return found ? { ...found } : null;
     },
     async parentBelongsToEmpresa(parentTable, parentId, empresaId) {
       return parentEmpresaOf(parentTable, parentId) === empresaId;
     },
-    async findCanonicalMany(table: SyncTable, empresaId, pks) {
+    async findCanonicalMany(table: TwoWaySyncTable, empresaId, pks) {
       const map = new Map<string, Row>();
       for (const pk of pks) {
         const f = await this.findCanonical(table, empresaId, pk);
@@ -84,6 +98,28 @@ function makeCloud(seed: Record<string, Row[]> = {}) {
         if (await this.parentBelongsToEmpresa(parentTable, id, empresaId)) set.add(String(id));
       }
       return set;
+    },
+    async mergeAndUpsert(table, empresaId, row) {
+      store[table.name] = store[table.name] ?? [];
+      const idx = store[table.name].findIndex((candidate) => candidate[table.pk] === row[table.pk]);
+      const existing = idx >= 0 ? store[table.name][idx] : null;
+
+      if (existing?.empresa_id !== undefined && existing.empresa_id !== empresaId) return null;
+      if (existing?.empresa_id === undefined && existing && table.parent) {
+        if (parentEmpresaOf(table.parent.table, existing[table.parent.fk]) !== empresaId) return null;
+      }
+      if (table.parent && parentEmpresaOf(table.parent.table, row[table.parent.fk]) !== empresaId) {
+        return null;
+      }
+
+      const saved = existing ? mergeRow(row, existing) as Row : { ...row };
+      if (saved.empresa_id !== undefined) saved.empresa_id = empresaId;
+      saved.updated_at = Object.values(
+        (saved.field_updated_at ?? {}) as Record<string, string>,
+      ).filter((value): value is string => typeof value === 'string').sort().at(-1) ?? EPOCH;
+      if (idx >= 0) store[table.name][idx] = saved;
+      else store[table.name].push(saved);
+      return { ...saved };
     },
     async upsertRaw(table, row) {
       store[table] = store[table] ?? [];
@@ -106,14 +142,21 @@ function makeCloud(seed: Record<string, Row[]> = {}) {
     async setSyncReplica() {
       /* no-op: o fake não tem trigger */
     },
-    async selectAuthUsers(empresaId, cursor, limit) {
+    async selectAuthUsers(empresaId, cursor, limit, cursorPk?: string) {
       const profIds = new Set(
         (store.profiles ?? []).filter((p) => p.empresa_id === empresaId).map((p) => String(p.id)),
       );
-      const rows = (store['auth.users'] ?? []).filter(
-        (u) => profIds.has(String(u.id)) && String(u.updated_at ?? '') > cursor,
-      );
-      rows.sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
+      const rows = (store['auth.users'] ?? []).filter((u) => {
+        const updatedAt = String(u.updated_at ?? '');
+        return profIds.has(String(u.id)) && (
+          updatedAt > cursor ||
+          (cursorPk !== undefined && updatedAt === cursor && String(u.id) > cursorPk)
+        );
+      });
+      rows.sort((a, b) => (
+        String(a.updated_at).localeCompare(String(b.updated_at)) ||
+        String(a.id).localeCompare(String(b.id))
+      ));
       return rows.slice(0, limit).map((r) => ({ ...r }));
     },
   };
@@ -144,33 +187,75 @@ const TABLE_BY_NAME: Record<string, SyncTable> = Object.fromEntries(
 // HUB — db local em memória (mesma interface mínima do hub/test/sync.test.mjs).
 // ---------------------------------------------------------------------------
 const EPOCH = '1970-01-01T00:00:00Z';
+type HubCursor = { pull_at: string; pull_pk: string; push_at: string; push_pk: string };
+type PushCursor = { at: string; pk: string };
+
 function makeHubDb() {
   const tables = new Map<string, Map<unknown, Row>>();
-  const cursors = new Map<string, { pull_at: string; push_at: string }>();
+  const cursors = new Map<string, HubCursor>();
   const tbl = (name: string) => {
     if (!tables.has(name)) tables.set(name, new Map());
     return tables.get(name)!;
   };
+  const changedRows = (table: string, pk: string, cursor: PushCursor) => (
+    [...tbl(table).values()]
+      .filter((row) => {
+        const at = String(row.updated_at ?? '');
+        const rowPk = String(row[pk] ?? '');
+        return at > cursor.at || (at === cursor.at && rowPk > cursor.pk);
+      })
+      .sort((a, b) => {
+        const byTime = String(a.updated_at).localeCompare(String(b.updated_at));
+        return byTime || String(a[pk]).localeCompare(String(b[pk]));
+      })
+  );
   return {
     async ensureCursorTable() {},
     async getCursor(table: string) {
-      return cursors.get(table) || { pull_at: EPOCH, push_at: EPOCH };
+      return cursors.get(table) || { pull_at: EPOCH, pull_pk: '', push_at: EPOCH, push_pk: '' };
     },
-    async setCursor(table: string, patch: { pull_at?: string; push_at?: string }) {
-      const cur = cursors.get(table) || { pull_at: EPOCH, push_at: EPOCH };
+    async setCursor(
+      table: string,
+      patch: { pull_at?: string; pull_pk?: string; push_at?: string; push_pk?: string },
+    ) {
+      const cur = cursors.get(table) || { pull_at: EPOCH, pull_pk: '', push_at: EPOCH, push_pk: '' };
       cursors.set(table, { ...cur, ...patch });
     },
-    async selectChanged(table: string, cursor: string, limit: number) {
-      const rows = [...tbl(table).values()]
-        .filter((r) => String(r.updated_at ?? '') > String(cursor ?? ''))
-        .sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
-      return rows.slice(0, limit).map((r) => ({ ...r }));
+    async selectChanged(table: string, pk: string, cursor: PushCursor, limit: number) {
+      return changedRows(table, pk, cursor).slice(0, limit).map((row) => ({ ...row }));
+    },
+    async countChanged(table: string, pk: string, cursor: PushCursor) {
+      return changedRows(table, pk, cursor).length;
     },
     async upsert(table: string, pk: string, row: Row) {
       tbl(table).set(row[pk], { ...row });
     },
+    async applyCanonicalPage(
+      table: string,
+      pk: string,
+      rows: Row[],
+      cursor: { pull_at?: string; pull_pk?: string; push_at?: string; push_pk?: string },
+    ) {
+      const rowsBefore = new Map(
+        [...tbl(table)].map(([key, row]) => [key, { ...row }]),
+      );
+      const hadCursor = cursors.has(table);
+      const cursorBefore = hadCursor ? { ...cursors.get(table)! } : null;
+      try {
+        for (const row of rows) await this.upsert(table, pk, row);
+        await this.setCursor(table, cursor);
+      } catch (error) {
+        tables.set(table, rowsBefore);
+        if (hadCursor && cursorBefore) cursors.set(table, cursorBefore);
+        else cursors.delete(table);
+        throw error;
+      }
+    },
     async upsertAuthUser(row: Row) {
       tbl('auth.users').set(row.id, { ...row });
+    },
+    async listPendingIdentityAliases() {
+      return [];
     },
     // helpers de teste
     get(table: string, id: unknown) {
@@ -195,8 +280,14 @@ function makeTransports(cloud: ReturnType<typeof makeCloud>, empresaId: string) 
       // runPush pode lançar PushError(status) — o syncOnce trata 403 e relança o resto.
       return await runPush(cloud.db, empresaId, rows);
     },
-    pullFn: async ({ cursors }: { cursors: Record<string, string> }) => {
-      return await runPull(cloud.db, empresaId, cursors);
+    pullFn: async ({
+      cursors,
+      identityOnly,
+    }: {
+      cursors: Record<string, string>;
+      identityOnly?: boolean;
+    }) => {
+      return await runPull(cloud.db, empresaId, cursors, { identityOnly });
     },
   };
 }
@@ -215,6 +306,65 @@ function clone(r: Row): Row {
 }
 
 describe('E2E sync — cenários multi-hub + nuvem (lógica real)', () => {
+  it('adapter keyset envia 530 empates em duas páginas sem perder backlog', async () => {
+    const cloud = makeCloud();
+    const hub = makeHubDb();
+    const timestamp = '2026-07-14T12:00:00.123456Z';
+    for (let i = 0; i < 530; i += 1) {
+      hub.seed('clientes', {
+        id: `c${String(i).padStart(4, '0')}`,
+        empresa_id: E1,
+        nome: `Cliente ${i}`,
+        updated_at: timestamp,
+        field_updated_at: { nome: timestamp },
+      });
+    }
+    const transports = makeTransports(cloud, E1);
+    const pageSizes: number[] = [];
+
+    const first = await syncOnce({
+      db: hub,
+      apiBase: 'mem://cloud',
+      deviceToken: 'tok',
+      maxPushPages: 1,
+      pushFn: async ({ rows }: { rows: Record<string, Row[]> }) => {
+        pageSizes.push(rows.clientes.length);
+        return transports.pushFn({ rows });
+      },
+      pullFn: transports.pullFn,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(pageSizes).toEqual([500]);
+    expect(cloud.store.clientes).toHaveLength(500);
+    expect(getState()).toMatchObject({
+      pendingByTable: expect.objectContaining({ clientes: 30 }),
+      pendingPush: 30,
+      caughtUp: false,
+    });
+
+    const second = await syncOnce({
+      db: hub,
+      apiBase: 'mem://cloud',
+      deviceToken: 'tok',
+      pushFn: async ({ rows }: { rows: Record<string, Row[]> }) => {
+        pageSizes.push(rows.clientes.length);
+        return transports.pushFn({ rows });
+      },
+      pullFn: transports.pullFn,
+    });
+
+    expect(second.ok).toBe(true);
+    expect(pageSizes).toEqual([500, 30]);
+    expect(cloud.store.clientes).toHaveLength(530);
+    expect(new Set(cloud.store.clientes.map((row) => row.id)).size).toBe(530);
+    expect(await hub.getCursor('clientes')).toMatchObject({
+      push_at: timestamp,
+      push_pk: 'c0529',
+    });
+    expect(getState()).toMatchObject({ pendingPush: 0, caughtUp: true });
+  });
+
   it('conflito por campo: A muda endereco, B muda telefone do MESMO cliente → ambos sobrevivem', async () => {
     // Nuvem tem o cliente canônico; os dois hubs partem dele já sincronizado.
     const base: Row = {
@@ -351,7 +501,16 @@ describe('E2E sync — cenários multi-hub + nuvem (lógica real)', () => {
 
     const { pushFn } = makeTransports(cloud, E1);
     // 1º ciclo: push OK, pull LANÇA (rede caiu logo após confirmar o push).
-    const failingPull = async () => {
+    const failingPull = async ({
+      cursors,
+      identityOnly,
+    }: {
+      cursors: Record<string, string>;
+      identityOnly?: boolean;
+    }) => {
+      if (identityOnly) {
+        return runPull(cloud.db, E1, cursors, { identityOnly: true });
+      }
       throw new Error('ECONNRESET no pull');
     };
     const res1 = await syncOnce({ db: hub, apiBase: 'mem://cloud', deviceToken: 'tok', pushFn, pullFn: failingPull });
@@ -488,9 +647,10 @@ describe('E2E sync — cenários multi-hub + nuvem (lógica real)', () => {
       field_updated_at: { nome: '2026-09-01T00:00:00Z' },
     });
 
-    // syncOnce trata o 403 da nuvem: loga, NÃO avança o cursor, e o ciclo segue ok.
+    // O 403 preserva o dado da outra empresa e não avança o cursor, mas o ciclo
+    // precisa sinalizar falha: a linha continua pendente e exige diagnóstico.
     const res = await cycle(hubA, cloud, 'EA');
-    expect(res.ok).toBe(true); // 403 de escopo é tratado, não derruba o ciclo
+    expect(res.ok).toBe(false);
 
     // A linha da empresa B continua intacta no cloud.
     expect(cloud.store.clientes).toHaveLength(1);

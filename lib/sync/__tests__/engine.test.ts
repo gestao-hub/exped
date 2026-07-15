@@ -1,6 +1,46 @@
 import { describe, it, expect } from 'vitest';
-import { runPull, runPush, PushError, EPOCH, type SyncDb, type Row } from '../engine';
-import type { SyncTable } from '../tables';
+import {
+  runPull,
+  runPush,
+  PushError,
+  SyncSchemaUnavailableError,
+  EPOCH,
+  PUSH_CONCURRENCY,
+  type SyncDb,
+  type Row,
+} from '../engine';
+import { mergeRow } from '../merge';
+import { SYNC_TABLES, getSyncTable, type TwoWaySyncTable } from '../tables';
+
+const pullPkCursorKey = (table: string) => `${table}.__pk`;
+
+function pullPk(table: string, row: Row): string {
+  const pk = getSyncTable(table)?.pk ?? 'id';
+  const column = Array.isArray(pk) ? pk[pk.length - 1] : pk;
+  return String(row[column] ?? '');
+}
+
+function comparePullPk(table: string, left: Row, right: Row): number {
+  if (table === 'hiper_vendedor_map') {
+    return Number(left.hiper_usuario_id) - Number(right.hiper_usuario_id);
+  }
+  return pullPk(table, left).localeCompare(pullPk(table, right));
+}
+
+function pullPkIsAfter(table: string, row: Row, cursorPk: string): boolean {
+  if (cursorPk === '') return true;
+  if (table === 'hiper_vendedor_map') {
+    return Number(row.hiper_usuario_id) > Number(cursorPk);
+  }
+  return pullPk(table, row) > cursorPk;
+}
+
+function maxFieldTimestamp(row: Row): string {
+  return Object.values((row.field_updated_at ?? {}) as Record<string, string>)
+    .filter((value): value is string => typeof value === 'string')
+    .sort()
+    .at(-1) ?? EPOCH;
+}
 
 /**
  * Fake in-memory de SyncDb. Guarda linhas por tabela e registra o estado do trigger
@@ -23,15 +63,22 @@ function makeDb(seed: Record<string, Row[]> = {}) {
   const replicaCalls: boolean[] = [];
 
   const db: SyncDb = {
-    async selectChanges(table, empresaId, cursor, limit) {
+    async selectChanges(table, empresaId, cursor, limit, cursorPk?: string) {
       const rows = (store[table] ?? []).filter((r) => {
         const inScope = r.empresa_id === undefined ? true : r.empresa_id === empresaId;
-        return inScope && String(r.updated_at ?? '') > cursor;
+        const updatedAt = String(r.updated_at ?? '');
+        return inScope && (
+          updatedAt > cursor ||
+          (cursorPk !== undefined && updatedAt === cursor && pullPkIsAfter(table, r, cursorPk))
+        );
       });
-      rows.sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
+      rows.sort((a, b) => (
+        String(a.updated_at).localeCompare(String(b.updated_at)) ||
+        comparePullPk(table, a, b)
+      ));
       return rows.slice(0, limit).map((r) => ({ ...r }));
     },
-    async findCanonical(table: SyncTable, empresaId, pk) {
+    async findCanonical(table: TwoWaySyncTable, empresaId, pk) {
       const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
       if (!found) return null;
       if (found.empresa_id !== undefined && found.empresa_id !== empresaId) return null;
@@ -42,7 +89,7 @@ function makeDb(seed: Record<string, Row[]> = {}) {
       }
       return { ...found };
     },
-    async findCanonicalGlobal(table: SyncTable, pk) {
+    async findCanonicalGlobal(table: TwoWaySyncTable, pk) {
       // Existência GLOBAL por PK, SEM filtro de empresa.
       const found = (store[table.name] ?? []).find((r) => r[table.pk] === pk);
       return found ? { ...found } : null;
@@ -50,7 +97,7 @@ function makeDb(seed: Record<string, Row[]> = {}) {
     async parentBelongsToEmpresa(parentTable, parentId, empresaId) {
       return parentEmpresa[parentTable]?.[String(parentId)] === empresaId;
     },
-    async findCanonicalMany(table: SyncTable, empresaId, pks) {
+    async findCanonicalMany(table: TwoWaySyncTable, empresaId, pks) {
       const map = new Map<string, Row>();
       for (const pk of pks) {
         const found = await this.findCanonical(table, empresaId, pk);
@@ -64,6 +111,38 @@ function makeDb(seed: Record<string, Row[]> = {}) {
         if (parentEmpresa[parentTable]?.[String(id)] === empresaId) set.add(String(id));
       }
       return set;
+    },
+    async mergeAndUpsert(table, empresaId, row) {
+      store[table.name] = store[table.name] ?? [];
+      const idx = store[table.name].findIndex((candidate) => candidate[table.pk] === row[table.pk]);
+      const existing = idx >= 0 ? store[table.name][idx] : null;
+
+      if (existing?.empresa_id !== undefined && existing.empresa_id !== empresaId) return null;
+      if (existing?.empresa_id === undefined && existing && table.parent) {
+        const existingParentEmpresa = parentEmpresa[table.parent.table]?.[
+          String(existing[table.parent.fk])
+        ];
+        if (existingParentEmpresa !== empresaId) return null;
+      }
+      if (table.parent) {
+        const incomingParentEmpresa = parentEmpresa[table.parent.table]?.[
+          String(row[table.parent.fk])
+        ];
+        if (incomingParentEmpresa !== empresaId) return null;
+      }
+
+      const saved = existing ? mergeRow(row, existing) as Row : { ...row };
+      if (saved.empresa_id !== undefined) saved.empresa_id = empresaId;
+      saved.updated_at = maxFieldTimestamp(saved);
+      if (idx >= 0) store[table.name][idx] = saved;
+      else store[table.name].push(saved);
+
+      if (table.name === 'pedidos' || table.name === 'ordens_servico') {
+        parentEmpresa[table.name][String(saved.id)] = empresaId;
+      } else if (table.name === 'pedido_pontos_retirada') {
+        parentEmpresa.pedido_pontos_retirada[String(saved.id)] = empresaId;
+      }
+      return { ...saved };
     },
     async upsertRaw(table, row) {
       store[table] = store[table] ?? [];
@@ -88,15 +167,24 @@ function makeDb(seed: Record<string, Row[]> = {}) {
     async setSyncReplica(on) {
       replicaCalls.push(on);
     },
-    async selectAuthUsers(empresaId, cursor, limit) {
+    async selectAuthUsers(empresaId, cursor, limit, cursorPk?: string) {
       // profiles da empresa → ids; depois filtra auth.users por esses ids.
       const profIds = new Set(
         (store.profiles ?? []).filter((p) => p.empresa_id === empresaId).map((p) => String(p.id)),
       );
       const rows = (store['auth.users'] ?? []).filter(
-        (u) => profIds.has(String(u.id)) && String(u.updated_at ?? '') > cursor,
+        (u) => {
+          const updatedAt = String(u.updated_at ?? '');
+          return profIds.has(String(u.id)) && (
+            updatedAt > cursor ||
+            (cursorPk !== undefined && updatedAt === cursor && String(u.id) > cursorPk)
+          );
+        },
       );
-      rows.sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
+      rows.sort((a, b) => (
+        String(a.updated_at).localeCompare(String(b.updated_at)) ||
+        String(a.id).localeCompare(String(b.id))
+      ));
       return rows.slice(0, limit).map((r) => ({ ...r }));
     },
   };
@@ -104,6 +192,35 @@ function makeDb(seed: Record<string, Row[]> = {}) {
 }
 
 describe('runPull', () => {
+  it('identityOnly consulta somente profiles e auth.users e sinaliza o contrato aditivo', async () => {
+    const { db } = makeDb({
+      clientes: [
+        { id: 'c1', empresa_id: 'E1', updated_at: '2026-07-14T10:00:00Z' },
+      ],
+      profiles: [
+        { id: 'u1', empresa_id: 'E1', updated_at: '2026-07-14T11:00:00Z' },
+      ],
+      'auth.users': [
+        { id: 'u1', email: 'u1@example.test', updated_at: '2026-07-14T12:00:00Z' },
+      ],
+    });
+    const selectedTables: string[] = [];
+    const selectChanges = db.selectChanges.bind(db);
+    db.selectChanges = async (...args) => {
+      selectedTables.push(args[0]);
+      return selectChanges(...args);
+    };
+
+    const result = await runPull(db, 'E1', {}, { identityOnly: true });
+
+    expect(selectedTables).toEqual(['profiles']);
+    expect(Object.keys(result.tables)).toEqual(['profiles']);
+    expect(result.tables.profiles.map((row) => row.id)).toEqual(['u1']);
+    expect(result.auth_users.map((row) => row.id)).toEqual(['u1']);
+    expect(result.identityOnly).toBe(true);
+    expect(result.nextCursors.clientes).toBeUndefined();
+  });
+
   it('devolve linhas > cursor por tabela, incl. deleted_at, e calcula nextCursor', async () => {
     const { db } = makeDb({
       clientes: [
@@ -155,9 +272,241 @@ describe('runPull', () => {
     expect(res.auth_users).toEqual([]);
     expect(res.nextCursors['auth.users']).toBe('2026-06-01T00:00:00Z');
   });
+
+  it('pagina 530 empates por PK em todas as tabelas, filhas e auth.users', async () => {
+    const timestamp = '2026-07-14T12:00:00.123456Z';
+    const seed: Record<string, Row[]> = {};
+
+    for (const table of SYNC_TABLES) {
+      seed[table.name] = Array.from({ length: 530 }, (_, index) => {
+        const suffix = String(index).padStart(4, '0');
+        if (typeof table.pk !== 'string') {
+          return {
+            empresa_id: 'E1',
+            hiper_usuario_id: index,
+            updated_at: timestamp,
+          };
+        }
+        return {
+          [table.pk]: `${table.name}-${suffix}`,
+          ...(table.name === 'profiles' ? { empresa_id: 'E1' } : {}),
+          updated_at: timestamp,
+        };
+      });
+    }
+    seed['auth.users'] = seed.profiles.map((profile) => ({
+      id: profile.id,
+      email: `${profile.id}@example.test`,
+      updated_at: timestamp,
+    }));
+
+    const { db } = makeDb(seed);
+    const cursors: Record<string, string> = {};
+    for (const table of SYNC_TABLES) {
+      cursors[table.name] = EPOCH;
+      cursors[pullPkCursorKey(table.name)] = '';
+    }
+    cursors['auth.users'] = EPOCH;
+    cursors[pullPkCursorKey('auth.users')] = '';
+
+    const first = await runPull(db, 'E1', cursors);
+    const second = await runPull(db, 'E1', first.nextCursors);
+
+    for (const table of SYNC_TABLES) {
+      expect(first.tables[table.name], `${table.name} pagina 1`).toHaveLength(500);
+      expect(second.tables[table.name], `${table.name} pagina 2`).toHaveLength(30);
+      expect(new Set(
+        [...first.tables[table.name], ...second.tables[table.name]]
+          .map((row) => pullPk(table.name, row)),
+      ).size, `${table.name} sem perdas`).toBe(530);
+    }
+    expect(first.auth_users).toHaveLength(500);
+    expect(second.auth_users).toHaveLength(30);
+    expect(new Set([...first.auth_users, ...second.auth_users].map((row) => row.id)).size).toBe(530);
+  });
 });
 
 describe('runPush', () => {
+  it('preserva campos de dois pushes concorrentes delegando o merge ao banco atomico', async () => {
+    const initial: Row = {
+      id: 'c1',
+      empresa_id: 'E1',
+      endereco_padrao: 'Rua antiga',
+      telefone_padrao: '1111',
+      updated_at: '2026-07-14T10:00:00Z',
+      field_updated_at: {
+        endereco_padrao: '2026-07-14T10:00:00Z',
+        telefone_padrao: '2026-07-14T10:00:00Z',
+      },
+    };
+    const { db, store } = makeDb({ clientes: [initial] });
+
+    // Reproduz a corrida antiga: os dois requests leem o mesmo snapshot antes
+    // de qualquer escrita. Um read/merge/write fora da transacao perde um campo.
+    let snapshotReads = 0;
+    let releaseSnapshots!: () => void;
+    const bothSnapshotsStarted = new Promise<void>((resolve) => {
+      releaseSnapshots = resolve;
+    });
+    db.findCanonicalMany = async () => {
+      snapshotReads += 1;
+      if (snapshotReads === 2) releaseSnapshots();
+      await bothSnapshotsStarted;
+      return new Map([['c1', { ...initial }]]);
+    };
+
+    // Contrato novo: cada chamada le, mescla e grava a canônica corrente como
+    // uma unica operacao. O fake e sincrono; a implementacao real e uma RPC SQL.
+    const atomicDb = db as SyncDb & {
+      mergeAndUpsert: (
+        table: TwoWaySyncTable,
+        empresaId: string,
+        row: Row,
+      ) => Promise<Row | null>;
+    };
+    atomicDb.mergeAndUpsert = async (table, empresaId, row) => {
+      const current = store[table.name].find((candidate) => candidate.id === row.id);
+      if (!current || current.empresa_id !== empresaId) return null;
+      const merged = mergeRow(row, current) as Row;
+      merged.empresa_id = empresaId;
+      merged.updated_at = Object.values(
+        (merged.field_updated_at ?? {}) as Record<string, string>,
+      ).sort().at(-1) ?? EPOCH;
+      store[table.name][0] = merged;
+      return { ...merged };
+    };
+
+    await Promise.all([
+      runPush(db, 'E1', {
+        clientes: [{
+          id: 'c1',
+          endereco_padrao: 'Rua nova',
+          field_updated_at: { endereco_padrao: '2026-07-14T11:00:00Z' },
+        }],
+      }),
+      runPush(db, 'E1', {
+        clientes: [{
+          id: 'c1',
+          telefone_padrao: '2222',
+          field_updated_at: { telefone_padrao: '2026-07-14T12:00:00Z' },
+        }],
+      }),
+    ]);
+
+    expect(store.clientes[0].endereco_padrao).toBe('Rua nova');
+    expect(store.clientes[0].telefone_padrao).toBe('2222');
+  });
+
+  it('envolve falha de escrita com tabela/PK e sem mensagem interna', async () => {
+    const { db } = makeDb();
+    db.mergeAndUpsert = async () => {
+      throw new Error('duplicate key value violates secret_constraint');
+    };
+
+    await expect(
+      runPush(db, 'E1', {
+        pedidos: [{ id: 'p-4079', field_updated_at: {} }],
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: 'Falha ao gravar linha de sync',
+      blockedRow: { table: 'pedidos', pk: 'p-4079' },
+    });
+  });
+
+  it('falha fechada com 503 quando a migration atomica ainda nao foi aplicada', async () => {
+    const { db } = makeDb();
+    db.mergeAndUpsert = async () => {
+      throw new SyncSchemaUnavailableError('sync_merge_upsert indisponivel');
+    };
+
+    await expect(
+      runPush(db, 'E1', {
+        pedidos: [{ id: 'p-4079', field_updated_at: {} }],
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: 'Sincronizacao aguardando atualizacao do banco',
+      blockedRow: { table: 'pedidos', pk: 'p-4079' },
+    });
+  });
+
+  it('grava uma pagina com concorrencia limitada e preserva a ordem canonica', async () => {
+    const { db } = makeDb();
+    let active = 0;
+    let maxActive = 0;
+    db.mergeAndUpsert = async (_table, empresaId, row) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { ...row, empresa_id: empresaId };
+    };
+    const rows = Array.from({ length: 24 }, (_, index) => ({
+      id: `c-${String(index).padStart(2, '0')}`,
+      field_updated_at: {},
+    }));
+
+    const result = await runPush(db, 'E1', { clientes: rows });
+
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(PUSH_CONCURRENCY);
+    expect(result.tables.clientes.map((row) => row.id)).toEqual(
+      rows.map((row) => row.id),
+    );
+  });
+
+  it('em erro para de agendar linhas e espera as operacoes iniciadas', async () => {
+    const { db } = makeDb();
+    const started: string[] = [];
+    const finished: string[] = [];
+    db.mergeAndUpsert = async (_table, empresaId, row) => {
+      const id = String(row.id);
+      started.push(id);
+      if (id === 'c-02') {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        throw new Error('falha controlada');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      finished.push(id);
+      return { ...row, empresa_id: empresaId };
+    };
+    const rows = Array.from({ length: PUSH_CONCURRENCY * 2 }, (_, index) => ({
+      id: `c-${String(index).padStart(2, '0')}`,
+      field_updated_at: {},
+    }));
+
+    await expect(runPush(db, 'E1', { clientes: rows })).rejects.toMatchObject({
+      status: 500,
+      blockedRow: { table: 'clientes', pk: 'c-02' },
+    });
+
+    expect(started).toHaveLength(PUSH_CONCURRENCY);
+    expect(finished).toHaveLength(PUSH_CONCURRENCY - 1);
+    expect(started).not.toContain('c-08');
+  });
+
+  it('sanitiza e limita a PK antes de expor o diagnóstico', async () => {
+    const { db } = makeDb();
+    db.mergeAndUpsert = async () => {
+      throw new Error('detalhe interno que não pode sair');
+    };
+    const hostilePk = `pedido\n<4079>${'x'.repeat(180)}`;
+
+    await expect(
+      runPush(db, 'E1', {
+        pedidos: [{ id: hostilePk, field_updated_at: {} }],
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: 'Falha ao gravar linha de sync',
+      blockedRow: {
+        table: 'pedidos',
+        pk: `pedido4079${'x'.repeat(118)}`,
+      },
+    });
+  });
+
   it('recusa tabela down com 403', async () => {
     const { db } = makeDb();
     await expect(runPush(db, 'E1', { empresas: [{ id: 'x', nome: 'X' }] })).rejects.toMatchObject({
@@ -325,7 +674,7 @@ describe('runPush', () => {
   });
 
   it('allowlist: chave estranha no payload não quebra o push (filtrada no RPC por information_schema)', async () => {
-    // O descarte real de colunas inexistentes acontece no RPC sync_push_upsert
+    // O descarte real de colunas inexistentes acontece no RPC sync_merge_upsert
     // (allowlist via information_schema) — validado contra o Postgres. No engine,
     // a chave estranha apenas trafega sem causar erro.
     const { db, store } = makeDb();
@@ -349,7 +698,7 @@ describe('runPush', () => {
     await expect(runPush(db, 'E1', { clientes: rows })).rejects.toMatchObject({ status: 413 });
   });
 
-  it('rejeita lote com PK duplicada (ambíguo pra pré-busca em lote)', async () => {
+  it('rejeita lote com PK duplicada', async () => {
     const { db } = makeDb();
     const rows = [
       { id: 'dup', empresa_id: 'E1', field_updated_at: {} },
@@ -358,7 +707,7 @@ describe('runPush', () => {
     await expect(runPush(db, 'E1', { pedidos: rows })).rejects.toMatchObject({ status: 422 });
   });
 
-  it('push com pré-busca: merge da canônica existente + insert da nova (mesmas linhas)', async () => {
+  it('push atomico: merge da canônica existente + insert da nova (mesmas linhas)', async () => {
     const empresa = 'E1';
     const { db } = makeDb({
       pedidos: [

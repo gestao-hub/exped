@@ -33,7 +33,11 @@ export async function upsertCliente(
   if (cnpj) {
     // Em sessão de usuário a RLS já escopa por empresa; no ingest (service_role,
     // sem RLS) precisamos escopar manualmente pra não casar cliente de outra empresa.
-    let q = supabase.from('clientes').select('id').eq('cnpj_cpf', cnpj);
+    let q = supabase
+      .from('clientes')
+      .select('id')
+      .eq('cnpj_cpf', cnpj)
+      .is('deleted_at', null);
     if (empresaId) q = q.eq('empresa_id', empresaId);
     const { data: existente } = await q.maybeSingle();
     if (existente) return { id: existente.id as string, criou: false };

@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ExpedAgent;
 
@@ -7,12 +8,16 @@ public sealed record AgentRuntimeConfig(string SituacoesVenda, bool SyncOs, stri
 
 /// Busca a config do agente no hub local (/api/agent/config). Mantém o último valor
 /// bom em memória; em falha, devolve o cache (ou os defaults do appsettings).
-public sealed class RemoteConfigClient(HttpClient http, AgentConfig cfg, ILogger<RemoteConfigClient> log)
+public sealed class RemoteConfigClient(
+    HttpClient http,
+    IOptionsMonitor<AgentConfig> liveCfg,
+    ILogger<RemoteConfigClient> log)
 {
     private AgentRuntimeConfig? _cache;
 
     public async Task<AgentRuntimeConfig> GetAsync(CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"{cfg.ApiBaseUrl}/api/agent/config");

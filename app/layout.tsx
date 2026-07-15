@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter, Outfit } from 'next/font/google';
+import Script from 'next/script';
 import { Toaster } from '@/components/ui/sonner';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { ConfirmProvider } from '@/components/providers/confirm-provider';
@@ -44,17 +45,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${inter.variable} ${outfit.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      {/* eslint-disable-next-line @next/next/no-sync-scripts */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html:
-            `window.__SUPABASE_ANON_KEY__=${JSON.stringify(supabaseConfig.anonKey)};` +
-            (isHubRuntime
-              ? `window.__SUPABASE_USE_ORIGIN__=true;`
-              : `window.__SUPABASE_URL__=${JSON.stringify(supabaseConfig.url)};`),
-        }}
-      />
       <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+        <Script
+          id="exped-supabase-runtime-config"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{
+            __html:
+              `window.__SUPABASE_ANON_KEY__=${JSON.stringify(supabaseConfig.anonKey)};` +
+              (isHubRuntime
+                ? `window.__SUPABASE_USE_ORIGIN__=true;`
+                : `window.__SUPABASE_URL__=${JSON.stringify(supabaseConfig.url)};`),
+          }}
+        />
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <ConfirmProvider>
             {children}

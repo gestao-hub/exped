@@ -7,12 +7,18 @@
  * merge e o escopo por empresa é SEMPRE aplicado aqui (nunca confiando no payload).
  */
 
-import { mergeRow, type SyncRow } from './merge';
-import { SYNC_TABLES, hasDirectEmpresaId, type SyncTable } from './tables';
+import {
+  SYNC_TABLES,
+  getSyncTable,
+  hasDirectEmpresaId,
+  pullCursorColumn,
+  type TwoWaySyncTable,
+} from './tables';
 
 export const EPOCH = '1970-01-01T00:00:00Z';
 export const PULL_LIMIT = 500;
 export const PUSH_LIMIT = 500;
+export const PUSH_CONCURRENCY = 8;
 
 export type Row = Record<string, unknown>;
 
@@ -22,24 +28,41 @@ export type Row = Record<string, unknown>;
  */
 export type SyncDb = {
   /**
-   * Linhas de `table` cuja `updated_at > cursor`, escopadas à empresa (direto por
-   * `empresa_id` ou via subquery pelo pai pras filhas), ordenadas por `updated_at`
-   * asc, limitadas a `limit`. Inclui linhas com `deleted_at` (remoções).
+   * Linhas de `table` depois de `(updated_at, cursorPk)`, escopadas à empresa
+   * (direto por `empresa_id` ou via subquery pelo pai pras filhas), ordenadas pelo
+   * mesmo keyset e limitadas a `limit`. Sem `cursorPk`, preserva o contrato legado
+   * `updated_at > cursor`. Inclui linhas com `deleted_at` (remoções).
    */
-  selectChanges(table: string, empresaId: string, cursor: string, limit: number): Promise<Row[]>;
+  selectChanges(
+    table: string,
+    empresaId: string,
+    cursor: string,
+    limit: number,
+    cursorPk?: string,
+  ): Promise<Row[]>;
   /** Busca a linha canônica por PK, já garantindo que pertence à empresa. */
-  findCanonical(table: SyncTable, empresaId: string, pk: unknown): Promise<Row | null>;
+  findCanonical(table: TwoWaySyncTable, empresaId: string, pk: unknown): Promise<Row | null>;
   /**
    * Busca a linha por PK SEM filtro de empresa (checagem global de existência).
    * Usado pra detectar colisão de PK cross-tenant antes de decidir INSERT.
    */
-  findCanonicalGlobal(table: SyncTable, pk: unknown): Promise<Row | null>;
+  findCanonicalGlobal(table: TwoWaySyncTable, pk: unknown): Promise<Row | null>;
   /** Verifica se um id de pai pertence à empresa (validação de filhas no push). */
   parentBelongsToEmpresa(parentTable: string, parentId: unknown, empresaId: string): Promise<boolean>;
   /** Canônicas por PK (em lote), escopadas à empresa. Mesmo critério do findCanonical. */
-  findCanonicalMany(table: SyncTable, empresaId: string, pks: unknown[]): Promise<Map<string, Row>>;
+  findCanonicalMany(table: TwoWaySyncTable, empresaId: string, pks: unknown[]): Promise<Map<string, Row>>;
   /** Subconjunto de parentIds que pertencem à empresa (checagem de pais em lote). */
   parentsInEmpresa(parentTable: string, parentIds: unknown[], empresaId: string): Promise<Set<string>>;
+  /**
+   * Serializa por PK e executa validacao de tenant, leitura canonica, merge por
+   * field_updated_at e upsert na mesma transacao. O tenant vem da autenticacao,
+   * nunca do payload. Retorna null quando a PK/pai pertence a outra empresa.
+   */
+  mergeAndUpsert(
+    table: TwoWaySyncTable,
+    empresaId: string,
+    row: Row,
+  ): Promise<Row | null>;
   /**
    * Grava (insert/update) a linha exatamente como passada (sem trigger sobrescrever).
    * Retorna `null` quando o ON CONFLICT não afetou linha alguma (guarda de empresa no
@@ -50,11 +73,17 @@ export type SyncDb = {
   setSyncReplica(on: boolean): Promise<void>;
   /**
    * Linhas de `auth.users` (login offline) cujos `id` estão em `profiles` da empresa
-   * (`profiles.empresa_id = empresaId`), com `updated_at > cursor`, ordenadas asc,
-   * limitadas a `limit`. Escopo por empresa SEMPRE server-side. Só as colunas que o
-   * GoTrue local precisa pra autenticar (id, email, encrypted_password, etc.).
+   * (`profiles.empresa_id = empresaId`), ordenadas por `(updated_at, id)` e limitadas
+   * a `limit`. Escopo por empresa SEMPRE server-side. Só as colunas que o GoTrue
+   * local precisa pra autenticar (id, email, encrypted_password, etc.).
+   * `cursorPk` habilita desempate por `id`; ausente mantém o filtro legado.
    */
-  selectAuthUsers(empresaId: string, cursor: string, limit: number): Promise<Row[]>;
+  selectAuthUsers(
+    empresaId: string,
+    cursor: string,
+    limit: number,
+    cursorPk?: string,
+  ): Promise<Row[]>;
 };
 
 export type PullResult = {
@@ -62,65 +91,170 @@ export type PullResult = {
   nextCursors: Record<string, string>;
   /** Linhas de auth.users escopadas à empresa (login offline). */
   auth_users: Row[];
+  /** Confirma que a cloud aplicou o modo de preflight em vez de ignorar a flag. */
+  identityOnly?: true;
+};
+
+export type PullOptions = {
+  /** Restringe o pull a profiles + auth.users para reconciliar identidade antes do push. */
+  identityOnly?: boolean;
 };
 
 /** Chave do cursor de auth.users (fora do registro de tabelas public). */
 export const AUTH_USERS_KEY = 'auth.users';
 
+/** Chave companheira compatível com o mapa legado de cursores timestamp. */
+export function pullCursorPkKey(table: string): string {
+  return `${table}.__pk`;
+}
+
+function lastPullCursor(
+  rows: Row[],
+  fallbackAt: string,
+  fallbackPk: string,
+  pkColumn: string,
+): { at: string; pk: string } {
+  const last = rows[rows.length - 1];
+  if (!last) return { at: fallbackAt, pk: fallbackPk };
+  return {
+    at: String(last.updated_at ?? fallbackAt),
+    pk: String(last[pkColumn] ?? fallbackPk),
+  };
+}
+
 export async function runPull(
   db: SyncDb,
   empresaId: string,
   cursors: Record<string, string>,
+  options: PullOptions = {},
 ): Promise<PullResult> {
   const tables: Record<string, Row[]> = {};
   const nextCursors: Record<string, string> = {};
+  const pullTables = options.identityOnly
+    ? SYNC_TABLES.filter((table) => table.name === 'profiles')
+    : SYNC_TABLES;
 
-  for (const t of SYNC_TABLES) {
+  for (const t of pullTables) {
     const cursor = cursors[t.name] ?? EPOCH;
-    const rows = await db.selectChanges(t.name, empresaId, cursor, PULL_LIMIT);
+    const cursorPkKey = pullCursorPkKey(t.name);
+    const hasCursorPk = Object.prototype.hasOwnProperty.call(cursors, cursorPkKey);
+    const cursorPk = hasCursorPk ? cursors[cursorPkKey] : undefined;
+    const rows = cursorPk === undefined
+      ? await db.selectChanges(t.name, empresaId, cursor, PULL_LIMIT)
+      : await db.selectChanges(t.name, empresaId, cursor, PULL_LIMIT, cursorPk);
     tables[t.name] = rows;
-    // nextCursor = maior updated_at do lote (ou mantém o cursor atual se vazio).
-    let max = cursor;
-    for (const r of rows) {
-      const u = String(r.updated_at ?? '');
-      if (u > max) max = u;
-    }
-    nextCursors[t.name] = max;
+    const next = lastPullCursor(rows, cursor, cursorPk ?? '', pullCursorColumn(t));
+    nextCursors[t.name] = next.at;
+    nextCursors[cursorPkKey] = next.pk;
   }
 
   // auth.users (login offline): escopado por empresa via profiles, cursor próprio.
   const authCursor = cursors[AUTH_USERS_KEY] ?? EPOCH;
-  const authUsers = await db.selectAuthUsers(empresaId, authCursor, PULL_LIMIT);
-  let authMax = authCursor;
-  for (const r of authUsers) {
-    const u = String(r.updated_at ?? '');
-    if (u > authMax) authMax = u;
-  }
-  nextCursors[AUTH_USERS_KEY] = authMax;
+  const authCursorPkKey = pullCursorPkKey(AUTH_USERS_KEY);
+  const hasAuthCursorPk = Object.prototype.hasOwnProperty.call(cursors, authCursorPkKey);
+  const authCursorPk = hasAuthCursorPk ? cursors[authCursorPkKey] : undefined;
+  const authUsers = authCursorPk === undefined
+    ? await db.selectAuthUsers(empresaId, authCursor, PULL_LIMIT)
+    : await db.selectAuthUsers(empresaId, authCursor, PULL_LIMIT, authCursorPk);
+  const authNext = lastPullCursor(authUsers, authCursor, authCursorPk ?? '', 'id');
+  nextCursors[AUTH_USERS_KEY] = authNext.at;
+  nextCursors[authCursorPkKey] = authNext.pk;
 
-  return { tables, nextCursors, auth_users: authUsers };
+  return {
+    tables,
+    nextCursors,
+    auth_users: authUsers,
+    ...(options.identityOnly ? { identityOnly: true as const } : {}),
+  };
 }
 
 export type PushResult = {
   tables: Record<string, Row[]>;
 };
 
+export type BlockedRow = { table: string; pk: string };
+
 export class PushError extends Error {
   constructor(
     public status: number,
     message: string,
+    public blockedRow?: BlockedRow,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
-function maxTimestamp(fua: Record<string, string> | undefined): string {
-  if (!fua) return EPOCH;
-  let max = EPOCH;
-  for (const v of Object.values(fua)) {
-    if (typeof v === 'string' && v > max) max = v;
+export class SyncSchemaUnavailableError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SyncSchemaUnavailableError';
   }
-  return max;
+}
+
+function blockedRowFor(table: TwoWaySyncTable, row: Row): BlockedRow {
+  const raw = String(row[table.pk] ?? 'desconhecida');
+  const sanitized = raw.replace(/[^a-zA-Z0-9_.:/-]/g, '').slice(0, 128);
+  return { table: table.name, pk: sanitized || 'desconhecida' };
+}
+
+async function mergeRowForPush(
+  db: SyncDb,
+  table: TwoWaySyncTable,
+  empresaId: string,
+  row: Row,
+): Promise<Row> {
+  let saved: Row | null;
+  try {
+    saved = await db.mergeAndUpsert(table, empresaId, row);
+  } catch (cause) {
+    if (cause instanceof SyncSchemaUnavailableError) {
+      throw new PushError(
+        503,
+        'Sincronizacao aguardando atualizacao do banco',
+        blockedRowFor(table, row),
+        { cause },
+      );
+    }
+    throw new PushError(
+      500,
+      'Falha ao gravar linha de sync',
+      blockedRowFor(table, row),
+      { cause },
+    );
+  }
+
+  if (saved == null) {
+    throw new PushError(
+      403,
+      `${table.name}: PK ${String(row[table.pk])} fora do escopo`,
+      blockedRowFor(table, row),
+    );
+  }
+  return saved;
+}
+
+async function mergeRowsWithConcurrency(
+  db: SyncDb,
+  table: TwoWaySyncTable,
+  empresaId: string,
+  rows: Row[],
+): Promise<Row[]> {
+  const result = new Array<Row>(rows.length);
+  for (let offset = 0; offset < rows.length; offset += PUSH_CONCURRENCY) {
+    const wave = rows.slice(offset, offset + PUSH_CONCURRENCY);
+    const settled = await Promise.allSettled(
+      wave.map((row) => mergeRowForPush(db, table, empresaId, row)),
+    );
+    const failedIndex = settled.findIndex((entry) => entry.status === 'rejected');
+    if (failedIndex >= 0) {
+      throw (settled[failedIndex] as PromiseRejectedResult).reason;
+    }
+    settled.forEach((entry, index) => {
+      result[offset + index] = (entry as PromiseFulfilledResult<Row>).value;
+    });
+  }
+  return result;
 }
 
 export async function runPush(
@@ -130,18 +264,18 @@ export async function runPush(
 ): Promise<PushResult> {
   // Valida shape/direção/limites ANTES de mexer no banco.
   for (const [name, rows] of Object.entries(incoming)) {
-    const t = SYNC_TABLES.find((x) => x.name === name);
-    if (!t) throw new PushError(422, `Tabela desconhecida: ${name}`);
-    if (t.dir === 'down') throw new PushError(403, `Tabela read-only (down): ${name}`);
+    const table = getSyncTable(name);
+    if (!table) throw new PushError(422, `Tabela desconhecida: ${name}`);
+    if (table.dir !== 'two-way') throw new PushError(403, `Tabela read-only (down): ${name}`);
+    const pk = table.pk;
     if (rows.length > PUSH_LIMIT) throw new PushError(413, `Lote acima de ${PUSH_LIMIT} linhas: ${name}`);
-    // PK duplicada no MESMO lote é ambígua pra pré-busca em lote (a 2ª ocorrência leria a
-    // canônica estática, não a 1ª recém-gravada → INSERT em vez de MERGE). O hub legítimo
-    // nunca emite isso (PK única na origem); rejeita payload forjado/buggy em vez de mesclar errado.
+    // PK duplicada no MESMO lote torna a ordem do resultado parte do contrato. O hub
+    // legitimo nunca emite isso (PK unica na origem); rejeita payload forjado/buggy.
     const seenPk = new Set<string>();
     for (const r of rows) {
-      const pk = r[t.pk];
-      if (pk == null) continue;
-      const k = String(pk);
+      const pkValue = r[pk];
+      if (pkValue == null) continue;
+      const k = String(pkValue);
       if (seenPk.has(k)) throw new PushError(422, `${name}: PK duplicada no lote: ${k}`);
       seenPk.add(k);
     }
@@ -154,89 +288,32 @@ export async function runPush(
   await db.setSyncReplica(true);
   try {
     for (const [name, rows] of Object.entries(incoming)) {
-      const t = SYNC_TABLES.find((x) => x.name === name)!;
-      const result: Row[] = [];
-
-      // Pré-busca em lote (leitura) — NÃO altera a semântica de merge abaixo. Troca
-      // N queries (1 por linha) por ~2 queries por tabela do lote.
-      const pks = rows.map((r) => r[t.pk]).filter((x) => x != null);
-      const canonMap = await db.findCanonicalMany(t, empresaId, pks);
-      const validParents = t.parent
-        ? await db.parentsInEmpresa(t.parent.table, rows.map((r) => r[t.parent!.fk]), empresaId)
-        : new Set<string>();
-
-      for (const raw of rows) {
+      const table = getSyncTable(name);
+      if (!table) throw new PushError(422, `Tabela desconhecida: ${name}`);
+      if (table.dir !== 'two-way') throw new PushError(403, `Tabela read-only (down): ${name}`);
+      const scopedRows = rows.map((raw) => {
         const row: Row = { ...raw };
 
         // Escopo por empresa: server-side, sempre.
-        if (hasDirectEmpresaId(t.name)) {
+        if (hasDirectEmpresaId(table.name)) {
           row.empresa_id = empresaId; // força o escopo, ignora o que veio no payload.
-        } else if (t.parent) {
-          // Filha: valida que o pai pertence à empresa (cadeia até o ancestral com empresa_id).
-          const parentId = row[t.parent.fk];
+        } else if (table.parent) {
+          // A RPC revalida e trava o ancestral na mesma transacao da escrita. Aqui
+          // validamos apenas o shape para devolver 422 em vez de um erro de banco.
+          const parentId = row[table.parent.fk];
           if (parentId == null) {
-            throw new PushError(422, `${name}.${t.parent.fk} ausente`);
-          }
-          const ok = validParents.has(String(parentId));
-          if (!ok) {
-            throw new PushError(403, `${name}: pai ${t.parent.fk}=${String(parentId)} fora do escopo da empresa`);
+            throw new PushError(422, `${name}.${table.parent.fk} ausente`);
           }
         }
+        return row;
+      });
 
-        const pkVal = row[t.pk];
-        const canonica = pkVal != null ? (canonMap.get(String(pkVal)) ?? null) : null;
-
-        let toWrite: Row;
-        if (canonica) {
-          // incoming = "local"/novo; canonica = "remote". Merge campo-a-campo.
-          const merged = mergeRow(row as SyncRow, canonica as SyncRow);
-          // empresa_id nunca migra de empresa via merge.
-          if (hasDirectEmpresaId(t.name)) merged.empresa_id = empresaId;
-          merged.updated_at = maxTimestamp(merged.field_updated_at as Record<string, string>);
-          toWrite = merged as Row;
-        } else {
-          // SEGURANÇA (defesa em profundidade, camada app): antes de tratar como
-          // INSERT, cheque a existência GLOBAL da PK (sem filtro de empresa). Se a PK
-          // já existe mas NÃO pertence ao escopo do requisitante, é tentativa de
-          // takeover cross-tenant — rejeita com 403 em vez de deixar o ON CONFLICT
-          // sobrescrever a linha da outra empresa.
-          if (pkVal != null) {
-            const global = await db.findCanonicalGlobal(t, pkVal);
-            if (global) {
-              let belongs: boolean;
-              if (hasDirectEmpresaId(t.name)) {
-                belongs = global.empresa_id === empresaId;
-              } else if (t.parent) {
-                // Filha: resolve o pai da linha EXISTENTE e cheque se está na empresa.
-                const existingParentId = global[t.parent.fk];
-                belongs =
-                  existingParentId != null &&
-                  (await db.parentBelongsToEmpresa(t.parent.table, existingParentId, empresaId));
-              } else {
-                belongs = false;
-              }
-              if (!belongs) {
-                throw new PushError(403, `${name}: PK ${String(pkVal)} fora do escopo`);
-              }
-            }
-          }
-          // INSERT: respeita os carimbos vindos do hub; deriva updated_at do field_updated_at.
-          row.updated_at = maxTimestamp(row.field_updated_at as Record<string, string>);
-          toWrite = row;
-        }
-
-        const saved = await db.upsertRaw(t.name, toWrite);
-        // SEGURANÇA (camada banco): o RPC sync_push_upsert tem guarda
-        // `where empresa_id = <escopo>` no ON CONFLICT pra tabelas com empresa_id.
-        // Se a linha existente for de outra empresa, o UPDATE afeta 0 linhas e o
-        // RETURNING vem vazio (null) — tratamos como takeover bloqueado (403).
-        if (saved == null) {
-          throw new PushError(403, `${name}: PK ${String(row[t.pk])} fora do escopo`);
-        }
-        result.push(saved);
-      }
-
-      tables[name] = result;
+      tables[name] = await mergeRowsWithConcurrency(
+        db,
+        table,
+        empresaId,
+        scopedRows,
+      );
     }
   } finally {
     await db.setSyncReplica(false);

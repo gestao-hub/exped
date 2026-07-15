@@ -3,15 +3,20 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 namespace ExpedAgent;
 
 public enum IngestResult { Created, Duplicate, Unauthorized, Invalid, Error }
 public enum NfSyncResult { Ok, NotFound, Error }
 
-public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<IngestClient> log)
+public sealed class IngestClient(
+    HttpClient http,
+    IOptionsMonitor<AgentConfig> liveCfg,
+    ILogger<IngestClient> log)
 {
     public async Task<IngestResult> EnviarAsync(IngestPayload payload, string? pdfPath, CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         var json = JsonSerializer.Serialize(payload);
         HttpContent content;
         if (pdfPath is not null && File.Exists(pdfPath))
@@ -52,6 +57,7 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     /// <summary>Pinga o heartbeat (best-effort) pro painel da frota saber que está vivo.</summary>
     public async Task HeartbeatAsync(CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/agent/heartbeat");
@@ -65,6 +71,7 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     /// <summary>Consulta a versão publicada (pra avisar de atualização). Null se indisponível.</summary>
     public async Task<string?> LatestVersionAsync(CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         try
         {
             using var res = await http.GetAsync($"{cfg.ApiBaseUrl}/api/agent/version", ct);
@@ -78,6 +85,7 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
     /// <summary>Envia uma Ordem de Serviço pro endpoint /api/ingest/os.</summary>
     public async Task<IngestResult> EnviarOsAsync(IngestOsPayload payload, CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         var json = JsonSerializer.Serialize(payload);
         // OS nunca tem arquivo no ingest → JSON direto (evita multipart).
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{cfg.ApiBaseUrl}/api/ingest/os")
@@ -115,6 +123,7 @@ public sealed class IngestClient(HttpClient http, AgentConfig cfg, ILogger<Inges
         (string? Forma, string? Parcelas)? pg,
         CancellationToken ct)
     {
+        var cfg = liveCfg.CurrentValue;
         var payload = new IngestNfPayload
         {
             DocumentoErp = documentoErp,

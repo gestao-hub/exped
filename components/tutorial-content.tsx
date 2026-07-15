@@ -210,7 +210,7 @@ const STEPS_BY_ROLE: Record<UserRole, Step[]> = {
       icon: History,
       title: 'Histórico + exportar CSV',
       body:
-        'Em "Histórico" você vê todos finalizados + 3 KPIs (total, valor faturado, clientes únicos). Filtre por período e clique em "Exportar CSV" pra baixar planilha completa com dados de pedido + logística — pronta pro contábil/financeiro.',
+        'Em "Histórico" você consulta pedidos de todos os status. Os 3 KPIs e a exportação consideram somente os finalizados; use período, status e busca para investigar os demais.',
       cta: { label: 'Histórico', href: '/historico' },
     },
   ],
@@ -360,8 +360,8 @@ const FAQS: FAQ[] = [
     a: (
       <>
         No diálogo de impressão do Chrome, verifique: <strong>Tamanho do papel = A4</strong> e{' '}
-        <strong>Escala = 100%</strong> (não "Ajustar à página"). Margens podem ficar em "Padrão"
-        ou "Mínimas". A view de impressão (<code className="text-xs">/imprimir/[id]</code>) já
+        <strong>Escala = 100%</strong> (não &quot;Ajustar à página&quot;). Margens podem ficar em &quot;Padrão&quot;
+        ou &quot;Mínimas&quot;. A view de impressão (<code className="text-xs">/imprimir/[id]</code>) já
         vem com layout A4 otimizado.
       </>
     ),
@@ -436,7 +436,7 @@ const GLOSSARY: GlossaryEntry[] = [
       <>
         Logística entregou parte dos itens, mas restou quantidade. Aparece em aba própria
         em <strong>/logistica</strong>; no detalhe do pedido todos veem por item quanto foi
-        entregue e quanto falta. Continua aberto até "Marcar como Finalizado".
+        entregue e quanto falta. Continua aberto até &quot;Marcar como Finalizado&quot;.
       </>
     ),
   },
@@ -470,7 +470,7 @@ const GLOSSARY: GlossaryEntry[] = [
         Cliente com CNPJ ou CPF pode ter vários <strong>endereços cadastrados</strong>{' '}
         (Sede, Obra 1, Depósito) gerenciados em /admin/clientes. No formulário do pedido, o
         vendedor escolhe um do seletor (auto-pré-seleciona se bater com o do PDF) ou usa
-        "Outro endereço" pra digitar livre e opcionalmente salvar como novo. O Pedido
+        &quot;Outro endereço&quot; pra digitar livre e opcionalmente salvar como novo. O Pedido
         impresso sempre mostra o endereço daquele pedido (snapshot), mesmo que o cadastro
         do cliente mude depois.
       </>
@@ -481,7 +481,7 @@ const GLOSSARY: GlossaryEntry[] = [
     def: (
       <>
         O método (Crédito, Pix, Débito, Dinheiro, Boleto). Parcelas só no Crédito/Boleto. É
-        separado do "Receber na entrega" (que diz se o valor é cobrado na entrega). Aparece no
+        separado do &quot;Receber na entrega&quot; (que diz se o valor é cobrado na entrega). Aparece no
         pedido impresso pra logística.
       </>
     ),

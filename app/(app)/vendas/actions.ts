@@ -527,7 +527,24 @@ export async function puxarDoHiperAction(): Promise<{ ok: boolean; synced?: numb
       cache: 'no-store',
       signal: AbortSignal.timeout(20000),
     });
-    const json = (await res.json().catch(() => ({}))) as { synced?: number };
+    const json = (await res.json().catch(() => ({}))) as {
+      success?: unknown;
+      synced?: unknown;
+      error?: unknown;
+    };
+    if (!res.ok || json.success !== true) {
+      const agentError =
+        typeof json.error === 'string' && json.error.trim() ? json.error.trim() : null;
+      return {
+        ok: false,
+        message:
+          agentError ??
+          (res.ok
+            ? 'O agente local retornou uma resposta inválida.'
+            : `O agente local falhou ao sincronizar (HTTP ${res.status}).`),
+      };
+    }
+
     revalidatePath('/vendas');
     const synced = typeof json.synced === 'number' ? json.synced : 0;
     return {

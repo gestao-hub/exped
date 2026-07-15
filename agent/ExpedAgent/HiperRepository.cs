@@ -1,11 +1,173 @@
 using Microsoft.Data.SqlClient;
+using System.Text.Json.Serialization;
 namespace ExpedAgent;
+
+public sealed record HiperReadiness(
+    [property: JsonPropertyName("connected")] bool Connected,
+    [property: JsonPropertyName("queryOk")] bool QueryOk,
+    [property: JsonPropertyName("schemaCompatible")] bool SchemaCompatible,
+    [property: JsonPropertyName("targetSchema")] string TargetSchema,
+    [property: JsonPropertyName("database")] string? Database,
+    [property: JsonPropertyName("serverVersion")] string? ServerVersion,
+    [property: JsonPropertyName("sampleOrderId")] int? SampleOrderId,
+    [property: JsonPropertyName("missingColumns")] IReadOnlyList<string> MissingColumns,
+    [property: JsonPropertyName("error")] string? Error);
+
+public sealed record AgentReadinessSnapshot(
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("agentVersion")] string AgentVersion,
+    [property: JsonPropertyName("checkedAt")] string CheckedAt,
+    [property: JsonPropertyName("lastSyncNowAt")] string? LastSyncNowAt,
+    [property: JsonPropertyName("lastSyncNowOk")] bool? LastSyncNowOk,
+    [property: JsonPropertyName("lastSyncNowSynced")] int? LastSyncNowSynced,
+    [property: JsonPropertyName("hiper")] HiperReadiness Hiper)
+{
+    public static AgentReadinessSnapshot Create(
+        int processId,
+        string agentVersion,
+        HiperReadiness hiper,
+        SyncNowObservation? syncNow = null) =>
+        new(
+            processId,
+            agentVersion,
+            DateTimeOffset.UtcNow.ToString("O"),
+            syncNow?.CompletedAt,
+            syncNow?.Ok,
+            syncNow?.Synced,
+            hiper);
+}
 
 // ⚠️ Nomes de coluna do cliente (numero_endereco, fone_primario_*, etc.) vieram do
 // mapeamento; confirmar 1x no SQL Server real e ajustar se divergir (o log mostra o erro).
 public sealed class HiperRepository(string connectionString)
 {
     private readonly string _cs = connectionString;
+    public static readonly IReadOnlyList<(string Table, string Column)> RequiredColumns =
+    [
+        ("pedido_venda", "id_pedido_venda"), ("pedido_venda", "codigo"),
+        ("pedido_venda", "situacao"), ("pedido_venda", "data_hora_geracao"),
+        ("pedido_venda", "id_entidade_cliente"), ("pedido_venda", "id_usuario_vendedor"),
+        ("pedido_venda", "id_usuario_geracao"),
+        ("pedido_venda", "data_previsao_entrega_final"),
+        ("pedido_venda", "data_previsao_entrega_inicial"), ("pedido_venda", "observacao"),
+        ("pedido_venda", "valor_frete"), ("pedido_venda", "excluido"),
+        ("entidade", "id_entidade"), ("entidade", "nome"),
+        ("entidade", "logradouro"), ("entidade", "numero_endereco"),
+        ("entidade", "complemento"), ("entidade", "bairro"), ("entidade", "cep"),
+        ("entidade", "fone_primario_ddd"), ("entidade", "fone_primario_numero"),
+        ("entidade", "id_cidade"), ("pessoa_fisica", "id_entidade"),
+        ("pessoa_fisica", "cpf"), ("pessoa_juridica", "id_entidade"),
+        ("pessoa_juridica", "cnpj"), ("cidade", "nome"), ("cidade", "uf"),
+        ("cidade", "id_cidade"), ("item_pedido_venda", "id_pedido_venda"),
+        ("item_pedido_venda", "sequencia_item"), ("item_pedido_venda", "id_produto"),
+        ("item_pedido_venda", "valor_unitario"),
+        ("item_pedido_venda", "valor_unitario_com_desconto"),
+        ("item_pedido_venda", "data_hora_cadastro"),
+        ("item_pedido_venda", "excluido"), ("item_pedido_venda", "cancelado"),
+        ("grade_pedido_venda", "quantidade"), ("grade_pedido_venda", "sequencia_item"),
+        ("grade_pedido_venda", "id_pedido_venda"), ("produto", "codigo"),
+        ("produto", "nome"), ("produto", "id_produto"),
+    ];
+
+    public const string ReadOnlyProbeSql = @"
+SELECT TOP (1)
+       pv.id_pedido_venda,
+       pv.codigo,
+       pv.situacao,
+       pv.data_hora_geracao,
+       pv.id_entidade_cliente,
+       pv.id_usuario_vendedor,
+       pv.id_usuario_geracao,
+       pv.excluido
+FROM pedido_venda pv WITH (NOLOCK)
+ORDER BY pv.id_pedido_venda DESC;";
+
+    public static List<string> GetMissingRequiredColumns(
+        IEnumerable<(string Table, string Column)> existing)
+    {
+        var found = new HashSet<string>(
+            existing.Select(item => $"{item.Table}.{item.Column}"),
+            StringComparer.OrdinalIgnoreCase);
+        return RequiredColumns
+            .Where(item => !found.Contains($"{item.Table}.{item.Column}"))
+            .Select(item => $"{item.Table}.{item.Column}")
+            .ToList();
+    }
+
+    private static async Task<HashSet<(string Table, string Column)>> ReadSchemaColumnsAsync(
+        SqlConnection connection,
+        CancellationToken ct)
+    {
+        var tables = RequiredColumns.Select(item => item.Table).Distinct().ToArray();
+        var names = tables.Select((_, i) => "@t" + i).ToArray();
+        var sql = $"select TABLE_NAME, COLUMN_NAME from INFORMATION_SCHEMA.COLUMNS " +
+                  $"where TABLE_NAME in ({string.Join(",", names)})";
+        var found = new HashSet<(string Table, string Column)>();
+        await using var command = new SqlCommand(sql, connection) { CommandTimeout = 10 };
+        for (var i = 0; i < tables.Length; i++) command.Parameters.AddWithValue(names[i], tables[i]);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) found.Add((reader.GetString(0), reader.GetString(1)));
+        return found;
+    }
+
+    /// <summary>
+    /// Readiness do contrato de schema consumido pelo Exped Agent. Abre a mesma Trusted_Connection,
+    /// confere as colunas consumidas e executa uma consulta real somente leitura.
+    /// Conexao, query e compatibilidade permanecem sinais independentes.
+    /// </summary>
+    public async Task<HiperReadiness> ProbeReadinessAsync(CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(_cs);
+        try
+        {
+            await connection.OpenAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            return new(false, false, false, AgentInfo.HiperSchemaTarget, null, null, null, [], ex.Message);
+        }
+
+        string? database = null;
+        string? serverVersion = null;
+        IReadOnlyList<string> missing = [];
+        try
+        {
+            await using (var metadata = new SqlCommand(
+                "select DB_NAME(), convert(nvarchar(128), SERVERPROPERTY('ProductVersion'))",
+                connection) { CommandTimeout = 10 })
+            await using (var reader = await metadata.ExecuteReaderAsync(ct))
+            {
+                if (await reader.ReadAsync(ct))
+                {
+                    database = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    serverVersion = reader.IsDBNull(1) ? null : reader.GetString(1);
+                }
+            }
+
+            var existing = await ReadSchemaColumnsAsync(connection, ct);
+            missing = GetMissingRequiredColumns(existing);
+
+            int? sampleOrderId = null;
+            await using (var probe = new SqlCommand(ReadOnlyProbeSql, connection) { CommandTimeout = 10 })
+            await using (var reader = await probe.ExecuteReaderAsync(ct))
+            {
+                if (await reader.ReadAsync(ct) && !reader.IsDBNull(0)) sampleOrderId = reader.GetInt32(0);
+            }
+
+            var compatible = missing.Count == 0;
+            return new(
+                true, true, compatible, AgentInfo.HiperSchemaTarget, database, serverVersion,
+                sampleOrderId, missing,
+                compatible ? null : $"Colunas ausentes: {string.Join(", ", missing)}");
+        }
+        catch (Exception ex)
+        {
+            return new(
+                true, false, false, AgentInfo.HiperSchemaTarget, database, serverVersion,
+                null, missing, ex.Message);
+        }
+    }
+
     // As queries de NF/Pagamento dependem da tabela pedido_venda_operacao_pdv, que so
     // existe em versoes mais novas do Hiper. Cacheamos a existencia pra pular essas
     // queries em silencio em versoes antigas (ex.: Franzoni) — sem logar "Invalid column".

@@ -1,0 +1,110 @@
+name: promote-hub
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_run_id:
+        description: Successful release-hub workflow run containing the approved artifact
+        required: true
+        type: string
+      version:
+        description: Version already staged in hub-releases
+        required: true
+        type: string
+      source_sha:
+        description: Exact source commit SHA shown by the approved release-hub run
+        required: true
+        type: string
+      artifact_sha256:
+        description: Exact ZIP SHA-256 from the approved release metadata
+        required: true
+        type: string
+      allow_downgrade:
+        description: App rollback only; requires ExpedSetup/Hub 0.3.21 or newer
+        required: true
+        default: false
+        type: boolean
+      confirm_hub_0_3_21_or_newer:
+        description: I confirm ExpedSetup/Hub 0.3.21+ is already deployed
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: promote-hub
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    environment: hub-promotion
+    steps:
+      - name: Checkout trusted release tooling
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.18.0'
+      - name: Install trusted tooling dependencies
+        run: npm ci --ignore-scripts
+      - name: Validate approved release-hub run
+        shell: bash
+        env:
+          ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          STAGE_RUN_ID: ${{ inputs.stage_run_id }}
+        run: |
+          [[ "$STAGE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "invalid stage run id" >&2; exit 1; }
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "invalid version" >&2; exit 1; }
+          [[ "$RELEASE_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "invalid source SHA" >&2; exit 1; }
+          [[ "$ARTIFACT_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "invalid artifact SHA-256" >&2; exit 1; }
+          RUN_JSON=$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN_ID")
+          test "$(jq -r .conclusion <<<"$RUN_JSON")" = "success" || {
+            echo "release-hub run did not complete successfully" >&2
+            exit 1
+          }
+          RUN_PATH=$(jq -r .path <<<"$RUN_JSON")
+          test "${RUN_PATH%%@*}" = ".github/workflows/release-hub.yml" || {
+            echo "approved run is not release-hub.yml" >&2
+            exit 1
+          }
+      - name: Download exact approved release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hub-release-${{ inputs.source_sha }}
+          path: approved-release
+          run-id: ${{ inputs.stage_run_id }}
+          github-token: ${{ github.token }}
+      - name: Promote staged app manifest
+        shell: bash
+        env:
+          ALLOW_DOWNGRADE: ${{ inputs.allow_downgrade }}
+          CONFIRM_HUB_VERSION: ${{ inputs.confirm_hub_0_3_21_or_newer }}
+          MINIMUM_HUB_VERSION: 0.3.21
+          PROJECT_REF: ${{ vars.HUB_PROMOTION_SUPABASE_PROJECT_REF }}
+          RELEASE_APPROVAL_PATH: ${{ github.workspace }}/approved-release/${{ inputs.version }}.release.json
+          RELEASE_ARTIFACT_PATH: ${{ github.workspace }}/approved-release/${{ inputs.version }}.zip
+          RELEASE_ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SUPABASE_ANON_KEY: ${{ vars.HUB_PROMOTION_SUPABASE_ANON_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.HUB_PROMOTION_ACCESS_TOKEN }}
+        run: |
+          ARGS=(promote "$RELEASE_VERSION")
+          if [ "$ALLOW_DOWNGRADE" = "true" ]; then
+            if [ "$CONFIRM_HUB_VERSION" != "true" ]; then
+              echo "App rollback requires ExpedSetup/Hub 0.3.21+ already deployed" >&2
+              exit 1
+            fi
+            ARGS+=(--allow-downgrade --confirm-hub-version "$MINIMUM_HUB_VERSION")
+          fi
+          node scripts/release-hub.mjs "${ARGS[@]}"
