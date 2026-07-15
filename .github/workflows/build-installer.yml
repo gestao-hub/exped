@@ -143,9 +143,11 @@ jobs:
       - name: Smoke unified installer initialization
         shell: pwsh
         run: |
-          function Assert-SmokeHostClean([string]$Phase) {
+          function Assert-SmokeHostClean([string]$Phase, [bool]$AllowRoot = $false) {
             $problems = @()
-            if (Test-Path 'C:\Exped') { $problems += 'C:\Exped existe' }
+            if ((Test-Path 'C:\Exped') -and -not $AllowRoot) {
+              $problems += 'C:\Exped existe'
+            }
             if (Get-Service -Name 'ExpedHub' -ErrorAction SilentlyContinue) {
               $problems += 'servico ExpedHub existe'
             }
@@ -203,8 +205,16 @@ jobs:
             }
           }
 
-          Assert-SmokeHostClean 'antes'
+          $baselineRoot = "C:\Exped-smoke-baseline-$PID-$([Guid]::NewGuid().ToString('N'))"
+          $rootExisted = Test-Path -LiteralPath 'C:\Exped'
+          $baselineMoved = $false
+          Assert-SmokeHostClean 'antes' $rootExisted
           try {
+            if ($rootExisted) {
+              Move-Item -LiteralPath 'C:\Exped' -Destination $baselineRoot
+              $baselineMoved = $true
+            }
+            Assert-SmokeHostClean 'isolado'
             Invoke-InitSmoke 'clean'
             New-Item -ItemType Directory -Path 'C:\Exped' -Force | Out-Null
             $config = @{
@@ -221,7 +231,10 @@ jobs:
             Invoke-InitSmoke 'provisioned'
           } finally {
             Remove-Item -LiteralPath 'C:\Exped' -Recurse -Force -ErrorAction SilentlyContinue
-            Assert-SmokeHostClean 'depois'
+            if ($baselineMoved) {
+              Move-Item -LiteralPath $baselineRoot -Destination 'C:\Exped'
+            }
+            Assert-SmokeHostClean 'depois' $rootExisted
           }
 
       - name: Compile hub-only installer (ISCC)

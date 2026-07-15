@@ -189,6 +189,9 @@ describe('orquestração transacional do Inno', () => {
     expect(workflow).toContain("Invoke-InitSmoke 'clean'");
     expect(workflow).toContain("Invoke-InitSmoke 'provisioned'");
     expect(workflow).toContain('Assert-SmokeHostClean');
+    expect(workflow).toContain('$baselineRoot');
+    expect(workflow).toContain("Move-Item -LiteralPath 'C:\\Exped' -Destination $baselineRoot");
+    expect(workflow).toContain("Move-Item -LiteralPath $baselineRoot -Destination 'C:\\Exped'");
     expect(workflow).toContain("Get-Service -Name 'ExpedHub'");
     expect(workflow).toContain("Microsoft\\Windows\\CurrentVersion\\Uninstall");
     expect(workflow).toMatch(/expand the ["']app["'] constant/i);
