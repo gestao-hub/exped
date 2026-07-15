@@ -1,5 +1,5 @@
--- Enriquece chaves vazias de um cliente ja conhecido sem transformar strings em
--- identificadores validos. A migracao anterior ja restringe a RPC ao service_role.
+-- Rejeita clientes sem chave e conflitos entre documento/codigo. A funcao e os
+-- privilegios entram juntos para nunca expor SECURITY DEFINER em autocommit.
 begin;
 
 create or replace function public.resolve_cliente_ingest(
@@ -17,6 +17,10 @@ declare
     ''
   );
   v_codigo text := nullif(pg_catalog.btrim(coalesce(p_cliente ->> 'codigo_erp', '')), '');
+  v_documento_ids uuid[];
+  v_codigo_ids uuid[];
+  v_documento_id uuid;
+  v_codigo_id uuid;
   v_id uuid;
 begin
   if p_empresa is null then
@@ -25,7 +29,11 @@ begin
   if pg_catalog.jsonb_typeof(coalesce(p_cliente, '{}'::jsonb)) <> 'object' then
     raise exception using errcode = '22023', message = 'Cliente invalido';
   end if;
+  if v_documento is null and v_codigo is null then
+    raise exception using errcode = '22023', message = 'Cliente sem documento ou codigo ERP';
+  end if;
 
+  -- A ordem e fixa em todas as chamadas para evitar deadlock entre documento e codigo.
   if v_documento is not null then
     perform pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtext('exped.ingest.cliente.documento.' || p_empresa::text),
@@ -40,29 +48,51 @@ begin
   end if;
 
   if v_documento is not null then
-    select cliente.id
-      into v_id
-    from public.clientes cliente
-    where cliente.empresa_id = p_empresa
-      and cliente.deleted_at is null
-      and pg_catalog.regexp_replace(coalesce(cliente.cnpj_cpf, ''), '\D', '', 'g') = v_documento
-    order by cliente.created_at, cliente.id
-    limit 1
-    for update;
+    select pg_catalog.array_agg(candidate.id order by candidate.created_at, candidate.id)
+      into v_documento_ids
+    from (
+      select cliente.id, cliente.created_at
+      from public.clientes cliente
+      where cliente.empresa_id = p_empresa
+        and cliente.deleted_at is null
+        and pg_catalog.regexp_replace(coalesce(cliente.cnpj_cpf, ''), '\D', '', 'g') = v_documento
+      order by cliente.created_at, cliente.id
+      limit 2
+      for update
+    ) candidate;
+    if coalesce(pg_catalog.cardinality(v_documento_ids), 0) > 1 then
+      raise exception using errcode = '23505', message = 'Documento associado a mais de um cliente ativo';
+    end if;
+    v_documento_id := v_documento_ids[1];
   end if;
 
-  if v_id is null and v_codigo is not null then
-    select cliente.id
-      into v_id
-    from public.clientes cliente
-    where cliente.empresa_id = p_empresa
-      and cliente.deleted_at is null
-      and pg_catalog.btrim(coalesce(cliente.codigo_erp, '')) = v_codigo
-    order by cliente.created_at, cliente.id
-    limit 1
-    for update;
+  if v_codigo is not null then
+    select pg_catalog.array_agg(candidate.id order by candidate.created_at, candidate.id)
+      into v_codigo_ids
+    from (
+      select cliente.id, cliente.created_at
+      from public.clientes cliente
+      where cliente.empresa_id = p_empresa
+        and cliente.deleted_at is null
+        and pg_catalog.btrim(coalesce(cliente.codigo_erp, '')) = v_codigo
+      order by cliente.created_at, cliente.id
+      limit 2
+      for update
+    ) candidate;
+    if coalesce(pg_catalog.cardinality(v_codigo_ids), 0) > 1 then
+      raise exception using errcode = '23505', message = 'Codigo ERP associado a mais de um cliente ativo';
+    end if;
+    v_codigo_id := v_codigo_ids[1];
   end if;
 
+  if v_documento_id is not null and v_codigo_id is not null
+     and v_documento_id <> v_codigo_id then
+    raise exception using
+      errcode = '23505',
+      message = 'Documento e codigo ERP pertencem a clientes diferentes';
+  end if;
+
+  v_id := coalesce(v_documento_id, v_codigo_id);
   if v_id is not null then
     update public.clientes cliente
     set

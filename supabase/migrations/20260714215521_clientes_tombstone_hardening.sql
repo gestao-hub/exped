@@ -34,6 +34,55 @@ where position > 1;
 create unique index clientes_documento_reconciliation_source_idx
   on clientes_documento_reconciliation(source_id);
 
+-- Um documento com codigos ERP diferentes exige decisao humana: escolher um
+-- deles silenciosamente faria pedidos futuros apontarem para a identidade errada.
+do $$
+begin
+  if exists (
+    select candidates.target_id
+    from (
+      select
+        reconciliation.target_id,
+        nullif(pg_catalog.btrim(source.codigo_erp), '') as codigo_erp
+      from clientes_documento_reconciliation reconciliation
+      join public.clientes source on source.id = reconciliation.source_id
+
+      union all
+
+      select distinct
+        reconciliation.target_id,
+        nullif(pg_catalog.btrim(target.codigo_erp), '') as codigo_erp
+      from clientes_documento_reconciliation reconciliation
+      join public.clientes target on target.id = reconciliation.target_id
+    ) candidates
+    where candidates.codigo_erp is not null
+    group by candidates.target_id
+    having pg_catalog.count(distinct candidates.codigo_erp) > 1
+  ) then
+    raise exception using
+      errcode = '23505',
+      message = 'Documento duplicado possui codigos ERP divergentes';
+  end if;
+end $$;
+
+-- Se o cadastro canônico ainda não tinha código ERP, preserva o primeiro código
+-- não vazio de seus aliases antes de arquivá-los.
+with clientes_documento_reconciliation_codes as (
+  select distinct on (reconciliation.target_id)
+    reconciliation.target_id,
+    nullif(pg_catalog.btrim(source.codigo_erp), '') as codigo_erp
+  from clientes_documento_reconciliation reconciliation
+  join public.clientes source
+    on source.id = reconciliation.source_id
+  where nullif(pg_catalog.btrim(source.codigo_erp), '') is not null
+  order by reconciliation.target_id, source.created_at, source.id
+)
+update public.clientes target
+set codigo_erp = codes.codigo_erp
+from clientes_documento_reconciliation_codes codes
+where target.id = codes.target_id
+  and nullif(pg_catalog.btrim(target.codigo_erp), '') is null;
+
 update public.pedidos pedido
 set cliente_id = reconciliation.target_id
 from clientes_documento_reconciliation reconciliation

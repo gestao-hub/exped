@@ -15,6 +15,26 @@ type ExistingPedido = {
   cliente_id: string | null;
 };
 
+type PedidoResyncResolution = {
+  updated: boolean;
+  reason?: 'protected' | 'not_found';
+  id?: string;
+  numero?: number;
+};
+
+type PedidoResyncRpcClient = {
+  rpc(
+    name: 'resync_pedido_ingest',
+    args: {
+      p_pedido_id: string;
+      p_empresa: string;
+      p_header: Record<string, unknown>;
+      p_cliente: Record<string, unknown>;
+      p_pontos: PedidoFormInput['pontos_retirada'];
+    },
+  ): Promise<{ data: unknown; error: { message?: string } | null }>;
+};
+
 /** Insere pontos de retirada + itens de um pedido. Reusado pelo INSERT e pelo re-sync (UPSERT). */
 async function inserirPontosItens(
   supabase: SupabaseClient<Database>,
@@ -101,31 +121,30 @@ export async function inserirPedido(
     existing = (data as ExistingPedido | null) ?? null;
   }
 
-  // 2) cliente. Re-sync nunca cria outro cadastro: preserva o vínculo atual (inclusive
-  // null). Criar cliente antes de decidir se o pedido seria atualizado gerava órfãos.
-  let cliente_id: string | null = existing?.cliente_id ?? null;
-  if (!existing && !cliente_id) {
-    try {
-      const { id } = await upsertCliente(supabase, {
-        cnpj_cpf: d.cliente_cnpj_cpf,
-        codigo_erp: d.cliente_codigo,
-        nome: d.cliente_nome,
-        endereco: d.cliente_endereco,
-        bairro: d.cliente_bairro,
-        cidade: d.cliente_cidade,
-        uf: d.cliente_uf,
-        cep: d.cliente_cep,
-        telefone: d.cliente_telefone,
-      }, opts.empresaId);
-      cliente_id = id;
-    } catch {
-      cliente_id = null;
+  // Evita a chamada remota quando o estado observado ja esta protegido. A RPC
+  // repete esta guarda sob lock para fechar a janela de concorrencia.
+  if (existing) {
+    const podeAtualizar = opts.upsertOnDuplicate === true && existing.status === 'rascunho';
+    if (!podeAtualizar) {
+      return { duplicate: true, existing_id: existing.id, existing_numero: existing.numero_mapa };
     }
   }
 
-  // 3) campos de cabeçalho (compartilhados insert/update). SEM status (preservado no update)
+  const clienteInput = {
+    cnpj_cpf: d.cliente_cnpj_cpf,
+    codigo_erp: d.cliente_codigo,
+    nome: d.cliente_nome,
+    endereco: d.cliente_endereco,
+    bairro: d.cliente_bairro,
+    cidade: d.cliente_cidade,
+    uf: d.cliente_uf,
+    cep: d.cliente_cep,
+    telefone: d.cliente_telefone,
+  };
+
+  // 2) campos de cabeçalho (compartilhados insert/update). SEM status (preservado no update)
   //    e SEM empresa_id (não muda no re-sync).
-  const baseFields = {
+  const snapshotFields = {
     documento_erp: d.documento_erp ?? null,
     data_emissao: d.data_emissao ?? null,
     data_entrega: d.data_entrega ?? null,
@@ -138,7 +157,6 @@ export async function inserirPedido(
     cliente_uf: d.cliente_uf ?? null,
     cliente_cep: d.cliente_cep ?? null,
     cliente_telefone: d.cliente_telefone ?? null,
-    cliente_id,
     cliente_endereco_id: d.cliente_endereco_id ?? null,
     forma_pagamento: d.forma_pagamento ?? null,
     parcelas: d.parcelas ?? null,
@@ -155,57 +173,59 @@ export async function inserirPedido(
     vendedor_id: opts.vendedorId,
   };
 
-  // 4) Já existe (não-cancelado): re-sync (UPSERT) ou duplicate.
+  // 3) Pedido existente: a RPC bloqueia e revalida o pedido, resolve o cliente,
+  // arquiva os filhos antigos e insere os novos na mesma transacao.
   if (existing) {
-    const podeAtualizar = opts.upsertOnDuplicate === true && existing.status === 'rascunho';
-    if (podeAtualizar) {
-      // Intocado pelo vendedor? A ingestão cria SEMPRE 1 ponto; se há >1, o vendedor dividiu
-      // em híbrido → NÃO sobrescreve (preserva o trabalho dele).
-      const { count } = await supabase
-        .from('pedido_pontos_retirada')
-        .select('id', { count: 'exact', head: true })
-        .eq('pedido_id', existing.id)
-        .is('deleted_at', null);
-      if ((count ?? 0) <= 1) {
-        const updateObj: Database['public']['Tables']['pedidos']['Update'] = { ...baseFields };
-        if (d.exige_emissao !== undefined) updateObj.exige_emissao = d.exige_emissao;
-        const { error: upErr } = await supabase.from('pedidos').update(updateObj).eq('id', existing.id);
-        if (upErr) return { error: upErr.message };
+    if (!opts.empresaId) return { error: 'Empresa ausente no re-sync do pedido' };
+    const header: Record<string, unknown> = {
+      ...snapshotFields,
+      cliente_id: existing.cliente_id,
+    };
+    if (d.exige_emissao !== undefined) header.exige_emissao = d.exige_emissao;
 
-        // substitui pontos + itens pelo estado atual do Hiper
-        const { data: pontosAntigos } = await supabase
-          .from('pedido_pontos_retirada')
-          .select('id')
-          .eq('pedido_id', existing.id)
-          .is('deleted_at', null);
-        const ids = (pontosAntigos ?? []).map((p) => p.id as string);
-        if (ids.length) {
-          const now = new Date().toISOString();
-          const { error: itemArchiveError } = await supabase
-            .from('pedido_itens')
-            .update({ deleted_at: now })
-            .in('ponto_retirada_id', ids)
-            .is('deleted_at', null);
-          if (itemArchiveError) return { error: `Falha ao arquivar itens: ${itemArchiveError.message}` };
-
-          const { error: pointArchiveError } = await supabase
-            .from('pedido_pontos_retirada')
-            .update({ deleted_at: now })
-            .in('id', ids);
-          if (pointArchiveError) return { error: `Falha ao arquivar pontos: ${pointArchiveError.message}` };
-        }
-
-        const err = await inserirPontosItens(supabase, existing.id, d.pontos_retirada);
-        if (err) return { error: err };
-        return { id: existing.id, numero: existing.numero_mapa, updated: true };
-      }
+    const { data, error } = await (supabase as unknown as PedidoResyncRpcClient).rpc(
+      'resync_pedido_ingest',
+      {
+        p_pedido_id: existing.id,
+        p_empresa: opts.empresaId,
+        p_header: header,
+        p_cliente: clienteInput,
+        p_pontos: d.pontos_retirada,
+      },
+    );
+    if (error) return { error: `Falha no re-sync do pedido: ${error.message ?? 'desconhecida'}` };
+    if (!data || typeof data !== 'object' || typeof (data as { updated?: unknown }).updated !== 'boolean') {
+      return { error: 'Falha no re-sync do pedido: resposta invalida' };
     }
-    return { duplicate: true, existing_id: existing.id, existing_numero: existing.numero_mapa };
+
+    const resolution = data as PedidoResyncResolution;
+    if (!resolution.updated) {
+      return {
+        duplicate: true,
+        existing_id: resolution.id ?? existing.id,
+        existing_numero: resolution.numero ?? existing.numero_mapa,
+      };
+    }
+    return {
+      id: resolution.id ?? existing.id,
+      numero: resolution.numero ?? existing.numero_mapa,
+      updated: true,
+    };
   }
 
-  // 5) INSERT novo
+  // 4) Pedido novo: resolve o cliente antes do insert. Falhas de identidade nao
+  // impedem a entrada do snapshot do pedido, que permanece com cliente_id nulo.
+  let cliente_id: string | null = null;
+  try {
+    const { id } = await upsertCliente(supabase, clienteInput, opts.empresaId);
+    cliente_id = id;
+  } catch {
+    cliente_id = null;
+  }
+
   const insertRow: Database['public']['Tables']['pedidos']['Insert'] = {
-    ...baseFields,
+    ...snapshotFields,
+    cliente_id,
     status: opts.status,
   };
   if (opts.empresaId) insertRow.empresa_id = opts.empresaId;

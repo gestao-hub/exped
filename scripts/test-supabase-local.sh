@@ -64,4 +64,8 @@ HUB_RELEASE_TEST_DATABASE_URL="$DB_URL" \
 HUB_RELEASE_TEST_ALLOW_POSTGRES=1 \
   npx vitest run \
     scripts/__tests__/sync-db-concurrency.test.mjs \
+    scripts/__tests__/cliente-ingest-db-concurrency.test.mjs \
     scripts/__tests__/release-hub-postgres-concurrency.test.mjs
+
+SYNC_TEST_DB_URL="$DB_URL" \
+  npx vitest run scripts/__tests__/clientes-legacy-migration-db.test.mjs

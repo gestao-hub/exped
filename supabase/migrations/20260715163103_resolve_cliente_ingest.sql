@@ -1,5 +1,7 @@
 -- Resolve a chave natural do cliente e cria o cadastro do ingest na mesma
 -- transacao. O lock evita duplicatas quando o agente reenvia pedidos em paralelo.
+begin;
+
 create or replace function public.resolve_cliente_ingest(
   p_empresa uuid,
   p_cliente jsonb
@@ -104,3 +106,5 @@ revoke all on function public.resolve_cliente_ingest(uuid, jsonb)
   from public, anon, authenticated;
 grant execute on function public.resolve_cliente_ingest(uuid, jsonb)
   to service_role;
+
+commit;
