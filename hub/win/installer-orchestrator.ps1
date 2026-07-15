@@ -328,50 +328,115 @@ function Invoke-NativeChecked($FilePath, $Arguments, $AllowedExitCodes = @(0)) {
 
 function Get-HubServiceRegistryAclSnapshot {
     if (-not $script:IsWindowsPlatform) { return @() }
-    $rootPath = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$ServiceName"
-    if (-not (Test-Path -LiteralPath $rootPath)) { return @() }
-    $paths = @($rootPath) + @(
-        Get-ChildItem -LiteralPath $rootPath -Recurse -Force | ForEach-Object { $_.PSPath }
-    )
-    $rootPrefix = $rootPath.TrimEnd('\') + '\'
-    return @($paths | ForEach-Object {
-        $fullPath = "$_"
-        $relativePath = if ([string]::Equals(
-            $fullPath, $rootPath, [System.StringComparison]::OrdinalIgnoreCase
-        )) { '' } else {
-            $providerIndex = $fullPath.IndexOf('HKEY_LOCAL_MACHINE\', [System.StringComparison]::OrdinalIgnoreCase)
-            if ($providerIndex -lt 0) { throw "Path de ACL de registro inesperado: $fullPath" }
-            $providerPath = 'Registry::' + $fullPath.Substring($providerIndex)
-            if (-not $providerPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                throw "Subchave do servico escapou da raiz: $providerPath"
+    $baseKey = $null
+    $rootKey = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
+        )
+        $serviceSubKey = "SYSTEM\CurrentControlSet\Services\$ServiceName"
+        $readRights = [System.Security.AccessControl.RegistryRights]::ReadKey -bor
+            [System.Security.AccessControl.RegistryRights]::ReadPermissions
+        $rootKey = $baseKey.OpenSubKey(
+            $serviceSubKey,
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree,
+            $readRights
+        )
+        if ($null -eq $rootKey) { return @() }
+
+        $pendingPaths = New-Object 'System.Collections.Generic.Queue[string]'
+        $pendingPaths.Enqueue('')
+        $entries = @()
+        while ($pendingPaths.Count -gt 0) {
+            $relativePath = $pendingPaths.Dequeue()
+            $key = $null
+            try {
+                $key = if ($relativePath) {
+                    $rootKey.OpenSubKey(
+                        $relativePath,
+                        [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadSubTree,
+                        $readRights
+                    )
+                } else {
+                    $rootKey
+                }
+                if ($null -eq $key) {
+                    throw "Subchave ausente ao capturar ACL: $relativePath"
+                }
+                $security = $key.GetAccessControl(
+                    [System.Security.AccessControl.AccessControlSections]::All
+                )
+                $entries += [pscustomobject]@{
+                    RelativePath = $relativePath
+                    Sddl = $security.GetSecurityDescriptorSddlForm(
+                        [System.Security.AccessControl.AccessControlSections]::All
+                    )
+                }
+                foreach ($childName in @($key.GetSubKeyNames() | Sort-Object)) {
+                    $childPath = if ($relativePath) {
+                        "$relativePath\$childName"
+                    } else {
+                        "$childName"
+                    }
+                    $pendingPaths.Enqueue($childPath)
+                }
+            } finally {
+                if ($null -ne $key -and $key -ne $rootKey) { $key.Dispose() }
             }
-            $providerPath.Substring($rootPrefix.Length)
         }
-        $acl = Get-Acl -LiteralPath $fullPath
-        [pscustomobject]@{
-            RelativePath = $relativePath
-            Sddl = $acl.GetSecurityDescriptorSddlForm(
-                [System.Security.AccessControl.AccessControlSections]::All
-            )
-        }
-    })
+        return @($entries)
+    } finally {
+        if ($null -ne $rootKey) { $rootKey.Dispose() }
+        if ($null -ne $baseKey) { $baseKey.Dispose() }
+    }
 }
 
 function Restore-HubServiceRegistryAcls($Entries) {
-    $rootPath = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$ServiceName"
-    foreach ($entry in @($Entries | Sort-Object { "$($_.RelativePath)".Length })) {
-        $relativePath = "$($entry.RelativePath)"
-        if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|[\\/])\.\.([\\/]|$)') {
-            throw "Path relativo de ACL invalido: $relativePath"
-        }
-        $path = if ($relativePath) { Join-Path $rootPath $relativePath } else { $rootPath }
-        if (-not (Test-Path -LiteralPath $path)) { throw "Subchave ausente ao restaurar ACL: $relativePath" }
-        $security = New-Object System.Security.AccessControl.RegistrySecurity
-        $security.SetSecurityDescriptorSddlForm(
-            "$($entry.Sddl)",
-            [System.Security.AccessControl.AccessControlSections]::All
+    if (-not $script:IsWindowsPlatform) { return }
+    $baseKey = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
         )
-        Set-Acl -LiteralPath $path -AclObject $security
+        $serviceSubKey = "SYSTEM\CurrentControlSet\Services\$ServiceName"
+        $writeRights = [System.Security.AccessControl.RegistryRights]::ReadKey -bor
+            [System.Security.AccessControl.RegistryRights]::ReadPermissions -bor
+            [System.Security.AccessControl.RegistryRights]::ChangePermissions -bor
+            [System.Security.AccessControl.RegistryRights]::TakeOwnership
+        foreach ($entry in @($Entries | Sort-Object { "$($_.RelativePath)".Length })) {
+            $relativePath = "$($entry.RelativePath)"
+            if ([System.IO.Path]::IsPathRooted($relativePath) -or $relativePath -match '(^|[\\/])\.\.([\\/]|$)') {
+                throw "Path relativo de ACL invalido: $relativePath"
+            }
+            $subKeyPath = if ($relativePath) {
+                "$serviceSubKey\$relativePath"
+            } else {
+                $serviceSubKey
+            }
+            $key = $null
+            try {
+                $key = $baseKey.OpenSubKey(
+                    $subKeyPath,
+                    [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+                    $writeRights
+                )
+                if ($null -eq $key) {
+                    throw "Subchave ausente ao restaurar ACL: $relativePath"
+                }
+                $security = New-Object System.Security.AccessControl.RegistrySecurity
+                $security.SetSecurityDescriptorSddlForm(
+                    "$($entry.Sddl)",
+                    [System.Security.AccessControl.AccessControlSections]::All
+                )
+                $key.SetAccessControl($security)
+            } finally {
+                if ($null -ne $key) { $key.Dispose() }
+            }
+        }
+    } finally {
+        if ($null -ne $baseKey) { $baseKey.Dispose() }
     }
 }
 

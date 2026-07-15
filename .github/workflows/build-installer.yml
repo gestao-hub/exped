@@ -121,6 +121,100 @@ jobs:
           VER: ${{ steps.ver.outputs.ver }}
         run: node scripts/montar-payload.mjs --auth gotrue-build/auth.exe --auth-migrations gotrue-build/migrations --mkcert mkcert.exe --version "$VER"
 
+      - name: Smoke transactional snapshot with deep paths
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "exped-snapshot-root-$PID"
+          $transaction = 'C:\ExpedHubTxn-smoke-' + [Guid]::NewGuid().ToString('N')
+          $serviceName = "ExpedHubSmoke$PID$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+          $serviceCreated = $false
+          $relativeDeepPath = 'bin\pgsql\pgAdmin 4\web\pgadmin\browser\server_groups\servers\databases\foreign_data_wrappers\foreign_servers\user_mappings\templates\user_mappings\sql'
+          $deepPath = Join-Path $root $relativeDeepPath
+          try {
+            $createOutput = @(& sc.exe create $serviceName `
+              binPath= "$env:SystemRoot\System32\cmd.exe /c exit 0" `
+              start= demand 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) {
+              throw "Nao foi possivel criar o servico descartavel: $($createOutput -join ' ')"
+            }
+            $serviceCreated = $true
+            $serviceKey = "HKLM\SYSTEM\CurrentControlSet\Services\$serviceName"
+            $regOutput = @(& reg.exe add "$serviceKey\Parameters\AppExit" `
+              /v Default /t REG_SZ /d Restart /f 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0) {
+              throw "Nao foi possivel criar subchaves descartaveis: $($regOutput -join ' ')"
+            }
+            New-Item -ItemType Directory -Path $deepPath -Force | Out-Null
+            $deepProbe = Join-Path $deepPath 'probe.sql'
+            [IO.File]::WriteAllText($deepProbe, 'select 1;')
+            & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+              -File 'hub\win\installer-orchestrator.ps1' `
+              -Operation SnapshotHub `
+              -Root $root `
+              -TransactionDir $transaction `
+              -ServiceName $serviceName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Snapshot transacional falhou com exit code $LASTEXITCODE."
+            }
+            $backupProbe = Join-Path $transaction ("payload\$relativeDeepPath\probe.sql")
+            if (-not (Test-Path -LiteralPath $backupProbe -PathType Leaf)) {
+              throw 'Snapshot nao preservou o path profundo de teste.'
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $transaction 'hub-state.json') -PathType Leaf)) {
+              throw 'Snapshot nao gerou hub-state.json.'
+            }
+            $state = Get-Content -Raw -LiteralPath (Join-Path $transaction 'hub-state.json') |
+              ConvertFrom-Json
+            if (-not $state.ServiceExistedBefore -or $state.ServiceWasRunningBefore) {
+              throw 'Snapshot nao registrou corretamente o servico descartavel parado.'
+            }
+            $aclPath = Join-Path $transaction 'service-acl.json'
+            $aclState = Get-Content -Raw -LiteralPath $aclPath | ConvertFrom-Json
+            if (@($aclState.Keys).Count -lt 3) {
+              throw 'Snapshot nao capturou as ACLs da arvore do servico descartavel.'
+            }
+
+            [IO.File]::WriteAllText($deepProbe, 'mutated')
+            $null = & reg.exe add "$serviceKey\Parameters\AppExit" `
+              /v Default /t REG_SZ /d Ignore /f
+            if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel preparar a mutacao de rollback.' }
+            & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
+              -File 'hub\win\installer-orchestrator.ps1' `
+              -Operation RestoreHub `
+              -Root $root `
+              -TransactionDir $transaction `
+              -ServiceName $serviceName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Rollback transacional falhou com exit code $LASTEXITCODE."
+            }
+            if ([IO.File]::ReadAllText($deepProbe) -ne 'select 1;') {
+              throw 'Rollback nao restaurou o arquivo profundo original.'
+            }
+            $queryOutput = @(& reg.exe query "$serviceKey\Parameters\AppExit" `
+              /v Default 2>&1 | ForEach-Object { "$_" })
+            if ($LASTEXITCODE -ne 0 -or ($queryOutput -join "`n") -notmatch 'REG_SZ\s+Restart') {
+              throw 'Rollback nao restaurou a arvore original do registro do servico.'
+            }
+            $restoredService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+            if (-not $restoredService -or $restoredService.Status -ne 'Stopped') {
+              throw 'Rollback nao preservou o servico descartavel parado.'
+            }
+          } finally {
+            if ($serviceCreated -or (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) {
+              $null = & sc.exe delete $serviceName 2>&1
+              $deadline = (Get-Date).AddSeconds(20)
+              while ((Get-Service -Name $serviceName -ErrorAction SilentlyContinue) -and
+                     (Get-Date) -lt $deadline) {
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue
+            if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
+              throw "Servico descartavel continuou registrado: $serviceName"
+            }
+          }
+
       - name: Instalar Inno Setup 6.7.3 verificado
         shell: pwsh
         run: |

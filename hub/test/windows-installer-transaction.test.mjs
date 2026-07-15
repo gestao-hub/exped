@@ -219,6 +219,20 @@ describe('orquestração transacional do Inno', () => {
     expect(workflow).toContain('EXPED_HUB_INIT_SMOKE_OK:');
   });
 
+  it('mantem o snapshot em raiz curta e exercita paths profundos no Windows', () => {
+    for (const installer of [unified, hubOnly]) {
+      const prepare = routine(installer, 'PrepareToInstall');
+      expect(prepare).toContain("ExpandConstant('{sd}\\ExpedHubTxn-')");
+      expect(prepare).not.toContain("ExpandConstant('{tmp}\\ExpedHubTransaction-')");
+    }
+    expect(workflow).toContain('Smoke transactional snapshot with deep paths');
+    expect(workflow).toContain('foreign_servers\\user_mappings\\templates\\user_mappings\\sql');
+    expect(workflow).toContain("$transaction = 'C:\\ExpedHubTxn-smoke-'");
+    expect(workflow).toContain('& sc.exe create $serviceName');
+    expect(workflow).toContain('-Operation RestoreHub');
+    expect(workflow).toContain("Join-Path $transaction 'service-acl.json'");
+  });
+
   it('faz preflight e descobre o servico antes de snapshot, stop, download, escrita ou redeem', () => {
     const prepare = routine(unified, 'PrepareToInstall');
     expectOrder(prepare, ['PreflightUser', 'QueryHubRunning', 'SnapshotHub', 'StopHub']);
@@ -958,9 +972,19 @@ describe('contratos PowerShell do instalador', () => {
   it('snapshot do serviço restaura a chave inteira e seus ACLs exatos', () => {
     const snapshot = routine(orchestrator, 'New-HubSnapshot');
     const restore = routine(orchestrator, 'Restore-HubServiceSnapshot');
+    const snapshotAcls = routine(orchestrator, 'Get-HubServiceRegistryAclSnapshot');
+    const restoreAcls = routine(orchestrator, 'Restore-HubServiceRegistryAcls');
     expect(snapshot).toContain('RegistryServiceAclBackup');
     expect(orchestrator).toContain('Get-HubServiceRegistryAclSnapshot');
     expect(orchestrator).toContain('Restore-HubServiceRegistryAcls');
+    expect(snapshotAcls).toContain('RegistryKey]::OpenBaseKey');
+    expect(snapshotAcls).toContain('RegistryView]::Registry64');
+    expect(snapshotAcls).toContain('GetAccessControl');
+    expect(snapshotAcls).not.toContain('Get-Acl');
+    expect(restoreAcls).toContain('RegistryKey]::OpenBaseKey');
+    expect(restoreAcls).toContain('RegistryView]::Registry64');
+    expect(restoreAcls).toContain('SetAccessControl');
+    expect(restoreAcls).not.toContain('Set-Acl');
     expectOrder(restore, [
       'Stop-HubServiceIfPresent',
       "@('delete', $serviceKey",
