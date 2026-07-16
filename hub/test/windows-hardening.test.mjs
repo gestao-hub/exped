@@ -63,6 +63,18 @@ describe('hardening do instalador Windows', () => {
     expect(workflow).toContain('Language.Parser]::ParseFile');
   });
 
+  it('baixa todos os binários com retentativa e SHA-256 por tentativa', () => {
+    const retry = routine(download, 'Invoke-VerifiedDownload');
+    expect(retry).toContain('for ($attempt = 1; $attempt -le $Attempts; $attempt++)');
+    expect(retry).toContain('Invoke-WebRequest');
+    expect(retry).toContain('Assert-Sha256');
+    expect(retry).toContain('Remove-Item');
+
+    const calls = download.match(/Invoke-VerifiedDownload\s+-Uri/g) || [];
+    expect(calls).toHaveLength(4);
+    expect(download).not.toMatch(/^Invoke-WebRequest\s+-Uri\s+\$(?:pg|pr|node|nssm)Url/m);
+  });
+
   it('protege config.json transacionalmente por SID e restringe firewall', () => {
     const protectAcl = routine(install, 'Protect-ExpedConfigAcl');
     expect(protectAcl).toContain('S-1-5-18');
@@ -111,6 +123,19 @@ describe('hardening do instalador Windows', () => {
     );
     expect(install).toMatch(/AppStopMethodWindow/);
     expect(install).toMatch(/AppStopMethodThreads/);
+  });
+
+  it('protege o ambiente NSSM sem exigir troca do proprietário da chave existente', () => {
+    const serviceEnvironment = routine(install, 'Set-NssmServiceEnvironment');
+    const aclSetup = serviceEnvironment.slice(0, serviceEnvironment.indexOf('$key.SetAccessControl'));
+    expect(aclSetup).toContain('AccessControlSections]::Access');
+    expect(aclSetup).toMatch(/D:P\(A;CI;KA;;;SY\)\(A;CI;KA;;;BA\)/);
+    expect(aclSetup).not.toMatch(/O:(?:SY|BA)|G:(?:SY|BA)/);
+  });
+
+  it('remove NUL dos diagnósticos pela sobrecarga de string no PowerShell 5.1', () => {
+    expect(install).not.toMatch(/\.Replace\(\[char\]0,\s*''\)/);
+    expect(install).toContain("([char]0).ToString()");
   });
 
   it('inclui canário pré/pós-login, botão, sync, rollback e 03:00 pausado', () => {
