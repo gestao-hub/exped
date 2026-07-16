@@ -174,6 +174,10 @@ async function recordMigration(cfg, targetDb, name) {
  * `migrationsDir` default = o dir do install (cfg.paths.migrationsDir); o auto-update passa o dir da release.
  */
 export async function applyPendingMigrations(cfg, targetDb, migrationsDir = resolveRoot(cfg.paths.migrationsDir)) {
+  // Existing hubs also need new local Supabase compatibility helpers before
+  // migrations that target a newer managed schema. The prelude is idempotent.
+  const prelude = path.join(resolveRoot(cfg.paths.sqlDir), '00-prelude-helpers.sql');
+  await psqlFile(cfg, prelude, { dbOverride: targetDb });
   await ensureHubMigrationsTable(cfg, targetDb);
   const done = await appliedMigrations(cfg, targetDb);
   for (const m of listMigrations(migrationsDir)) {
@@ -190,7 +194,6 @@ export async function bootstrap(cfg) {
   const db = cfg.paths.db;
   const sqlDir = resolveRoot(cfg.paths.sqlDir);
   const rolesExt = path.join(sqlDir, '00-roles-ext.sql');
-  const prelude = path.join(sqlDir, '00-prelude-helpers.sql');
 
   const fresh = !(await dbExists(cfg, db));
 
@@ -201,12 +204,10 @@ export async function bootstrap(cfg) {
     await psqlFile(cfg, rolesExt, { dbOverride: db });
     // (3) GoTrue migrate (cria auth.users)
     await gotrueMigrate(cfg, db);
-    // (4) helpers auth.* + grants + storage/realtime shim
-    await psqlFile(cfg, prelude, { dbOverride: db });
-    // (5) migrations do app (registra cada uma)
+    // (4/5) prelude local + migrations do app (registra cada uma)
     await applyPendingMigrations(cfg, db);
   } else {
-    // DB já existe: aplica só as migrations do app que faltam
+    // DB já existe: atualiza o prelude local e aplica só migrations pendentes.
     await applyPendingMigrations(cfg, db);
   }
 
