@@ -146,4 +146,96 @@ describeWithDb('resolve_cliente_ingest com conexoes concorrentes', () => {
       `);
     }
   }, 15_000);
+
+  it('serializa a criacao completa do mesmo pedido e preserva um unico conjunto de filhos', async () => {
+    const empresaId = '93000000-0000-0000-0000-000000000201';
+    const header = JSON.stringify({
+      documento_erp: 'CONCORRENTE-930201',
+      cliente_codigo: 'CLI-930201',
+      cliente_nome: 'Pedido atomico concorrente',
+      valor_total: 80,
+      ingest_snapshot_hash: 'a'.repeat(64),
+    }).replaceAll("'", "''");
+    const cliente = JSON.stringify({
+      codigo_erp: 'CLI-930201',
+      nome: 'Pedido atomico concorrente',
+    }).replaceAll("'", "''");
+    const pontos = JSON.stringify([{
+      tipo: 'loja',
+      empresa_nome: 'Loja',
+      itens: [{
+        codigo: 'CONCURRENT',
+        descricao: 'Item concorrente',
+        quantidade: 1,
+        unidade: 'UN',
+        preco_unitario: 80,
+        desconto: 0,
+        total: 80,
+        modalidade: 'loja',
+      }],
+    }]).replaceAll("'", "''");
+
+    await runPsql(`
+      insert into public.empresas (id, nome, slug)
+      values ('${empresaId}', 'Criacao atomica concorrente', 'criacao-atomica-concorrente');
+    `);
+
+    try {
+      const first = startPsql(`
+        begin;
+        select public.create_pedido_ingest(
+          '${empresaId}', '${header}'::jsonb, '${cliente}'::jsonb, '${pontos}'::jsonb
+        ) ->> 'created';
+        select 'PEDIDO_ATOMICO_CRIADO';
+        select pg_sleep(0.75);
+        commit;
+      `);
+      await waitForOutput(first, 'PEDIDO_ATOMICO_CRIADO');
+
+      const second = startPsql(`
+        select public.create_pedido_ingest(
+          '${empresaId}', '${header}'::jsonb, '${cliente}'::jsonb, '${pontos}'::jsonb
+        ) ->> 'created';
+      `);
+
+      const [firstOutput, secondOutput] = await Promise.all([first.done, second.done]);
+      expect(firstOutput.split('\n')[0]).toBe('true');
+      expect(secondOutput).toBe('false');
+
+      const state = await runPsql(`
+        select concat_ws('|',
+          (select count(*) from public.pedidos where empresa_id = '${empresaId}' and documento_erp = 'CONCORRENTE-930201'),
+          (
+            select count(*)
+            from public.pedido_pontos_retirada ponto
+            join public.pedidos pedido on pedido.id = ponto.pedido_id
+            where pedido.empresa_id = '${empresaId}' and pedido.documento_erp = 'CONCORRENTE-930201'
+          ),
+          (
+            select count(*)
+            from public.pedido_itens item
+            join public.pedido_pontos_retirada ponto on ponto.id = item.ponto_retirada_id
+            join public.pedidos pedido on pedido.id = ponto.pedido_id
+            where pedido.empresa_id = '${empresaId}' and pedido.documento_erp = 'CONCORRENTE-930201'
+          )
+        );
+      `);
+      expect(state).toBe('1|1|1');
+    } finally {
+      await runPsql(`
+        delete from public.pedido_itens
+        where ponto_retirada_id in (
+          select ponto.id
+          from public.pedido_pontos_retirada ponto
+          join public.pedidos pedido on pedido.id = ponto.pedido_id
+          where pedido.empresa_id = '${empresaId}'
+        );
+        delete from public.pedido_pontos_retirada
+        where pedido_id in (select id from public.pedidos where empresa_id = '${empresaId}');
+        delete from public.pedidos where empresa_id = '${empresaId}';
+        delete from public.clientes where empresa_id = '${empresaId}';
+        delete from public.empresas where id = '${empresaId}';
+      `);
+    }
+  }, 15_000);
 });
