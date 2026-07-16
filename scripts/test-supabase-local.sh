@@ -45,9 +45,13 @@ sed -i \
 supabase start --workdir "$WORKDIR" \
   --exclude realtime,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
 
-DB_URL="$(supabase status --workdir "$WORKDIR" -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
-if [[ -z "$DB_URL" ]]; then
-  echo "Nao foi possivel descobrir a URL do PostgreSQL local." >&2
+STATUS_ENV="$(supabase status --workdir "$WORKDIR" -o env)"
+DB_URL="$(sed -n 's/^DB_URL="\(.*\)"$/\1/p' <<<"$STATUS_ENV")"
+API_URL="$(sed -n 's/^API_URL="\(.*\)"$/\1/p' <<<"$STATUS_ENV")"
+ANON_KEY="$(sed -n 's/^ANON_KEY="\(.*\)"$/\1/p' <<<"$STATUS_ENV")"
+JWT_SECRET="$(sed -n 's/^JWT_SECRET="\(.*\)"$/\1/p' <<<"$STATUS_ENV")"
+if [[ -z "$DB_URL" || -z "$API_URL" || -z "$ANON_KEY" || -z "$JWT_SECRET" ]]; then
+  echo "Nao foi possivel descobrir o ambiente Supabase local." >&2
   exit 1
 fi
 
@@ -69,3 +73,9 @@ HUB_RELEASE_TEST_ALLOW_POSTGRES=1 \
 
 SYNC_TEST_DB_URL="$DB_URL" \
   npx vitest run scripts/__tests__/clientes-legacy-migration-db.test.mjs
+
+SUPABASE_LOCAL_API_URL="$API_URL" \
+SUPABASE_LOCAL_DB_URL="$DB_URL" \
+SUPABASE_LOCAL_ANON_KEY="$ANON_KEY" \
+SUPABASE_LOCAL_JWT_SECRET="$JWT_SECRET" \
+  node scripts/local-stack/test-hub-release-storage-copy.mjs

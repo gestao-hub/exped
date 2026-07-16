@@ -43,6 +43,13 @@ const promotionMigration = readFileSync(
   path.join(ROOT, 'supabase/migrations/20260714223000_hub_release_promotion_rpc.sql'),
   'utf8',
 );
+const materializedCopyMigration = readFileSync(
+  path.join(
+    ROOT,
+    'supabase/migrations/20260716131854_hub_release_materialized_copy_attestation.sql',
+  ),
+  'utf8',
+);
 const apiKeyMigration = readFileSync(
   path.join(ROOT, 'supabase/migrations/20260715115548_hub_release_api_key_auth.sql'),
   'utf8',
@@ -80,6 +87,39 @@ describe('contrato transacional da promocao', () => {
   it('mantem promocao copiada em recovery e bloqueia identidade concorrente', () => {
     expect(promotionMigration).toMatch(/promocao copiada aguarda recovery da mesma identidade/i);
     expect(promotionMigration).toMatch(/versao atual legada possui identidade imutavel desconhecida/i);
+  });
+
+  it('atesta a copia materializada fora da transacao descartada pelo Storage', () => {
+    expect(materializedCopyMigration).toMatch(
+      /attest_hub_release_manifest_copy\(\s*p_promotion_id uuid\s*\)/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /from storage\.objects[\s\S]*bucket_id = 'hub-releases'[\s\S]*name = 'manifest\.json'/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /observed_at[\s\S]*pending_requested_at[\s\S]*user_metadata[\s\S]*pending_manifest_sha256/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /create trigger hub_release_guard_manifest_write[\s\S]*on storage\.objects/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /promotionId[\s\S]*pending_promotion_id[\s\S]*eTag[\s\S]*pending_source_name/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /observed_at\s*<=\s*p_state\.pending_requested_at/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /complete_hub_release_promotion[\s\S]*hub_release_assert_materialized_copy/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /revoke all on function public\.attest_hub_release_manifest_copy\(uuid\)[\s\S]*service_role/i,
+    );
+    expect(materializedCopyMigration).toMatch(
+      /grant execute on function public\.attest_hub_release_manifest_copy\(uuid\)[\s\S]*exped_hub_release_promote/i,
+    );
+    expect(materializedCopyMigration).not.toMatch(
+      /hub_release_mark_copy\(name,\s*user_metadata\)/i,
+    );
   });
 });
 
@@ -881,7 +921,7 @@ describe('release-hub promote via RPC canonica', () => {
     };
   }
 
-  function recordAttestation(approval, variantOrKind) {
+  function recordAttestation(approval, variantOrKind, promotionId) {
     if (variantOrKind === 'artifact') {
       return artifactAttestation(approval.version, Buffer.from(`artifact-${approval.version}`));
     }
@@ -899,7 +939,7 @@ describe('release-hub promote via RPC canonica', () => {
       };
     }
     const candidate = approval.manifests[variantOrKind];
-    return {
+    const record = {
       expedRelease: {
         schemaVersion: 1,
         kind: 'hub-release-manifest',
@@ -911,6 +951,8 @@ describe('release-hub promote via RPC canonica', () => {
         manifest: candidate.body,
       },
     };
+    if (promotionId) record.expedRelease.promotionId = promotionId;
+    return record;
   }
 
   function approvedRecords(fixture) {
@@ -946,6 +988,8 @@ describe('release-hub promote via RPC canonica', () => {
     corruptCanonicalBytes = false,
     corruptCanonicalMetadata = false,
     corruptStorageDownloadBytes = false,
+    attestationStatus = 200,
+    attestationOverrides = {},
   } = {}) {
     const { approval } = fixture;
     const records = approvedRecords(fixture);
@@ -967,7 +1011,9 @@ describe('release-hub promote via RPC canonica', () => {
             ? Buffer.from('corrompido')
             : Buffer.from(JSON.stringify(candidate.body)),
           contentType: 'application/json',
-          metadata: corruptCanonicalMetadata ? {} : recordAttestation(approval, variant),
+          metadata: corruptCanonicalMetadata
+            ? {}
+            : recordAttestation(approval, variant, PROMOTION_ID),
         };
     const directive = {
       manifest: candidate.body,
@@ -998,6 +1044,20 @@ describe('release-hub promote via RPC canonica', () => {
       if (url.endsWith('/rest/v1/rpc/promote_hub_release')) {
         return fakeResponse(200, JSON.stringify(directive));
       }
+      if (url.endsWith('/rest/v1/rpc/attest_hub_release_manifest_copy')) {
+        return fakeResponse(attestationStatus, JSON.stringify(attestationStatus === 200 ? {
+          promotionId: PROMOTION_ID,
+          sourceSha: approval.source_sha,
+          artifactSha256: approval.artifact.sha256,
+          metadataSha256: approval.metadata.sha256,
+          manifestSha256: candidate.sha256,
+          observedAt: new Date().toISOString(),
+          objectVersion: 'canonical-version',
+          ...attestationOverrides,
+        } : {
+          message: 'manifest canonico nao foi materializado nesta reserva',
+        }));
+      }
       if (url.endsWith('/rest/v1/rpc/complete_hub_release_promotion')) {
         return fakeResponse(200, JSON.stringify({
           manifest: directive.manifest,
@@ -1013,10 +1073,14 @@ describe('release-hub promote via RPC canonica', () => {
       if (url.endsWith('/storage/v1/object/copy')) {
         if (copyStatus !== 200) return fakeResponse(copyStatus, '{"message":"copy denied"}');
         const source = records.get(JSON.parse(init.body).sourceKey);
+        const encodedMetadata = requestHeader(init, 'x-metadata');
+        const copiedMetadata = encodedMetadata
+          ? JSON.parse(Buffer.from(encodedMetadata, 'base64').toString('utf8'))
+          : source.metadata;
         canonical = {
           bytes: corruptCanonicalBytes ? Buffer.from('corrompido') : source.bytes,
           contentType: source.contentType,
-          metadata: corruptCanonicalMetadata ? {} : source.metadata,
+          metadata: corruptCanonicalMetadata ? {} : copiedMetadata,
         };
         return fakeResponse(200, JSON.stringify({ Key: 'hub-releases/manifest.json' }));
       }
@@ -1101,12 +1165,25 @@ describe('release-hub promote via RPC canonica', () => {
         bucketId: 'hub-releases',
         sourceKey: fixture.approval.manifests.release.path,
         destinationKey: 'manifest.json',
-        copyMetadata: true,
+        copyMetadata: false,
       });
+      expect(JSON.parse(Buffer.from(
+        requestHeader(copyCall.init, 'x-metadata'),
+        'base64',
+      ).toString('utf8'))).toEqual(
+        recordAttestation(fixture.approval, 'release', PROMOTION_ID),
+      );
       const completeCall = network.calls.find(({ url }) => url.endsWith('/complete_hub_release_promotion'));
+      const attestCall = network.calls.find(
+        ({ url }) => url.endsWith('/attest_hub_release_manifest_copy'),
+      );
+      expect(JSON.parse(attestCall.init.body)).toEqual({
+        p_promotion_id: PROMOTION_ID,
+      });
       expect(JSON.parse(completeCall.init.body)).toEqual({
         p_promotion_id: PROMOTION_ID,
       });
+      expect(network.calls.indexOf(attestCall)).toBeLessThan(network.calls.indexOf(completeCall));
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -1273,6 +1350,21 @@ describe('release-hub promote via RPC canonica', () => {
         ...fixture.options,
         fetchImpl: network.fetchImpl,
       })).rejects.toThrow('manifest.json possui atestacao inconsistente');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('nao conclui quando o banco nao atesta a copia materializada nesta reserva', async () => {
+    const fixture = approvalFixture();
+    const network = promotionFetch(fixture, { attestationStatus: 409 });
+    try {
+      await expect(promoteRelease(PROJECT_REF, promotionCredentials(), '0.3.21', {
+        ...fixture.options,
+        fetchImpl: network.fetchImpl,
+      })).rejects.toThrow('atestado da copia canonica falhou');
+      expect(network.calls.some(({ url }) => url.endsWith('/complete_hub_release_promotion')))
+        .toBe(false);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
