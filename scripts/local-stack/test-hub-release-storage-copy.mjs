@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 const apiUrl = process.env.SUPABASE_LOCAL_API_URL;
 const dbUrl = process.env.SUPABASE_LOCAL_DB_URL;
@@ -43,6 +44,7 @@ const canonicalMetadata = {
     promotionId,
   },
 };
+const copyPauseLockKey = 903035;
 
 function base64url(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -94,9 +96,150 @@ function expectOk(result, label) {
   }
 }
 
+function readMaterializedCopy() {
+  return JSON.parse(sql(
+    `select pg_catalog.row_to_json(result)::text
+       from (
+         select
+           src.metadata ->> 'eTag' = dst.metadata ->> 'eTag' as etag_matches,
+           (src.metadata ->> 'size')::bigint =
+             (dst.metadata ->> 'size')::bigint as size_matches,
+           dst.version = proof.object_version as version_matches,
+           dst.metadata ->> 'eTag' = proof.object_etag as proof_etag_matches,
+           (dst.metadata ->> 'size')::bigint = proof.object_size as proof_size_matches,
+           dst.owner_id = :'promotion_subject' as owner_matches,
+           dst.user_metadata = :'canonical_metadata'::jsonb as user_metadata_matches,
+           dst.version as destination_version
+         from storage.objects src
+         join storage.objects dst
+           on dst.bucket_id = 'hub-releases' and dst.name = 'manifest.json'
+         join private.hub_release_copy_proofs proof
+           on proof.promotion_id = :'promotion_id'::uuid
+         where src.bucket_id = 'hub-releases' and src.name = :'source_name'
+       ) result`,
+    {
+      promotion_subject: promotionSubject,
+      canonical_metadata: JSON.stringify(canonicalMetadata),
+      promotion_id: promotionId,
+      source_name: sourceName,
+    },
+  ));
+}
+
+function assertMaterializedCopy(materialized, label) {
+  if (
+    !materialized.etag_matches
+    || !materialized.size_matches
+    || !materialized.version_matches
+    || !materialized.proof_etag_matches
+    || !materialized.proof_size_matches
+    || !materialized.owner_matches
+    || !materialized.user_metadata_matches
+  ) {
+    throw new Error(`${label} divergiu da prova materializada`);
+  }
+}
+
+function installCopyPause() {
+  sql(
+    `create table private.hub_release_e2e_copy_pause (
+       promotion_id uuid primary key,
+       lock_key bigint not null
+     );
+     revoke all on table private.hub_release_e2e_copy_pause from public;
+
+     create function private.hub_release_e2e_pause_copy()
+     returns trigger
+     language plpgsql
+     security definer
+     set search_path = ''
+     as $$
+     declare
+       v_lock_key bigint;
+     begin
+       if new.version is distinct from '1'
+         and storage.allow_only_operation('object.copy')
+       then
+         select p.lock_key into v_lock_key
+         from private.hub_release_e2e_copy_pause p
+         where p.promotion_id::text =
+           new.user_metadata #>> '{expedRelease,promotionId}';
+         if found then
+           perform pg_catalog.pg_advisory_xact_lock(v_lock_key);
+         end if;
+       end if;
+       return new;
+     end;
+     $$;
+     revoke all on function private.hub_release_e2e_pause_copy() from public;
+
+     create trigger aaa_hub_release_e2e_pause_copy
+     before insert or update on storage.objects
+     for each row
+     when (
+       new.bucket_id = 'hub-releases'
+       and new.name = 'manifest.json'
+     )
+     execute function private.hub_release_e2e_pause_copy();
+
+     insert into private.hub_release_e2e_copy_pause (promotion_id, lock_key)
+     values (:'promotion_id'::uuid, :'lock_key'::bigint);`,
+    {
+      promotion_id: promotionId,
+      lock_key: copyPauseLockKey,
+    },
+  );
+}
+
+async function waitForAdvisoryLock(granted) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const count = Number(sql(
+      `select count(*)
+         from pg_catalog.pg_locks
+        where locktype = 'advisory'
+          and classid = 0
+          and objid = :'lock_key'::oid
+          and granted = :'granted'::boolean`,
+      {
+        lock_key: copyPauseLockKey,
+        granted: String(granted),
+      },
+    ));
+    if (count > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`lock advisory ${granted ? 'titular' : 'bloqueado'} nao foi observado`);
+}
+
+async function startAdvisoryLockHolder() {
+  const holder = spawn(
+    'psql',
+    [
+      dbUrl,
+      '-X',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-c',
+      `select pg_advisory_lock(${copyPauseLockKey}); select pg_sleep(60);`,
+    ],
+    { stdio: 'ignore' },
+  );
+  holder.on('error', () => {});
+  await waitForAdvisoryLock(true);
+  return async () => {
+    if (holder.exitCode === null && holder.signalCode === null) {
+      holder.kill('SIGTERM');
+      await once(holder, 'exit');
+    }
+  };
+}
+
 function resetFixture() {
   sql(
     `begin;
+     drop trigger if exists aaa_hub_release_e2e_pause_copy on storage.objects;
+     drop function if exists private.hub_release_e2e_pause_copy();
+     drop table if exists private.hub_release_e2e_copy_pause;
      set local storage.allow_delete_query = 'true';
      delete from storage.objects
       where bucket_id = 'hub-releases'
@@ -211,46 +354,17 @@ async function run() {
       copyMetadata: false,
     }),
   };
-  const copy = await api('/storage/v1/object/copy', promotionToken, copyRequest);
-  expectOk(copy, 'copy real da Storage API');
+  const insertedCopy = await api('/storage/v1/object/copy', promotionToken, copyRequest);
+  expectOk(insertedCopy, 'copy INSERT real da Storage API');
+  const inserted = readMaterializedCopy();
+  assertMaterializedCopy(inserted, 'copy INSERT');
 
-  const materialized = JSON.parse(sql(
-    `select pg_catalog.row_to_json(result)::text
-       from (
-         select
-           src.metadata ->> 'eTag' = dst.metadata ->> 'eTag' as etag_matches,
-           (src.metadata ->> 'size')::bigint =
-             (dst.metadata ->> 'size')::bigint as size_matches,
-           dst.version = proof.object_version as version_matches,
-           dst.metadata ->> 'eTag' = proof.object_etag as proof_etag_matches,
-           (dst.metadata ->> 'size')::bigint = proof.object_size as proof_size_matches,
-           dst.owner_id = :'promotion_subject' as owner_matches,
-           dst.user_metadata = :'canonical_metadata'::jsonb as user_metadata_matches,
-           dst.version as destination_version
-         from storage.objects src
-         join storage.objects dst
-           on dst.bucket_id = 'hub-releases' and dst.name = 'manifest.json'
-         join private.hub_release_copy_proofs proof
-           on proof.promotion_id = :'promotion_id'::uuid
-         where src.bucket_id = 'hub-releases' and src.name = :'source_name'
-       ) result`,
-    {
-      promotion_subject: promotionSubject,
-      canonical_metadata: JSON.stringify(canonicalMetadata),
-      promotion_id: promotionId,
-      source_name: sourceName,
-    },
-  ));
-  if (
-    !materialized.etag_matches
-    || !materialized.size_matches
-    || !materialized.version_matches
-    || !materialized.proof_etag_matches
-    || !materialized.proof_size_matches
-    || !materialized.owner_matches
-    || !materialized.user_metadata_matches
-  ) {
-    throw new Error('prova materializada divergiu do objeto copiado');
+  const overwrittenCopy = await api('/storage/v1/object/copy', promotionToken, copyRequest);
+  expectOk(overwrittenCopy, 'copy UPDATE real da Storage API');
+  const overwritten = readMaterializedCopy();
+  assertMaterializedCopy(overwritten, 'copy UPDATE');
+  if (overwritten.destination_version === inserted.destination_version) {
+    throw new Error('copy UPDATE nao materializou uma nova versao do objeto');
   }
 
   const attest = await api(
@@ -264,20 +378,33 @@ async function run() {
   );
   expectOk(attest, 'atestado RPC');
   const attestation = JSON.parse(attest.body);
-  if (attestation.objectVersion !== materialized.destination_version) {
+  if (attestation.objectVersion !== overwritten.destination_version) {
     throw new Error('RPC retornou versao de objeto divergente');
   }
 
-  const complete = await api(
-    '/rest/v1/rpc/complete_hub_release_promotion',
-    promotionToken,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ p_promotion_id: promotionId }),
-    },
-  );
-  expectOk(complete, 'conclusao RPC');
+  installCopyPause();
+  const releaseAdvisoryLock = await startAdvisoryLockHolder();
+  const delayedCopyPromise = api('/storage/v1/object/copy', promotionToken, copyRequest);
+  try {
+    await waitForAdvisoryLock(false);
+    const complete = await api(
+      '/rest/v1/rpc/complete_hub_release_promotion',
+      promotionToken,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ p_promotion_id: promotionId }),
+      },
+    );
+    expectOk(complete, 'conclusao RPC durante copy atrasado');
+  } finally {
+    await releaseAdvisoryLock();
+  }
+
+  const delayedCopy = await delayedCopyPromise;
+  if (delayedCopy.response.ok) {
+    throw new Error('copy que passou RLS foi aceito depois da conclusao');
+  }
 
   const state = JSON.parse(sql(
     `select pg_catalog.row_to_json(result)::text
@@ -297,16 +424,11 @@ async function run() {
     throw new Error('estado final da promocao ficou inconsistente');
   }
 
-  const lateCopy = await api('/storage/v1/object/copy', promotionToken, copyRequest);
-  if (lateCopy.response.ok) {
-    throw new Error('copy atrasado foi aceito depois da conclusao');
-  }
-
   const finalVersion = sql(
     `select version from storage.objects
       where bucket_id = 'hub-releases' and name = 'manifest.json'`,
   );
-  if (finalVersion !== materialized.destination_version) {
+  if (finalVersion !== overwritten.destination_version) {
     throw new Error('copy atrasado alterou o objeto canonico');
   }
 }

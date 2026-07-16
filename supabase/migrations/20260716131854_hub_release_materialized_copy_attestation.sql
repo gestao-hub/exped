@@ -405,7 +405,9 @@ begin
   if v_state.pending_promotion_id is null then
     raise exception using errcode = '55000', message = 'nenhuma promocao esta pendente';
   end if;
-  if v_state.pending_promotion_id <> p_promotion_id then
+  if p_promotion_id is null
+    or v_state.pending_promotion_id is distinct from p_promotion_id
+  then
     raise exception using errcode = '55000', message = 'promotion_id nao corresponde a reserva ativa';
   end if;
   if v_state.pending_expires_at <= pg_catalog.clock_timestamp() then
@@ -455,7 +457,9 @@ begin
     end if;
     raise exception using errcode = '55000', message = 'nenhuma promocao compativel esta pendente';
   end if;
-  if v_state.pending_promotion_id <> p_promotion_id then
+  if p_promotion_id is null
+    or v_state.pending_promotion_id is distinct from p_promotion_id
+  then
     raise exception using errcode = '55000', message = 'promotion_id nao corresponde a reserva ativa';
   end if;
   if v_state.pending_expires_at <= pg_catalog.clock_timestamp() then

@@ -21,9 +21,11 @@ ordem:
 1. `20260714202311_hub_release_storage_roles.sql`
 2. `20260714223000_hub_release_promotion_rpc.sql`
 3. `20260715115548_hub_release_api_key_auth.sql`
+4. `20260716131854_hub_release_materialized_copy_attestation.sql`
 
 Sem a terceira migration, o primeiro stage falha fechado antes de tocar o
-Storage.
+Storage. Sem a quarta, a promocao falha fechada porque a copia canonica nao
+pode ser atestada na transacao materializada pelo Storage.
 
 ## Segredos e variaveis do GitHub
 

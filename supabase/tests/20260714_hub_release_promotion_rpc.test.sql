@@ -1,6 +1,6 @@
 begin;
 
-select plan(69);
+select plan(71);
 
 select has_function(
   'public',
@@ -948,6 +948,15 @@ select throws_ok(
   'atestado nao aceita promotion_id diferente'
 );
 
+select throws_ok(
+  $$
+    select public.attest_hub_release_manifest_copy(null::uuid)
+  $$,
+  '55000',
+  'promotion_id nao corresponde a reserva ativa',
+  'atestado exige promotion_id nao nulo e exato'
+);
+
 select lives_ok(
   $$
     select public.attest_hub_release_manifest_copy(
@@ -986,6 +995,15 @@ select ok(
   'prova persistida e estritamente posterior ao inicio da reserva'
 );
 set local role exped_hub_release_promote;
+
+select throws_ok(
+  $$
+    select public.complete_hub_release_promotion(null::uuid)
+  $$,
+  '55000',
+  'promotion_id nao corresponde a reserva ativa',
+  'conclusao exige promotion_id nao nulo e exato'
+);
 
 select lives_ok(
   $$
