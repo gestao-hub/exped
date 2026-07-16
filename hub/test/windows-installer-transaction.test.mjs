@@ -385,7 +385,8 @@ describe('orquestração transacional do Inno', () => {
     expectOrder(stopService, ['WaitForStatus', 'Stop-HubPayloadProcesses']);
 
     expect(workflow).toContain('$orphanProcess');
-    expect(workflow).toMatch(/payload[\\/]bin[\\/]node\.exe/i);
+    expect(workflow).toMatch(/System32[\\/]ping\.exe/i);
+    expect(workflow).toContain("Join-Path $root 'bin\\exped-orphan-smoke.exe'");
     expect(workflow).toMatch(/orphanProcess[\s\S]*-Operation RestoreHub[\s\S]*HasExited/i);
   });
 

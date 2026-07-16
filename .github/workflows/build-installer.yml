@@ -154,8 +154,9 @@ jobs:
               throw "Nao foi possivel criar subchaves descartaveis: $($regOutput -join ' ')"
             }
             New-Item -ItemType Directory -Path $deepPath -Force | Out-Null
-            $orphanExe = Join-Path $root 'bin\node.exe'
-            Copy-Item -LiteralPath 'payload\bin\node.exe' -Destination $orphanExe -Force
+            $orphanExe = Join-Path $root 'bin\exped-orphan-smoke.exe'
+            Copy-Item -LiteralPath "$env:SystemRoot\System32\ping.exe" `
+              -Destination $orphanExe -Force
             $deepProbe = Join-Path $deepPath 'probe.sql'
             [IO.File]::WriteAllText($deepProbe, 'select 1;')
             & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
@@ -206,7 +207,7 @@ jobs:
 
             [IO.File]::WriteAllText($deepProbe, 'mutated')
             $orphanProcess = Start-Process -FilePath $orphanExe `
-              -ArgumentList '-e', 'setInterval(()=>{},1000)' -WindowStyle Hidden -PassThru
+              -ArgumentList '-t', '127.0.0.1' -WindowStyle Hidden -PassThru
             Start-Sleep -Milliseconds 500
             if ($orphanProcess.HasExited) {
               throw 'Processo orfao descartavel encerrou antes do rollback.'
