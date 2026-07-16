@@ -371,6 +371,25 @@ describe('orquestração transacional do Inno', () => {
     ]);
   });
 
+  it('encerra processos órfãos somente dentro do bin do Hub antes do rollback', () => {
+    const stopService = routine(orchestrator, 'Stop-HubServiceIfPresent');
+    const findPayload = routine(orchestrator, 'Get-HubPayloadProcesses');
+    const stopPayload = routine(orchestrator, 'Stop-HubPayloadProcesses');
+
+    expect(findPayload).toContain("Join-Path $Root 'bin'");
+    expect(findPayload).toContain('Get-Process');
+    expect(findPayload).toContain('.Path');
+    expect(findPayload).toContain('StringComparison]::OrdinalIgnoreCase');
+    expect(stopPayload).toContain('Stop-Process');
+    expect(stopPayload).toMatch(/continuaram ativos|continuou ativo/i);
+    expectOrder(stopService, ['WaitForStatus', 'Stop-HubPayloadProcesses']);
+
+    expect(workflow).toContain('$orphanProcess');
+    expect(workflow).toMatch(/System32[\\/]ping\.exe/i);
+    expect(workflow).toContain("Join-Path $root 'bin\\exped-orphan-smoke.exe'");
+    expect(workflow).toMatch(/orphanProcess[\s\S]*-Operation RestoreHub[\s\S]*HasExited/i);
+  });
+
   it('carimba MyAppVersion atomicamente nos dois instaladores sob o mesmo snapshot', () => {
     for (const installer of [unified, hubOnly]) {
       const install = routine(installer, 'RunTransactionalInstall');

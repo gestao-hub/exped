@@ -130,6 +130,7 @@ jobs:
           $watchdogTaskName = "ExpedWatchdogSmoke$PID$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
           $serviceCreated = $false
           $watchdogTaskCreated = $false
+          $orphanProcess = $null
           $relativeDeepPath = 'bin\pgsql\pgAdmin 4\web\pgadmin\browser\server_groups\servers\databases\foreign_data_wrappers\foreign_servers\user_mappings\templates\user_mappings\sql'
           $deepPath = Join-Path $root $relativeDeepPath
           try {
@@ -153,6 +154,9 @@ jobs:
               throw "Nao foi possivel criar subchaves descartaveis: $($regOutput -join ' ')"
             }
             New-Item -ItemType Directory -Path $deepPath -Force | Out-Null
+            $orphanExe = Join-Path $root 'bin\exped-orphan-smoke.exe'
+            Copy-Item -LiteralPath "$env:SystemRoot\System32\ping.exe" `
+              -Destination $orphanExe -Force
             $deepProbe = Join-Path $deepPath 'probe.sql'
             [IO.File]::WriteAllText($deepProbe, 'select 1;')
             & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass `
@@ -202,6 +206,12 @@ jobs:
             }
 
             [IO.File]::WriteAllText($deepProbe, 'mutated')
+            $orphanProcess = Start-Process -FilePath $orphanExe `
+              -ArgumentList '-t', '127.0.0.1' -WindowStyle Hidden -PassThru
+            Start-Sleep -Milliseconds 500
+            if ($orphanProcess.HasExited) {
+              throw 'Processo orfao descartavel encerrou antes do rollback.'
+            }
             $null = & reg.exe add "$serviceKey\Parameters\AppExit" `
               /v Default /t REG_SZ /d Ignore /f
             if ($LASTEXITCODE -ne 0) { throw 'Nao foi possivel preparar a mutacao de rollback.' }
@@ -217,6 +227,10 @@ jobs:
             }
             if ([IO.File]::ReadAllText($deepProbe) -ne 'select 1;') {
               throw 'Rollback nao restaurou o arquivo profundo original.'
+            }
+            $orphanProcess.Refresh()
+            if (-not $orphanProcess.HasExited) {
+              throw 'Rollback nao encerrou o processo orfao do payload.'
             }
             $queryOutput = @(& reg.exe query "$serviceKey\Parameters\AppExit" `
               /v Default 2>&1 | ForEach-Object { "$_" })
@@ -238,6 +252,9 @@ jobs:
                      (Get-Date) -lt $deadline) {
                 Start-Sleep -Milliseconds 250
               }
+            }
+            if ($orphanProcess -and -not $orphanProcess.HasExited) {
+              Stop-Process -Id $orphanProcess.Id -Force -ErrorAction SilentlyContinue
             }
             Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $transaction -Recurse -Force -ErrorAction SilentlyContinue

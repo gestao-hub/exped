@@ -301,6 +301,40 @@ function Get-HubService {
     return Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 }
 
+function Get-HubPayloadProcesses {
+    if (-not $script:IsWindowsPlatform) { return @() }
+    $binRoot = [System.IO.Path]::GetFullPath((Join-Path $Root 'bin')).TrimEnd('\', '/') + '\'
+    $matches = @()
+    foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
+        $executablePath = ''
+        try { $executablePath = "$($process.Path)" } catch { continue }
+        if ($executablePath -and $executablePath.StartsWith(
+            $binRoot, [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            $matches += $process
+        }
+    }
+    return @($matches)
+}
+
+function Stop-HubPayloadProcesses {
+    if (-not $script:IsWindowsPlatform) { return }
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $remaining = @(Get-HubPayloadProcesses)
+        if ($remaining.Count -eq 0) { return }
+        foreach ($process in $remaining) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+
+    $remaining = @(Get-HubPayloadProcesses)
+    if ($remaining.Count -gt 0) {
+        throw "Processos do payload continuaram ativos apos stop: $($remaining.Id -join ', ')"
+    }
+}
+
 function Get-LegacyWatchdogTask {
     if (-not $script:IsWindowsPlatform) { return $null }
     $tasks = @(
@@ -611,6 +645,9 @@ function Stop-HubServiceIfPresent {
             [TimeSpan]::FromSeconds(30)
         )
     }
+    # If the maestro crashes before its graceful shutdown, native children can
+    # outlive NSSM and keep bin files locked during a transactional rollback.
+    Stop-HubPayloadProcesses
 }
 
 function Remove-HubServiceCreatedByAttempt {

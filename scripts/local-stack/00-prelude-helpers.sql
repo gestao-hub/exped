@@ -78,14 +78,55 @@ create table if not exists storage.objects (
   name        text,
   owner       uuid,
   created_at  timestamptz not null default now(),
-  metadata    jsonb
+  metadata    jsonb,
+  user_metadata jsonb
 );
+alter table storage.objects
+  add column if not exists user_metadata jsonb;
 alter table storage.objects enable row level security;
 
 create or replace function storage.foldername(name text) returns text[]
   language sql immutable
 as $$
   select string_to_array(name, '/')
+$$;
+
+-- Mesma interface do Supabase Storage gerenciado. O servidor local de arquivos
+-- nao define storage.operation, então fora de uma operacao interna o resultado
+-- e null e as policies que exigem object.copy permanecem fechadas.
+create or replace function storage.operation() returns text
+  language plpgsql stable
+as $$
+begin
+  return current_setting('storage.operation', true);
+end;
+$$;
+
+create or replace function storage.allow_only_operation(expected_operation text)
+returns boolean
+language sql
+stable
+as $$
+  with current_operation as (
+    select storage.operation() as raw_operation
+  ),
+  normalized as (
+    select
+      case
+        when raw_operation like 'storage.%' then substr(raw_operation, 9)
+        else raw_operation
+      end as current_operation,
+      case
+        when expected_operation like 'storage.%' then substr(expected_operation, 9)
+        else expected_operation
+      end as requested_operation
+    from current_operation
+  )
+  select case
+    when requested_operation is null or requested_operation = '' then false
+    else coalesce(current_operation = requested_operation, false)
+  end
+  from normalized
 $$;
 
 -- ============================================================
