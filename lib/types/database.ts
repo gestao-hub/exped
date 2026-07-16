@@ -914,6 +914,8 @@ export type Database = {
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
             | null
           id: string
+          ingest_pdf_snapshot_hash: string | null
+          ingest_snapshot_hash: string | null
           nf_chave: string | null
           nf_emitida_em: string | null
           nf_numero: string | null
@@ -955,6 +957,8 @@ export type Database = {
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
             | null
           id?: string
+          ingest_pdf_snapshot_hash?: string | null
+          ingest_snapshot_hash?: string | null
           nf_chave?: string | null
           nf_emitida_em?: string | null
           nf_numero?: string | null
@@ -996,6 +1000,8 @@ export type Database = {
             | Database["public"]["Enums"]["forma_pagamento_tipo"]
             | null
           id?: string
+          ingest_pdf_snapshot_hash?: string | null
+          ingest_snapshot_hash?: string | null
           nf_chave?: string | null
           nf_emitida_em?: string | null
           nf_numero?: string | null

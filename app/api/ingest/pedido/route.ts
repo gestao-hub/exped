@@ -5,7 +5,7 @@ import { ingestPedidoSchema } from '@/lib/validators/ingest';
 import { pedidoFormSchema, type PedidoFormInput } from '@/lib/validators/pedido';
 import { extrairPagamentoDoPdfText } from '@/lib/parser/extrair-pagamento';
 import { mapFormaPagamento, parseParcelas, isReceberNaEntrega } from '@/lib/parser/forma-pagamento';
-import { inserirPedido } from '@/lib/pedidos/inserir';
+import { calcularHashSnapshotIngest, inserirPedido } from '@/lib/pedidos/inserir';
 import { parseIngestRequest } from '@/lib/ingest/parse-request';
 
 export const runtime = 'nodejs';
@@ -13,6 +13,23 @@ export const maxDuration = 30;
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const BUCKET = 'pedidos-pdfs';
+
+type PedidoPdfAttachResolution = {
+  attached: boolean;
+  reason?: 'already_attached' | 'protected' | 'snapshot_changed' | 'not_found';
+};
+
+type PedidoPdfAttachRpcClient = {
+  rpc(
+    name: 'attach_pedido_ingest_pdf',
+    args: {
+      p_pedido_id: string;
+      p_empresa: string;
+      p_expected_hash: string;
+      p_storage_pdf_path: string;
+    },
+  ): Promise<{ data: unknown; error: { message?: string } | null }>;
+};
 
 /**
  * Injeta `modalidade: 'loja'` em itens que não trazem o campo (payload do agente Hiper,
@@ -117,19 +134,8 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   const vendedorId = (map?.vendedor_id as string | undefined) ?? null;
 
-  // 5) Upload do PDF (opcional)
-  let storage_pdf_path: string | null = null;
-  if (buffer) {
-    // Sanitiza documento_erp (vem do agente) — evita path traversal na chave do Storage.
-    const safeDoc = (d.documento_erp ?? 'sem-doc').replace(/[^A-Za-z0-9._-]/g, '_');
-    const path = `hiper-sync/${empresaId}/${safeDoc}-${Date.now()}.pdf`;
-    const { error: upErr } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, buffer, { contentType: 'application/pdf', upsert: false });
-    if (!upErr) storage_pdf_path = path;
-  }
-
-  // 6) Monta PedidoFormInput e valida
+  // 5) Monta PedidoFormInput e valida. O PDF e persistido somente depois que o
+  // snapshot for aceito; um backfill identico nao deve criar objetos orfaos.
   const formInput: PedidoFormInput = {
     documento_erp: d.documento_erp ?? null,
     data_emissao: d.data_emissao ?? null,
@@ -158,7 +164,7 @@ export async function POST(req: NextRequest) {
     receber_na_entrega: d.receber_na_entrega ?? isReceberNaEntrega(d.forma_pagamento ?? forma_pagamento),
     valor_total: d.valor_total,
     observacoes: d.observacoes ?? null,
-    storage_pdf_path,
+    storage_pdf_path: null,
     pontos_retirada: d.pontos_retirada,
   };
   const valid = pedidoFormSchema.safeParse(formInput);
@@ -169,7 +175,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 7) Insere como 'rascunho' → cai na "Meus Pedidos" do vendedor MAPEADO (passo 4),
+  // 6) Insere como 'rascunho' → cai na "Meus Pedidos" do vendedor MAPEADO (passo 4),
   //    que revisa e envia pra logística ("Revisar e enviar" → vira 'pendente').
   //    Decisão Franzoni 2026-06-05: pedido do Hiper passa pelo vendedor antes da logística.
   //    empresa explícita (service_role).
@@ -182,9 +188,67 @@ export async function POST(req: NextRequest) {
     upsertOnDuplicate: true,
   });
   if ('error' in r) return NextResponse.json(r, { status: 500 });
+
+  const persistirPdf = async (
+    pedidoId: string,
+    expectedHash: string,
+  ): Promise<string | null> => {
+    if (!buffer) return null;
+
+    const safeDoc = (d.documento_erp ?? 'sem-doc').replace(/[^A-Za-z0-9._-]/g, '_');
+    // A chave deterministica impede que retries ou chamadas concorrentes
+    // acumulem blobs: o mesmo snapshot sempre reutiliza o mesmo objeto.
+    const path = `hiper-sync/${empresaId}/${safeDoc}-${expectedHash}.pdf`;
+    const storage = supabase.storage.from(BUCKET);
+    const { error: upErr } = await storage.upload(path, buffer, {
+      contentType: 'application/pdf',
+      upsert: true,
+    });
+    if (upErr) return `Falha temporaria ao armazenar PDF: ${upErr.message}`;
+
+    const { data, error } = await (supabase as unknown as PedidoPdfAttachRpcClient).rpc(
+      'attach_pedido_ingest_pdf',
+      {
+        p_pedido_id: pedidoId,
+        p_empresa: empresaId,
+        p_expected_hash: expectedHash,
+        p_storage_pdf_path: path,
+      },
+    );
+    if (error) return `Falha temporaria ao vincular PDF: ${error.message ?? 'desconhecida'}`;
+    if (!data || typeof data !== 'object' || typeof (data as { attached?: unknown }).attached !== 'boolean') {
+      return 'Falha temporaria ao vincular PDF: resposta invalida';
+    }
+
+    const resolution = data as PedidoPdfAttachResolution;
+    if (!resolution.attached && resolution.reason === 'not_found') {
+      return 'Falha temporaria ao vincular PDF: pedido nao encontrado';
+    }
+    // protected/snapshot_changed significam que uma edicao venceu a corrida.
+    // O objeto deterministico pode ser reutilizado, sem alterar o pedido protegido.
+    return null;
+  };
+
   if ('duplicate' in r) {
+    // Um pedido pode ter sido aceito antes de uma indisponibilidade do Storage.
+    // O hash impede recriar filhos, mas um caminho explicitamente nulo permite
+    // que o mesmo backfill complete apenas o PDF ausente.
+    if (buffer && r.pdfRecoveryHash) {
+      const pdfError = await persistirPdf(r.existing_id, r.pdfRecoveryHash);
+      if (pdfError) return NextResponse.json({ error: pdfError }, { status: 503 });
+    }
     return NextResponse.json({ duplicate: true, id: r.existing_id, numero: r.existing_numero }, { status: 200 });
   }
+
+  // 7) O snapshot mudou ou foi criado: agora o PDF pode ser armazenado sem gerar
+  // um novo arquivo a cada rechecagem identica. Um vinculo tardio so tenta o
+  // upload quando o pedido ainda declara explicitamente que nao possui PDF.
+  if (buffer && (r.snapshotChanged !== false || r.previousPdfPath === null)) {
+    const pdfHash = r.pdfRecoveryHash ?? calcularHashSnapshotIngest(valid.data, vendedorId);
+    const pdfError = await persistirPdf(r.id, pdfHash);
+    if (pdfError) return NextResponse.json({ error: pdfError }, { status: 503 });
+  }
+
   // updated=true → re-sync atualizou um pedido existente (200); senão criou novo (201).
   return NextResponse.json({ id: r.id, numero: r.numero }, { status: r.updated ? 200 : 201 });
 }

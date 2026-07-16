@@ -1,32 +1,130 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import type { Database } from '@/lib/types/database';
 import type { PedidoFormInput } from '@/lib/validators/pedido';
 import { upsertCliente } from '@/lib/clientes/upsert';
 
 export type InserirPedidoResult =
   | { error: string }
-  | { id: string; numero: number; updated?: boolean }
-  | { duplicate: true; existing_id: string; existing_numero: number };
+  | {
+      id: string;
+      numero: number;
+      updated?: boolean;
+      snapshotChanged?: boolean;
+      previousPdfPath?: string | null;
+      pdfRecoveryHash?: string;
+    }
+  | {
+      duplicate: true;
+      existing_id: string;
+      existing_numero: number;
+      existingPdfPath?: string | null;
+      pdfRecoveryHash?: string;
+    };
 
 type ExistingPedido = {
   id: string;
   numero_mapa: number;
   status: string;
   cliente_id: string | null;
+  ingest_pdf_snapshot_hash: string | null;
+  ingest_snapshot_hash: string | null;
+  storage_pdf_path: string | null;
 };
 
 type PedidoResyncResolution = {
   updated: boolean;
-  reason?: 'protected' | 'not_found';
+  reason?: 'protected' | 'not_found' | 'unchanged' | 'client_resolved' | 'client_unresolved';
+  snapshot_changed?: boolean;
   id?: string;
   numero?: number;
 };
+
+/**
+ * Identifica o estado de negocio recebido do Hiper sem campos volateis. IDs locais,
+ * caminho do PDF e saldo de estoque nao representam alteracao do pedido e, portanto,
+ * nao podem disparar a recriacao dos filhos durante o backfill.
+ */
+export function calcularHashSnapshotIngest(
+  d: PedidoFormInput,
+  vendedorId: string | null,
+): string {
+  const snapshot = {
+    header: {
+      documento_erp: d.documento_erp ?? null,
+      data_emissao: d.data_emissao ?? null,
+      data_entrega: d.data_entrega ?? null,
+      data_entrega_inicio: d.data_entrega_inicio ?? null,
+      valor_frete: d.valor_frete ?? 0,
+      nf_numero: d.nf_numero ?? null,
+      nf_chave: d.nf_chave ?? null,
+      nf_emitida_em: d.nf_emitida_em ?? null,
+      nf_valor: d.nf_valor ?? null,
+      cliente_codigo: d.cliente_codigo ?? null,
+      cliente_nome: d.cliente_nome,
+      cliente_cnpj_cpf: d.cliente_cnpj_cpf ?? null,
+      cliente_endereco: d.cliente_endereco ?? null,
+      cliente_bairro: d.cliente_bairro ?? null,
+      cliente_cidade: d.cliente_cidade ?? null,
+      cliente_uf: d.cliente_uf ?? null,
+      cliente_cep: d.cliente_cep ?? null,
+      cliente_telefone: d.cliente_telefone ?? null,
+      cliente_endereco_id: d.cliente_endereco_id ?? null,
+      forma_pagamento: d.forma_pagamento ?? null,
+      parcelas: d.parcelas ?? null,
+      receber_na_entrega: d.receber_na_entrega ?? false,
+      exige_emissao: d.exige_emissao ?? null,
+      valor_total: d.valor_total,
+      observacoes: d.observacoes ?? null,
+      vendedor_id: vendedorId,
+    },
+    pontos_retirada: d.pontos_retirada.map((ponto) => ({
+      tipo: ponto.tipo,
+      empresa_nome: ponto.empresa_nome,
+      endereco: ponto.endereco ?? null,
+      itens: ponto.itens.map((item) => ({
+        codigo: item.codigo,
+        descricao: item.descricao,
+        quantidade: item.quantidade,
+        unidade: item.unidade,
+        preco_unitario: item.preco_unitario,
+        desconto: item.desconto,
+        total: item.total,
+        modalidade: item.modalidade,
+        referencia: item.referencia ?? null,
+      })),
+    })),
+  };
+
+  return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+}
 
 type PedidoResyncRpcClient = {
   rpc(
     name: 'resync_pedido_ingest',
     args: {
       p_pedido_id: string;
+      p_empresa: string;
+      p_header: Record<string, unknown>;
+      p_cliente: Record<string, unknown>;
+      p_pontos: PedidoFormInput['pontos_retirada'];
+    },
+  ): Promise<{ data: unknown; error: { message?: string } | null }>;
+};
+
+type PedidoCreateResolution = {
+  created: boolean;
+  duplicate?: boolean;
+  id?: string;
+  numero?: number;
+  storage_pdf_path?: string | null;
+  pdf_recovery_allowed?: boolean;
+};
+
+type PedidoCreateRpcClient = {
+  rpc(
+    name: 'create_pedido_ingest',
+    args: {
       p_empresa: string;
       p_header: Record<string, unknown>;
       p_cliente: Record<string, unknown>;
@@ -108,12 +206,17 @@ export async function inserirPedido(
     upsertOnDuplicate?: boolean;
   },
 ): Promise<InserirPedidoResult> {
+  const ingestSnapshotHash = calcularHashSnapshotIngest(d, opts.vendedorId);
+  const temIdentidadeCliente = Boolean(
+    d.cliente_cnpj_cpf?.trim() || d.cliente_codigo?.trim(),
+  );
+
   // 1) dedup por documento_erp (não-cancelado, escopo empresa)
   let existing: ExistingPedido | null = null;
   if (d.documento_erp) {
     let q = supabase
       .from('pedidos')
-      .select('id, numero_mapa, status, cliente_id')
+      .select('id, numero_mapa, status, cliente_id, ingest_pdf_snapshot_hash, ingest_snapshot_hash, storage_pdf_path')
       .eq('documento_erp', d.documento_erp)
       .neq('status', 'cancelado');
     if (opts.empresaId) q = q.eq('empresa_id', opts.empresaId);
@@ -125,8 +228,22 @@ export async function inserirPedido(
   // repete esta guarda sob lock para fechar a janela de concorrencia.
   if (existing) {
     const podeAtualizar = opts.upsertOnDuplicate === true && existing.status === 'rascunho';
-    if (!podeAtualizar) {
-      return { duplicate: true, existing_id: existing.id, existing_numero: existing.numero_mapa };
+    const snapshotConcluido = existing.ingest_snapshot_hash === ingestSnapshotHash
+      && (existing.cliente_id !== null || !temIdentidadeCliente);
+    if (!podeAtualizar || snapshotConcluido) {
+      return {
+        duplicate: true,
+        existing_id: existing.id,
+        existing_numero: existing.numero_mapa,
+        ...(existing.storage_pdf_path !== undefined
+          ? { existingPdfPath: existing.storage_pdf_path }
+          : {}),
+        ...(podeAtualizar
+          && existing.ingest_snapshot_hash === ingestSnapshotHash
+          && existing.ingest_pdf_snapshot_hash !== ingestSnapshotHash
+          ? { pdfRecoveryHash: ingestSnapshotHash }
+          : {}),
+      };
     }
   }
 
@@ -170,6 +287,7 @@ export async function inserirPedido(
     nf_valor: d.nf_valor ?? null,
     observacoes: d.observacoes ?? null,
     storage_pdf_path: d.storage_pdf_path ?? null,
+    ingest_snapshot_hash: ingestSnapshotHash,
     vendedor_id: opts.vendedorId,
   };
 
@@ -180,6 +298,7 @@ export async function inserirPedido(
     const header: Record<string, unknown> = {
       ...snapshotFields,
       cliente_id: existing.cliente_id,
+      storage_pdf_path: d.storage_pdf_path ?? existing.storage_pdf_path,
     };
     if (d.exige_emissao !== undefined) header.exige_emissao = d.exige_emissao;
 
@@ -204,17 +323,81 @@ export async function inserirPedido(
         duplicate: true,
         existing_id: resolution.id ?? existing.id,
         existing_numero: resolution.numero ?? existing.numero_mapa,
+        ...(existing.storage_pdf_path !== undefined
+          ? { existingPdfPath: existing.storage_pdf_path }
+          : {}),
+        ...(resolution.reason !== 'protected'
+          && resolution.reason !== 'not_found'
+          && existing.ingest_snapshot_hash === ingestSnapshotHash
+          && existing.ingest_pdf_snapshot_hash !== ingestSnapshotHash
+          ? { pdfRecoveryHash: ingestSnapshotHash }
+          : {}),
       };
     }
-    return {
+    const result: Extract<InserirPedidoResult, { id: string }> = {
       id: resolution.id ?? existing.id,
       numero: resolution.numero ?? existing.numero_mapa,
       updated: true,
     };
+    if (typeof resolution.snapshot_changed === 'boolean') {
+      result.snapshotChanged = resolution.snapshot_changed;
+    }
+    if (existing.storage_pdf_path !== undefined) {
+      result.previousPdfPath = existing.storage_pdf_path;
+    }
+    result.pdfRecoveryHash = ingestSnapshotHash;
+    return result;
   }
 
-  // 4) Pedido novo: resolve o cliente antes do insert. Falhas de identidade nao
-  // impedem a entrada do snapshot do pedido, que permanece com cliente_id nulo.
+  // 4) O ingest de um pedido novo e inteiramente transacional no banco. Isso
+  // impede que um segundo backfill observe cabecalho sem filhos ou concorra com
+  // a insercao de pontos/itens ainda em andamento.
+  if (opts.empresaId && opts.upsertOnDuplicate === true) {
+    const header: Record<string, unknown> = { ...snapshotFields };
+    if (d.exige_emissao !== undefined) header.exige_emissao = d.exige_emissao;
+
+    const { data, error } = await (supabase as unknown as PedidoCreateRpcClient).rpc(
+      'create_pedido_ingest',
+      {
+        p_empresa: opts.empresaId,
+        p_header: header,
+        p_cliente: clienteInput,
+        p_pontos: d.pontos_retirada,
+      },
+    );
+    if (error) return { error: `Falha ao criar pedido no ingest: ${error.message ?? 'desconhecida'}` };
+    if (!data || typeof data !== 'object' || typeof (data as { created?: unknown }).created !== 'boolean') {
+      return { error: 'Falha ao criar pedido no ingest: resposta invalida' };
+    }
+
+    const resolution = data as PedidoCreateResolution;
+    if (typeof resolution.id !== 'string' || typeof resolution.numero !== 'number') {
+      return { error: 'Falha ao criar pedido no ingest: pedido ausente na resposta' };
+    }
+    if (!resolution.created) {
+      return {
+        duplicate: true,
+        existing_id: resolution.id,
+        existing_numero: resolution.numero,
+        ...(resolution.storage_pdf_path === null || typeof resolution.storage_pdf_path === 'string'
+          ? { existingPdfPath: resolution.storage_pdf_path }
+          : {}),
+        ...(resolution.pdf_recovery_allowed === true
+          ? { pdfRecoveryHash: ingestSnapshotHash }
+          : {}),
+      };
+    }
+
+    return {
+      id: resolution.id,
+      numero: resolution.numero,
+      previousPdfPath: null,
+      pdfRecoveryHash: ingestSnapshotHash,
+    };
+  }
+
+  // 5) Pedido novo da interface: resolve o cliente antes do insert. Falhas de identidade nao
+  // impedem a entrada do pedido, que permanece com cliente_id nulo.
   let cliente_id: string | null = null;
   try {
     const { id } = await upsertCliente(supabase, clienteInput, opts.empresaId);
@@ -226,6 +409,8 @@ export async function inserirPedido(
   const insertRow: Database['public']['Tables']['pedidos']['Insert'] = {
     ...snapshotFields,
     cliente_id,
+    // Pedidos manuais nao participam do protocolo de replay do agente.
+    ingest_snapshot_hash: null,
     status: opts.status,
   };
   if (opts.empresaId) insertRow.empresa_id = opts.empresaId;
