@@ -29,26 +29,23 @@ describe('integridade dos binarios nativos do instalador Windows', () => {
 
   it('torna a validacao obrigatoria e a executa antes de cada extracao', () => {
     expect(script).toMatch(/function Assert-Sha256\b/);
+    expect(script).toMatch(/function Invoke-VerifiedDownload\b[\s\S]*Assert-Sha256/);
     expect(script).not.toMatch(/pular a verifica[cç][aã]o|if \(\$NodeSha256\)/i);
 
     expectOrder(script, [
-      'Invoke-WebRequest -Uri $pgUrl -OutFile $pgZip',
-      'Assert-Sha256 -Path $pgZip -Expected $PgSha256',
+      'Invoke-VerifiedDownload -Uri $pgUrl -OutFile $pgZip -ExpectedSha256 $PgSha256',
       'Expand-Archive -LiteralPath $pgZip',
     ]);
     expectOrder(script, [
-      'Invoke-WebRequest -Uri $prUrl -OutFile $prZip',
-      'Assert-Sha256 -Path $prZip -Expected $PostgrestSha256',
+      'Invoke-VerifiedDownload -Uri $prUrl -OutFile $prZip -ExpectedSha256 $PostgrestSha256',
       'Expand-Archive -LiteralPath $prZip',
     ]);
     expectOrder(script, [
-      'Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip',
-      'Assert-Sha256 -Path $nodeZip -Expected $NodeSha256',
+      'Invoke-VerifiedDownload -Uri $nodeUrl -OutFile $nodeZip -ExpectedSha256 $NodeSha256',
       'Expand-Archive -LiteralPath $nodeZip',
     ]);
     expectOrder(script, [
-      'Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip',
-      'Assert-Sha256 -Path $nssmZip -Expected $NssmSha256',
+      'Invoke-VerifiedDownload -Uri $nssmUrl -OutFile $nssmZip -ExpectedSha256 $NssmSha256',
       'Expand-Archive -LiteralPath $nssmZip',
     ]);
   });

@@ -1212,7 +1212,7 @@ describe('contratos PowerShell do instalador', () => {
     expect(journal).toMatch(/FileSecurity|SetSecurityDescriptorSddlForm/);
     expect(journal).toMatch(/WriteAllText[\s\S]*(?:Move|Replace)/);
     expect(journal).toContain('Protect-ExpedDiagnosticText');
-    expect(protect).toContain("Replace([char]0, '')");
+    expect(protect).toContain("Replace(([char]0).ToString(), '')");
     expect(protect).toMatch(/Length\s+-gt\s+8192[\s\S]*Substring\(0, 8192\)/i);
     expectOrder(failure, [
       '$failure = $_',

@@ -237,7 +237,7 @@ function Protect-ExpedNativeArgumentsForLog($Arguments) {
 }
 
 function Protect-ExpedDiagnosticText($Text) {
-    $safe = "$Text".Replace([char]0, '')
+    $safe = "$Text".Replace(([char]0).ToString(), '')
     if ($null -ne $envMap) {
         foreach ($entry in @($envMap.GetEnumerator())) {
             $value = "$($entry.Value)"
@@ -344,7 +344,7 @@ function Start-HubServiceAndWait([int]$TimeoutSeconds = 90) {
         [System.ServiceProcess.ServiceControllerStatus]::StartPending,
         [System.ServiceProcess.ServiceControllerStatus]::Running
     )) {
-        $startOutput = "$($startResult.Output)".Replace([char]0, '')
+        $startOutput = "$($startResult.Output)".Replace(([char]0).ToString(), '')
         throw "NSSM nao iniciou $ServiceName. Estado=$($service.Status). $startOutput"
     }
 
@@ -583,8 +583,11 @@ function Set-NssmServiceEnvironment($EnvironmentMap) {
         # Service registry keys are commonly readable by non-admin users. Lock
         # Parameters before writing the token-bearing REG_MULTI_SZ value.
         $security = New-Object System.Security.AccessControl.RegistrySecurity
+        # Preserve owner/group: the existing CreateSubKey handle can change the
+        # DACL, but does not request WRITE_OWNER on an already registered service.
         $security.SetSecurityDescriptorSddlForm(
-            'O:SYG:SYD:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)'
+            'D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)',
+            [System.Security.AccessControl.AccessControlSections]::Access
         )
         $key.SetAccessControl($security)
         # NSSM 2.24 le este REG_DWORD, mas algumas builds estaveis nao o

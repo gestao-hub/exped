@@ -75,6 +75,37 @@ function Assert-Sha256 {
     Write-Host "    SHA-256 OK: $actual"
 }
 
+function Invoke-VerifiedDownload {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][string]$OutFile,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha256,
+        [ValidateRange(1, 10)][int]$Attempts = 3,
+        [ValidateRange(30, 3600)][int]$TimeoutSec = 900
+    )
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+        try {
+            Write-Host "    tentativa $attempt de $Attempts ..."
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec -UseBasicParsing
+            Assert-Sha256 -Path $OutFile -Expected $ExpectedSha256
+            return
+        } catch {
+            $lastError = $_.Exception.Message
+            Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+            Write-Host "    tentativa $attempt falhou: $lastError" -ForegroundColor Yellow
+            if ($attempt -lt $Attempts) {
+                Start-Sleep -Seconds (3 * $attempt)
+            }
+        }
+    }
+
+    throw "Falha ao baixar ou validar $Uri apos $Attempts tentativas. Ultimo erro: $lastError"
+}
+
 # Log em arquivo: o [Code] do Inno roda este script oculto (saida invisivel).
 # Start-Transcript grava tudo (passos + erros) em C:\Exped\logs\download-binaries.log
 # pra auditar depois. (InstallDir e ...\bin; o pai e a raiz C:\Exped.)
@@ -103,8 +134,7 @@ $pgUrl = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-windows-
 $pgZip = Join-Path $tmp "postgresql.zip"
 Write-Step "Baixando PostgreSQL $PgVersion ..."
 Write-Host "    $pgUrl"
-Invoke-WebRequest -Uri $pgUrl -OutFile $pgZip -UseBasicParsing
-Assert-Sha256 -Path $pgZip -Expected $PgSha256
+Invoke-VerifiedDownload -Uri $pgUrl -OutFile $pgZip -ExpectedSha256 $PgSha256
 
 Write-Step "Extraindo PostgreSQL para $InstallDir\pgsql ..."
 # O zip da EDB contem uma pasta raiz "pgsql\". Extraimos direto em $InstallDir.
@@ -126,8 +156,7 @@ $prUrl = "https://github.com/PostgREST/postgrest/releases/download/$PostgrestVer
 $prZip = Join-Path $tmp "postgrest.zip"
 Write-Step "Baixando PostgREST $PostgrestVersion ..."
 Write-Host "    $prUrl"
-Invoke-WebRequest -Uri $prUrl -OutFile $prZip -UseBasicParsing
-Assert-Sha256 -Path $prZip -Expected $PostgrestSha256
+Invoke-VerifiedDownload -Uri $prUrl -OutFile $prZip -ExpectedSha256 $PostgrestSha256
 
 Write-Step "Extraindo PostgREST para $InstallDir ..."
 Expand-Archive -LiteralPath $prZip -DestinationPath $InstallDir -Force
@@ -159,8 +188,7 @@ $nodeUrl     = "https://nodejs.org/dist/$NodeVersion/$nodeDirName.zip"
 $nodeZip     = Join-Path $tmp "node.zip"
 Write-Step "Baixando Node.js $NodeVersion ..."
 Write-Host "    $nodeUrl"
-Invoke-WebRequest -Uri $nodeUrl -OutFile $nodeZip -UseBasicParsing
-Assert-Sha256 -Path $nodeZip -Expected $NodeSha256
+Invoke-VerifiedDownload -Uri $nodeUrl -OutFile $nodeZip -ExpectedSha256 $NodeSha256
 
 Write-Step "Extraindo Node.js para $InstallDir\node ..."
 # O zip contem uma pasta raiz "node-vX-win-x64\". Extraimos no tmp e movemos
@@ -201,16 +229,7 @@ if (Test-Path -LiteralPath $nssmExe) {
     $nssmZip = Join-Path $tmp "nssm.zip"
     Write-Step "Baixando NSSM $NssmVersion ..."
     Write-Host "    $nssmUrl"
-    # nssm.cc cai com frequencia (503/timeout). Tenta 3x antes de desistir.
-    $nssmOk = $false
-    for ($i = 1; $i -le 3 -and -not $nssmOk; $i++) {
-        try { Invoke-WebRequest -Uri $nssmUrl -OutFile $nssmZip -TimeoutSec 30 -UseBasicParsing; $nssmOk = $true }
-        catch { Write-Host "    tentativa $i de NSSM falhou: $($_.Exception.Message)"; Start-Sleep -Seconds 3 }
-    }
-    if (-not $nssmOk) {
-        throw "Falha ao baixar NSSM (nssm.cc) apos 3 tentativas. Solucao robusta: pre-empacote o nssm.exe (win64) em payload\bin\nssm.exe - o instalador o copia e este download e pulado. (Ou copie um nssm.exe para $InstallDir e rode de novo.)"
-    }
-    Assert-Sha256 -Path $nssmZip -Expected $NssmSha256
+    Invoke-VerifiedDownload -Uri $nssmUrl -OutFile $nssmZip -ExpectedSha256 $NssmSha256
     Write-Step "Extraindo NSSM (nssm.exe win64) para $InstallDir ..."
     $nssmExtract = Join-Path $tmp "nssm-extract"
     if (Test-Path -LiteralPath $nssmExtract) { Remove-Item -LiteralPath $nssmExtract -Recurse -Force }
