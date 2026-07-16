@@ -973,6 +973,18 @@ describe('contratos PowerShell do instalador', () => {
     expect(install).toContain('Assert-ExpedInteractiveUserSid');
   });
 
+  it('le Local AppData sem expandir USERPROFILE no contexto SYSTEM', () => {
+    const validator = routine(settings, 'Assert-ExpedInteractiveUserSid');
+
+    expect(validator).toContain('RegistryValueOptions]::DoNotExpandEnvironmentNames');
+    expect(validator).toMatch(
+      /GetValue\(\s*'Local AppData'[\s\S]*DoNotExpandEnvironmentNames/,
+    );
+    expect(validator).not.toMatch(
+      /Get-ItemPropertyValue[^\r\n]*-Name\s+'Local AppData'/,
+    );
+  });
+
   it('isola agente por ManageAgent explícito nos dois pacotes', () => {
     expect(install).toMatch(/ManageAgent[\s\S]*'false'/);
     expect(uninstall).toMatch(/ManageAgent[\s\S]*'false'/);

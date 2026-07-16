@@ -36,7 +36,16 @@ function Assert-ExpedInteractiveUserSid($Sid, $SettingsPath = '') {
         $userShellKey = "Registry::HKEY_USERS\$Sid\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
         if (Test-Path -LiteralPath $userShellKey) {
             try {
-                $registeredLocalAppData = "$(Get-ItemPropertyValue -LiteralPath $userShellKey -Name 'Local AppData' -ErrorAction Stop)"
+                $registryKey = Get-Item -LiteralPath $userShellKey -ErrorAction Stop
+                try {
+                    $registeredLocalAppData = "$($registryKey.GetValue(
+                        'Local AppData',
+                        $null,
+                        [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+                    ))"
+                } finally {
+                    $registryKey.Close()
+                }
                 if ($registeredLocalAppData.StartsWith(
                     '%USERPROFILE%',
                     [System.StringComparison]::OrdinalIgnoreCase
