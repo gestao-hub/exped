@@ -608,6 +608,13 @@ function buildManifestAttestation(approval, variant) {
   };
 }
 
+function buildCanonicalManifestAttestation(approval, variant, promotionId) {
+  return {
+    ...buildManifestAttestation(approval, variant),
+    promotionId,
+  };
+}
+
 function publicObjectUrl(ref, objectPath) {
   assertProjectRef(ref);
   return `https://${ref}.supabase.co/storage/v1/object/public/${STORAGE_BUCKET}/${objectPath}`;
@@ -1033,9 +1040,17 @@ async function initializePromotionState(client, ref, observed, accessToken) {
 async function copyAuthorizedManifest(
   ref,
   credentials,
+  approval,
   directive,
   fetchImpl,
 ) {
+  const canonicalMetadata = {
+    expedRelease: buildCanonicalManifestAttestation(
+      approval,
+      directive.variant,
+      directive.promotionId,
+    ),
+  };
   const response = await fetchImpl(
     `https://${ref}.supabase.co/storage/v1/object/copy`,
     {
@@ -1044,12 +1059,13 @@ async function copyAuthorizedManifest(
         ...releaseRequestHeaders(credentials),
         'content-type': 'application/json',
         'x-upsert': 'true',
+        'x-metadata': Buffer.from(JSON.stringify(canonicalMetadata)).toString('base64'),
       },
       body: JSON.stringify({
         bucketId: STORAGE_BUCKET,
         sourceKey: directive.source,
         destinationKey: directive.destination,
-        copyMetadata: true,
+        copyMetadata: false,
       }),
     },
   );
@@ -1065,7 +1081,11 @@ async function verifyCanonicalManifest(client, approval, directive) {
     bytes: Buffer.from(JSON.stringify(candidate.body)),
     contentType: 'application/json',
     attestation: {
-      expedRelease: buildManifestAttestation(approval, directive.variant),
+      expedRelease: buildCanonicalManifestAttestation(
+        approval,
+        directive.variant,
+        directive.promotionId,
+      ),
     },
     conflictMessage: 'copia canonica materializou bytes diferentes do artifact aprovado',
   };
@@ -1088,6 +1108,29 @@ async function verifyCanonicalManifest(client, approval, directive) {
       : 'manifest canonico no Storage possui bytes diferentes do artifact aprovado');
   }
   await assertImmutableObjectInfo(client, spec.objectPath, spec);
+}
+
+async function attestCanonicalManifestCopy(client, approval, directive, accessToken) {
+  const { data, error } = await client.rpc('attest_hub_release_manifest_copy', {
+    p_promotion_id: directive.promotionId,
+  });
+  if (error) {
+    const detail = redactDetail(error.message, [accessToken]);
+    throw new Error(`atestado da copia canonica falhou${detail ? `: ${detail}` : ''}`);
+  }
+  if (
+    data?.promotionId !== directive.promotionId
+    || data?.sourceSha !== approval.source_sha
+    || data?.artifactSha256 !== approval.artifact.sha256
+    || data?.metadataSha256 !== approval.metadata.sha256
+    || data?.manifestSha256 !== directive.manifestSha256
+    || typeof data?.objectVersion !== 'string'
+    || data.objectVersion.length === 0
+    || !Number.isFinite(Date.parse(data?.observedAt))
+  ) {
+    throw new Error('RPC atestou copia canonica com identidade diferente');
+  }
+  return data;
 }
 
 async function completePromotion(client, approval, directive, accessToken) {
@@ -1166,13 +1209,25 @@ export async function promoteRelease(
   );
 
   if (directive.requiresCopy) {
-    await copyAuthorizedManifest(ref, validatedCredentials, directive, fetchImpl);
+    await copyAuthorizedManifest(
+      ref,
+      validatedCredentials,
+      approval,
+      directive,
+      fetchImpl,
+    );
   }
   await verifyCanonicalManifest(client, approval, directive);
   if (!directive.requiresCopy) {
     logger.log('Manifest already promoted and verified:', JSON.stringify(directive.manifest));
     return directive.manifest;
   }
+  await attestCanonicalManifestCopy(
+    client,
+    approval,
+    directive,
+    credentialSecret,
+  );
   const manifest = await completePromotion(
     client,
     approval,

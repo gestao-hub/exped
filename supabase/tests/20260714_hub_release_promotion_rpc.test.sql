@@ -1,6 +1,6 @@
 begin;
 
-select plan(48);
+select plan(69);
 
 select has_function(
   'public',
@@ -31,10 +31,30 @@ select has_function(
 );
 
 select has_function(
+  'public',
+  'attest_hub_release_manifest_copy',
+  array['uuid'],
+  'RPC atesta o objeto materializado depois do copy'
+);
+
+select hasnt_function(
   'private',
   'hub_release_mark_copy',
   array['text', 'jsonb'],
-  'prova da copia e produzida dentro da operacao Storage'
+  'prova nao depende de efeito colateral descartado pela checagem RLS'
+);
+
+select has_table(
+  'private',
+  'hub_release_copy_proofs',
+  'prova persistente guarda a versao materializada do objeto'
+);
+
+select has_function(
+  'private',
+  'hub_release_guard_manifest_write',
+  array[]::text[],
+  'trigger valida a gravacao real feita pelo Storage'
 );
 
 select is(
@@ -59,6 +79,30 @@ select is(
   ),
   array['search_path=""']::text[],
   'RPC fixa search_path vazio'
+);
+
+select is(
+  (
+    select p.prosecdef
+    from pg_catalog.pg_proc p
+    where p.oid = to_regprocedure(
+      'public.attest_hub_release_manifest_copy(uuid)'
+    )
+  ),
+  true,
+  'RPC de atestacao usa SECURITY DEFINER'
+);
+
+select is(
+  (
+    select p.proconfig
+    from pg_catalog.pg_proc p
+    where p.oid = to_regprocedure(
+      'public.attest_hub_release_manifest_copy(uuid)'
+    )
+  ),
+  array['search_path=""']::text[],
+  'RPC de atestacao fixa search_path vazio'
 );
 
 select ok(
@@ -107,6 +151,51 @@ select ok(
 );
 
 select ok(
+  not has_function_privilege(
+    'anon',
+    'public.attest_hub_release_manifest_copy(uuid)',
+    'execute'
+  ),
+  'anon nao atesta copia'
+);
+
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.attest_hub_release_manifest_copy(uuid)',
+    'execute'
+  ),
+  'authenticated nao atesta copia'
+);
+
+select ok(
+  not has_function_privilege(
+    'exped_hub_release_stage',
+    'public.attest_hub_release_manifest_copy(uuid)',
+    'execute'
+  ),
+  'stage nao atesta copia'
+);
+
+select ok(
+  not has_function_privilege(
+    'service_role',
+    'public.attest_hub_release_manifest_copy(uuid)',
+    'execute'
+  ),
+  'service_role nao substitui a credencial de atestacao'
+);
+
+select ok(
+  has_function_privilege(
+    'exped_hub_release_promote',
+    'public.attest_hub_release_manifest_copy(uuid)',
+    'execute'
+  ),
+  'role dedicada atesta a copia materializada'
+);
+
+select ok(
   (
     select not initialized and current_version is null
     from private.hub_release_promotion_state
@@ -115,15 +204,16 @@ select ok(
   'migration inicia fechada sem supor versao legada'
 );
 
-select ok(
-  not exists (
-    select 1
+select is(
+  (
+    select count(*)::integer
     from pg_catalog.pg_trigger t
     where t.tgrelid = 'storage.objects'::regclass
       and not t.tgisinternal
-      and t.tgname like '%hub_release%'
+      and t.tgname = 'hub_release_guard_manifest_write'
   ),
-  'promocao nao depende de trigger em storage.objects'
+  1,
+  'gravacao real do manifest e guardada no mesmo commit do Storage'
 );
 
 select is(
@@ -157,8 +247,24 @@ select is(
       and pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)
         like '%hub_release_mark_copy(name, user_metadata)%'
   ),
+  0,
+  'policies autorizam o copy sem efeitos colaterais que o Storage descarta'
+);
+
+select is(
+  (
+    select count(*)::integer
+    from pg_catalog.pg_policy p
+    where p.polrelid = 'storage.objects'::regclass
+      and p.polname in (
+        'hub_release_promote_insert_manifest',
+        'hub_release_promote_update_manifest'
+      )
+      and pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid)
+        like '%hub_release_manifest_write_authorized(name, owner_id, user_metadata)%'
+  ),
   2,
-  'insert e update do copy registram prova transacional no pending'
+  'insert e update exigem nonce e metadata do pending sem efeitos laterais'
 );
 
 select ok(
@@ -196,18 +302,17 @@ select ok(
   'stage possui somente o grant de leitura necessario para Storage info()'
 );
 
-select ok(
-  not exists (
-    select 1
+select is(
+  (
+    select count(*)::integer
     from pg_catalog.pg_proc p
     where p.pronamespace in ('private'::regnamespace, 'public'::regnamespace)
       and p.proname like '%hub_release%'
-      and (
-        pg_catalog.pg_get_functiondef(p.oid) ~* '(from|join)[[:space:]]+storage[.]objects'
-        or pg_catalog.pg_get_functiondef(p.oid) like '%storage.operation%'
-      )
+      and pg_catalog.pg_get_functiondef(p.oid)
+        ~* '(from|join)[[:space:]]+storage[.]objects'
   ),
-  'RPCs usam estado proprio e nao detalhes internos do Storage'
+  2,
+  'somente o guard e a assercao pos-copy leem objetos do Storage'
 );
 
 create temporary table release_fixture (
@@ -708,11 +813,178 @@ select throws_ok(
 );
 
 reset role;
-update private.hub_release_promotion_state
-set
-  pending_copy_promotion_id = pending_promotion_id,
-  pending_copy_observed_at = pg_catalog.clock_timestamp()
+insert into storage.buckets (id, name, public)
+values ('hub-releases', 'hub-releases', true)
+on conflict (id) do nothing;
+
+insert into storage.objects (
+  bucket_id,
+  name,
+  owner_id,
+  metadata,
+  user_metadata,
+  version,
+  updated_at
+)
+select
+  'hub-releases',
+  pending_source_name,
+  pending_subject::text,
+  pg_catalog.jsonb_build_object(
+    'eTag', '"candidate-recovered"',
+    'size', 201,
+    'mimetype', 'application/json'
+  ),
+  pg_catalog.jsonb_build_object(
+    'expedRelease', pg_catalog.jsonb_build_object(
+      'schemaVersion', 1,
+      'kind', 'hub-release-manifest',
+      'version', pending_version,
+      'platform', 'win32',
+      'sourceSha', pending_source_sha,
+      'artifactSha256', pending_artifact_sha256,
+      'manifestSha256', pending_manifest_sha256,
+      'manifest', pending_manifest
+    )
+  ),
+  'candidate-recovered',
+  pg_catalog.clock_timestamp()
+from private.hub_release_promotion_state
 where singleton;
+
+-- O Storage reaplica este contexto na transacao privilegiada que materializa
+-- o copy. Escritas SQL comuns permanecem fora do guard e seguem apenas a RLS.
+select set_config('storage.operation', 'object.copy', true);
+
+select throws_ok(
+  $$
+    insert into storage.objects (
+      bucket_id, name, owner_id, metadata, user_metadata, version, updated_at
+    )
+    select
+      'hub-releases',
+      'manifest.json',
+      '00000000-0000-0000-0000-000000000099',
+      src.metadata,
+      pg_catalog.jsonb_build_object(
+        'expedRelease', (src.user_metadata -> 'expedRelease')
+          || pg_catalog.jsonb_build_object('promotionId', s.pending_promotion_id)
+      ),
+      'wrong-owner',
+      pg_catalog.clock_timestamp()
+    from private.hub_release_promotion_state s
+    join storage.objects src
+      on src.bucket_id = 'hub-releases'
+     and src.name = s.pending_source_name
+    where s.singleton
+  $$,
+  '55000',
+  'manifest canonico nao pertence ao subject da reserva',
+  'owner divergente nao materializa o manifest canonico'
+);
+
+select throws_ok(
+  $$
+    insert into storage.objects (
+      bucket_id, name, owner_id, metadata, user_metadata, version, updated_at
+    )
+    select
+      'hub-releases',
+      'manifest.json',
+      s.pending_subject::text,
+      pg_catalog.jsonb_set(src.metadata, '{eTag}', '"old-bytes"'::jsonb),
+      pg_catalog.jsonb_build_object(
+        'expedRelease', (src.user_metadata -> 'expedRelease')
+          || pg_catalog.jsonb_build_object('promotionId', s.pending_promotion_id)
+      ),
+      'old-bytes',
+      pg_catalog.clock_timestamp()
+    from private.hub_release_promotion_state s
+    join storage.objects src
+      on src.bucket_id = 'hub-releases'
+     and src.name = s.pending_source_name
+    where s.singleton
+  $$,
+  '55000',
+  'manifest canonico diverge do candidato imutavel',
+  'metadata nova nao permite promover bytes antigos'
+);
+
+select lives_ok(
+  $$
+    insert into storage.objects (
+      bucket_id, name, owner_id, metadata, user_metadata, version, updated_at
+    )
+    select
+      'hub-releases',
+      'manifest.json',
+      s.pending_subject::text,
+      src.metadata,
+      pg_catalog.jsonb_build_object(
+        'expedRelease', (src.user_metadata -> 'expedRelease')
+          || pg_catalog.jsonb_build_object('promotionId', s.pending_promotion_id)
+      ),
+      'canonical-recovered',
+      pg_catalog.clock_timestamp()
+    from private.hub_release_promotion_state s
+    join storage.objects src
+      on src.bucket_id = 'hub-releases'
+     and src.name = s.pending_source_name
+    where s.singleton
+  $$,
+  'gravacao real do candidato imutavel persiste a prova'
+);
+
+set local role exped_hub_release_promote;
+
+select throws_ok(
+  $$
+    select public.attest_hub_release_manifest_copy(
+      '00000000-0000-4000-8000-000000000099'
+    )
+  $$,
+  '55000',
+  'promotion_id nao corresponde a reserva ativa',
+  'atestado nao aceita promotion_id diferente'
+);
+
+select lives_ok(
+  $$
+    select public.attest_hub_release_manifest_copy(
+      (select (result ->> 'promotionId')::uuid from promotion_result where label = 'recovered')
+    )
+  $$,
+  'objeto recente com atestacao exata comprova a copia materializada'
+);
+
+select lives_ok(
+  $$
+    select public.attest_hub_release_manifest_copy(
+      (select (result ->> 'promotionId')::uuid from promotion_result where label = 'recovered')
+    )
+  $$,
+  'retry do atestado da mesma versao materializada e idempotente'
+);
+
+reset role;
+select is(
+  (
+    select pending_copy_promotion_id::text
+    from private.hub_release_promotion_state
+    where singleton
+  ),
+  (select result ->> 'promotionId' from promotion_result where label = 'recovered'),
+  'atestado vincula a prova ao pending exato'
+);
+
+select ok(
+  (
+    select pending_copy_observed_at > pending_requested_at
+    from private.hub_release_promotion_state
+    where singleton
+  ),
+  'prova persistida e estritamente posterior ao inicio da reserva'
+);
 set local role exped_hub_release_promote;
 
 select lives_ok(
@@ -725,6 +997,20 @@ select lives_ok(
 );
 
 reset role;
+select throws_ok(
+  $$
+    update storage.objects
+    set
+      version = 'late-copy',
+      updated_at = pg_catalog.clock_timestamp()
+    where bucket_id = 'hub-releases'
+      and name = 'manifest.json'
+  $$,
+  '55000',
+  'nenhuma promocao ativa autoriza manifest canonico',
+  'copy materializado depois do complete e recusado pelo trigger'
+);
+
 select is(
   (select current_version from private.hub_release_promotion_state where singleton),
   '0.3.21',
@@ -772,12 +1058,68 @@ select is(
 );
 
 reset role;
-update private.hub_release_promotion_state
+insert into storage.objects (
+  bucket_id,
+  name,
+  owner_id,
+  metadata,
+  user_metadata,
+  version,
+  updated_at
+)
+select
+  'hub-releases',
+  s.pending_source_name,
+  s.pending_subject::text,
+  pg_catalog.jsonb_build_object(
+    'eTag', '"candidate-upgrade"',
+    'size', 201,
+    'mimetype', 'application/json'
+  ),
+  pg_catalog.jsonb_build_object(
+    'expedRelease', pg_catalog.jsonb_build_object(
+      'schemaVersion', 1,
+      'kind', 'hub-release-manifest',
+      'version', s.pending_version,
+      'platform', 'win32',
+      'sourceSha', s.pending_source_sha,
+      'artifactSha256', s.pending_artifact_sha256,
+      'manifestSha256', s.pending_manifest_sha256,
+      'manifest', s.pending_manifest
+    )
+  ),
+  'candidate-upgrade',
+  pg_catalog.clock_timestamp()
+from private.hub_release_promotion_state s
+where s.singleton;
+
+update storage.objects o
 set
-  pending_copy_promotion_id = pending_promotion_id,
-  pending_copy_observed_at = pg_catalog.clock_timestamp()
-where singleton;
+  owner_id = s.pending_subject::text,
+  metadata = src.metadata,
+  updated_at = pg_catalog.clock_timestamp(),
+  version = 'canonical-upgrade',
+  user_metadata = pg_catalog.jsonb_build_object(
+    'expedRelease', (src.user_metadata -> 'expedRelease')
+      || pg_catalog.jsonb_build_object('promotionId', s.pending_promotion_id)
+  )
+from private.hub_release_promotion_state s
+join storage.objects src
+  on src.bucket_id = 'hub-releases'
+ and src.name = s.pending_source_name
+where s.singleton
+  and o.bucket_id = 'hub-releases'
+  and o.name = 'manifest.json';
 set local role exped_hub_release_promote;
+
+select lives_ok(
+  $$
+    select public.attest_hub_release_manifest_copy(
+      (select (result ->> 'promotionId')::uuid from promotion_result where label = 'upgrade')
+    )
+  $$,
+  'upgrade tambem exige atestado do objeto materializado'
+);
 
 select lives_ok(
   $$
