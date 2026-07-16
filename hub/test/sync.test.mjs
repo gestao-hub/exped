@@ -467,6 +467,30 @@ describe('makePsqlDb — cursores keyset', () => {
     expect(sql).toContain('pull_pk = excluded.pull_pk');
   });
 
+  it('aplica uma pagina de pull e o cursor na mesma transacao SQL', async () => {
+    const db = makePsqlDb(cfg);
+    expect(typeof db.applyPulledPage).toBe('function');
+    if (typeof db.applyPulledPage !== 'function') return;
+
+    await db.applyPulledPage(
+      'clientes',
+      'id',
+      [
+        { id: 'c1', nome: 'Ana', updated_at: '2026-07-14T12:00:00.000Z' },
+        { id: 'c2', nome: 'Bia', updated_at: '2026-07-14T12:01:00.000Z' },
+      ],
+      { pull_at: '2026-07-14T12:01:00.000Z', pull_pk: 'c2' },
+    );
+
+    expect(psqlCapture.commands).toHaveLength(0);
+    expect(psqlCapture.scripts).toHaveLength(1);
+    const sql = psqlCapture.scripts[0];
+    expect(sql.match(/insert into public\.clientes/g)).toHaveLength(2);
+    expect(sql).toContain('pull_at = excluded.pull_at');
+    expect(sql).toContain('pull_pk = excluded.pull_pk');
+    expect(sql.indexOf('insert into public._sync_cursors')).toBeLessThan(sql.lastIndexOf('commit;'));
+  });
+
   it('aplica todas as canônicas e o cursor de push em uma única transação SQL', async () => {
     await makePsqlDb(cfg).applyCanonicalPage(
       'pedidos',
@@ -1720,6 +1744,58 @@ describe('syncOnce — paginação / cold start', () => {
   let db;
   beforeEach(() => {
     db = makeMemDb();
+  });
+
+  it('aplica tabelas two-way por pagina atomica quando o banco oferece o contrato', async () => {
+    const applyPulledPage = vi.fn(async (table, pk, rows, cursor) => {
+      for (const row of rows) await db.upsert(table, pk, row);
+      await db.setCursor(table, cursor);
+    });
+    db.applyPulledPage = applyPulledPage;
+    const row = { id: 'c-batch', nome: 'Lote', updated_at: '2026-01-01T00:00:00Z' };
+
+    const result = await syncOnce({
+      db,
+      apiBase,
+      deviceToken,
+      pushFn: async () => ({ tables: {} }),
+      pullFn: async () => ({
+        tables: { clientes: [row] },
+        nextCursors: { clientes: row.updated_at, 'clientes.__pk': row.id },
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(applyPulledPage).toHaveBeenCalledOnce();
+    expect(applyPulledPage).toHaveBeenCalledWith(
+      'clientes',
+      'id',
+      [row],
+      { pull_at: row.updated_at, pull_pk: row.id },
+    );
+  });
+
+  it('faz fallback linha a linha quando a pagina atomica falha inteira', async () => {
+    db.applyPulledPage = vi.fn().mockRejectedValueOnce(new Error('batch indisponivel'));
+    const row = { id: 'c-fallback', nome: 'Fallback', updated_at: '2026-01-01T00:00:00Z' };
+
+    const result = await syncOnce({
+      db,
+      apiBase,
+      deviceToken,
+      pushFn: async () => ({ tables: {} }),
+      pullFn: async () => ({
+        tables: { clientes: [row] },
+        nextCursors: { clientes: row.updated_at, 'clientes.__pk': row.id },
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(db.get('clientes', row.id)).toEqual(row);
+    expect(await db.getCursor('clientes')).toMatchObject({
+      pull_at: row.updated_at,
+      pull_pk: row.id,
+    });
   });
 
   it('cold start: 2 páginas (500 + 30) → 2 requests, 530 linhas, cursor = max da última', async () => {

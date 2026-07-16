@@ -32,7 +32,7 @@ import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
-import { Supervisor } from './supervisor.mjs';
+import { rotateLogFileSync, Supervisor } from './supervisor.mjs';
 import {
   assertCompleteHubStatus,
   readAgentReadiness,
@@ -541,6 +541,8 @@ function peerState(sup) {
 export async function startMaestro(cfg, opts = {}) {
   const logDir = cfg.paths.logDir || path.join(ROOT, '.hub-logs');
   await mkdir(logDir, { recursive: true });
+  rotateLogFileSync(path.join(logDir, 'maestro.log'));
+  rotateLogFileSync(path.join(logDir, 'postgres.log'));
   const logger = opts.logger || makeLogger(path.join(logDir, 'maestro.log'));
 
   const startApp = opts.startApp !== false; // permite pular o app no smoke

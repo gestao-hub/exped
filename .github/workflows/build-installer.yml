@@ -43,6 +43,7 @@ jobs:
           $scripts = @(
             Get-ChildItem hub -Filter *.ps1 -File
             Get-ChildItem hub/win -Filter *.ps1 -File
+            Get-ChildItem agent/installer -Filter *.ps1 -File
           )
           $scripts | ForEach-Object {
             $tokens = $null

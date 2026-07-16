@@ -1,4 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 function source(relativePath) {
@@ -23,6 +33,9 @@ describe('hardening do instalador Windows', () => {
     : '';
   const download = source('../win/download-binaries.ps1');
   const workflow = source('../../.github/workflows/build-installer.yml');
+  const agentStart = source('../../agent/installer/start.cmd');
+  const agentSettings = JSON.parse(source('../../agent/ExpedAgent/appsettings.json'));
+  const standaloneAgent = source('../../agent/installer/ExpedAgent.iss');
 
   it('usa AppIds explícitos, distintos e compatíveis com os nomes legados', () => {
     const unifiedId = setup.match(/^AppId=(.+)$/m)?.[1].trim();
@@ -61,6 +74,7 @@ describe('hardening do instalador Windows', () => {
     }
     expect(workflow).toMatch(/shell:\s*powershell[\s\S]*PSVersionTable\.PSVersion\.Major[\s\S]*-ne 5/i);
     expect(workflow).toContain('Language.Parser]::ParseFile');
+    expect(workflow).toMatch(/Get-ChildItem\s+agent\/installer\s+-Filter\s+\*\.ps1/i);
   });
 
   it('baixa todos os binários com retentativa e SHA-256 por tentativa', () => {
@@ -160,4 +174,101 @@ describe('hardening do instalador Windows', () => {
     expect(runbook).toContain('Trusted_Connection');
     expect(runbook).not.toMatch(/manifesto fake[\s\S]*http:\/\//i);
   });
+
+  it('limita o log do Agent antes do start e reduz o ruído de HTTP interno', () => {
+    const rotateUrl = new URL('../../agent/installer/rotate-log.ps1', import.meta.url);
+    const settingsHelperUrl = new URL('../win/agent-settings.ps1', import.meta.url);
+    expect(existsSync(rotateUrl)).toBe(true);
+    expect(agentStart).toContain('rotate-log.ps1');
+    expect(setup).toMatch(/AgentRotateLog[\s\S]*rotate-log\.ps1/);
+    expect(agentSettings.Logging.LogLevel['System.Net.Http.HttpClient']).toBe('Warning');
+    if (!existsSync(rotateUrl)) return;
+
+    const dir = mkdtempSync(path.join(tmpdir(), 'exped-agent-log-'));
+    const logPath = path.join(dir, 'agent.log');
+    const settingsPath = path.join(dir, 'appsettings.json');
+    writeFileSync(logPath, 'a'.repeat(128));
+    writeFileSync(`${logPath}.1`, 'backup-anterior');
+    writeFileSync(settingsPath, JSON.stringify({ Agent: { SyncNowPort: 5005 } }));
+    try {
+      const result = spawnSync('pwsh', [
+        '-NoLogo', '-NoProfile', '-File', fileURLToPath(rotateUrl),
+        '-Path', logPath, '-MaxBytes', '64', '-Backups', '2',
+      ], { encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(existsSync(logPath)).toBe(false);
+      expect(readFileSync(`${logPath}.1`, 'utf8')).toBe('a'.repeat(128));
+      expect(readFileSync(`${logPath}.2`, 'utf8')).toBe('backup-anterior');
+
+      const update = spawnSync('pwsh', [
+        '-NoLogo', '-NoProfile', '-Command',
+        `. '${fileURLToPath(settingsHelperUrl)}'; Set-ExpedAgentSettings ` +
+          `-SettingsPath '${settingsPath}' -SyncNowPort 5005`,
+      ], { encoding: 'utf8' });
+      expect(update.status, update.stderr || update.stdout).toBe(0);
+      const installedSettings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      expect(installedSettings.Logging.LogLevel['System.Net.Http.HttpClient']).toBe('Warning');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserva appsettings no instalador standalone e aplica logging atomicamente', () => {
+    const ensureUrl = new URL('../../agent/installer/ensure-log-settings.ps1', import.meta.url);
+    expect(existsSync(ensureUrl)).toBe(true);
+    expect(standaloneAgent).toMatch(/publish\\\*[^\r\n]*Excludes:\s*"appsettings\.json"/i);
+    expect(standaloneAgent).toMatch(/publish\\appsettings\.json[^\r\n]*onlyifdoesntexist/i);
+    expect(standaloneAgent).toContain('ensure-log-settings.ps1');
+    expect(agentStart).toContain('ensure-log-settings.ps1');
+    expect(setup).toMatch(/AgentEnsureLogSettings[\s\S]*ensure-log-settings\.ps1/);
+    if (!existsSync(ensureUrl)) return;
+
+    const dir = mkdtempSync(path.join(tmpdir(), 'exped-agent-settings-'));
+    const settingsPath = path.join(dir, 'appsettings.json');
+    const original = {
+      Agent: {
+        DeviceToken: 'token-deve-permanecer',
+        SqlConnectionString: 'Server=.\\HIPER;Trusted_Connection=True;',
+        SyncNowPort: 5005,
+      },
+      FeatureFlag: { Preserve: true },
+    };
+    writeFileSync(settingsPath, JSON.stringify(original));
+    try {
+      const result = spawnSync('pwsh', [
+        '-NoLogo', '-NoProfile', '-File', fileURLToPath(ensureUrl),
+        '-SettingsPath', settingsPath,
+      ], { encoding: 'utf8' });
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      const updated = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      expect(updated.Agent).toEqual(original.Agent);
+      expect(updated.FeatureFlag).toEqual(original.FeatureFlag);
+      expect(updated.Logging.LogLevel['System.Net.Http.HttpClient']).toBe('Warning');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'start.cmd continua iniciando o Agent quando a rotacao falha',
+    () => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'exped-agent-start-failure-'));
+      const marker = path.join(dir, 'started.txt');
+      const startPath = path.join(dir, 'start.cmd');
+      const testStart = agentStart.replace(
+        /^"%~dp0ExpedAgent\.exe".*$/m,
+        `echo STARTED>"${marker}"`,
+      );
+      writeFileSync(startPath, testStart);
+      writeFileSync(path.join(dir, 'ensure-log-settings.ps1'), 'exit 0');
+      writeFileSync(path.join(dir, 'rotate-log.ps1'), 'exit 9');
+      try {
+        const result = spawnSync('cmd.exe', ['/d', '/c', startPath], { encoding: 'utf8' });
+        expect(result.status, result.stderr || result.stdout).toBe(0);
+        expect(readFileSync(marker, 'utf8').trim()).toBe('STARTED');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

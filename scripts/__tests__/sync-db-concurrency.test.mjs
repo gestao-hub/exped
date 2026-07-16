@@ -4,12 +4,13 @@ import { describe, expect, it } from 'vitest';
 const dbUrl = process.env.SYNC_TEST_DB_URL;
 const describeWithDb = dbUrl ? describe : describe.skip;
 let makePsqlDb = null;
+let syncOnce = null;
 let localDbConfig = null;
 
 if (dbUrl) {
   const parsed = new URL(dbUrl);
   process.env.PGPASSWORD = decodeURIComponent(parsed.password);
-  ({ makePsqlDb } = await import('../../hub/sync.mjs'));
+  ({ makePsqlDb, syncOnce } = await import('../../hub/sync.mjs'));
   localDbConfig = {
     ports: { pg: Number(parsed.port || 5432) },
     paths: {
@@ -67,6 +68,112 @@ async function waitForOutput(process, marker, timeoutMs = 5_000) {
 }
 
 describeWithDb('sync_merge_upsert com conexoes PostgreSQL concorrentes', () => {
+  it('reverte pagina de pull invalida e usa fallback sem avancar o cursor', async () => {
+    const empresaId = '92000000-0000-0000-0000-000000000091';
+    const firstId = '92000000-0000-0000-0000-000000000092';
+    const secondId = '92000000-0000-0000-0000-000000000093';
+    const initialAt = '2026-07-14T09:00:00.000Z';
+    const initialPk = '92000000-0000-0000-0000-000000000090';
+    const nextAt = '2026-07-14T10:00:00.000Z';
+    const sharedDocument = '52998247000100';
+    const db = makePsqlDb(localDbConfig);
+    await db.ensureCursorTable();
+    const rows = [
+      {
+        id: firstId,
+        empresa_id: empresaId,
+        nome: 'Cliente valido do lote',
+        cnpj_cpf: sharedDocument,
+        updated_at: nextAt,
+        field_updated_at: { nome: nextAt, cnpj_cpf: nextAt },
+        deleted_at: null,
+      },
+      {
+        id: secondId,
+        empresa_id: empresaId,
+        nome: 'Cliente conflitante do lote',
+        cnpj_cpf: sharedDocument,
+        updated_at: nextAt,
+        field_updated_at: { nome: nextAt, cnpj_cpf: nextAt },
+        deleted_at: null,
+      },
+    ];
+
+    await runPsql(`
+      begin;
+      set local exped.sync = 'on';
+      delete from public.clientes where id in ('${firstId}', '${secondId}');
+      delete from public.empresas where id = '${empresaId}';
+      insert into public.empresas (id, nome, slug)
+      values ('${empresaId}', 'Pull atomico', 'pull-atomico');
+      insert into public._sync_cursors (table_name, pull_at, pull_pk, push_at, push_pk)
+      values ('clientes', '${initialAt}', '${initialPk}', '2099-01-01T00:00:00Z', '')
+      on conflict (table_name) do update set
+        pull_at = excluded.pull_at,
+        pull_pk = excluded.pull_pk,
+        push_at = excluded.push_at,
+        push_pk = excluded.push_pk;
+      commit;
+    `);
+
+    try {
+      await expect(db.applyPulledPage(
+        'clientes',
+        'id',
+        rows,
+        { pull_at: nextAt, pull_pk: secondId },
+      )).rejects.toThrow();
+
+      const afterBatch = JSON.parse(await runPsql(`
+        select json_build_object(
+          'first_exists', exists(select 1 from public.clientes where id = '${firstId}'),
+          'second_exists', exists(select 1 from public.clientes where id = '${secondId}'),
+          'pull_at', to_char(pull_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'pull_pk', pull_pk
+        )::text from public._sync_cursors where table_name = 'clientes';
+      `));
+      expect(afterBatch).toEqual({
+        first_exists: false,
+        second_exists: false,
+        pull_at: initialAt,
+        pull_pk: initialPk,
+      });
+
+      const result = await syncOnce({
+        db,
+        apiBase: 'https://sync.invalid',
+        deviceToken: 'test-token',
+        pushFn: async () => ({ tables: {} }),
+        pullFn: async () => ({
+          tables: { clientes: rows },
+          nextCursors: { clientes: nextAt, 'clientes.__pk': secondId },
+        }),
+      });
+      expect(result.ok).toBe(false);
+
+      const afterFallback = JSON.parse(await runPsql(`
+        select json_build_object(
+          'first_exists', exists(select 1 from public.clientes where id = '${firstId}'),
+          'second_exists', exists(select 1 from public.clientes where id = '${secondId}'),
+          'pull_at', to_char(pull_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+          'pull_pk', pull_pk
+        )::text from public._sync_cursors where table_name = 'clientes';
+      `));
+      expect(afterFallback).toEqual({
+        first_exists: true,
+        second_exists: false,
+        pull_at: initialAt,
+        pull_pk: initialPk,
+      });
+    } finally {
+      await runPsql(`
+        delete from public.clientes where id in ('${firstId}', '${secondId}');
+        delete from public._sync_cursors where table_name = 'clientes';
+        delete from public.empresas where id = '${empresaId}';
+      `);
+    }
+  }, 20_000);
+
   it('serializa a mesma PK e preserva campos editados por dois hubs', async () => {
     const empresaId = '92000000-0000-0000-0000-000000000001';
     const clienteId = '92000000-0000-0000-0000-000000000011';

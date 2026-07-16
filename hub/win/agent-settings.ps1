@@ -201,6 +201,15 @@ function Set-ExpedAgentSettings {
     $settings = Get-Content -Raw -LiteralPath $SettingsPath | ConvertFrom-Json
     if (-not $settings.Agent) { throw "appsettings.json do ExpedAgent sem o no Agent: $SettingsPath" }
     $settings.Agent | Add-Member -NotePropertyName SyncNowPort -NotePropertyValue $SyncNowPort -Force
+    if (-not $settings.Logging) {
+        $settings | Add-Member -NotePropertyName Logging -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    if (-not $settings.Logging.LogLevel) {
+        $settings.Logging | Add-Member -NotePropertyName LogLevel `
+            -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    $settings.Logging.LogLevel | Add-Member `
+        -NotePropertyName 'System.Net.Http.HttpClient' -NotePropertyValue 'Warning' -Force
     if ($UpdateCredentials) {
         if (-not $ApiBaseUrl -or -not $DeviceToken) {
             throw 'ApiBaseUrl e DeviceToken sao obrigatorios ao atualizar credenciais do agente'
