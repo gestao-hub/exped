@@ -50,6 +50,8 @@
 #define AgentPublish "..\..\agent\installer\publish"
 ; start.cmd do agente (wrapper que aloca console e redireciona log).
 #define AgentStartCmd "..\..\agent\installer\start.cmd"
+#define AgentRotateLog "..\..\agent\installer\rotate-log.ps1"
+#define AgentEnsureLogSettings "..\..\agent\installer\ensure-log-settings.ps1"
 ; URL padrao da nuvem (usada como fallback se o operador nao informar outra no modo manual).
 #define CloudApiDefault "https://app-exped.vercel.app"
 
@@ -150,6 +152,8 @@ Source: "{#Payload}\config.json";           DestDir: "{app}";       Flags: onlyi
 Source: "{#AgentPublish}\*"; DestDir: "{app}\agent-stage"; Flags: recursesubdirs ignoreversion
 ; start.cmd: wrapper que aloca console (ConsoleLifetime) e redireciona o log.
 Source: "{#AgentStartCmd}";  DestDir: "{app}\agent-stage"; Flags: ignoreversion
+Source: "{#AgentRotateLog}";  DestDir: "{app}\agent-stage"; Flags: ignoreversion
+Source: "{#AgentEnsureLogSettings}"; DestDir: "{app}\agent-stage"; Flags: ignoreversion
 
 ; Deve ser a ultima entrada. Falhas no callback ainda pertencem a fase [Files],
 ; permitindo que o Inno reverta arquivos e metadados do produto.

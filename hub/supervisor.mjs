@@ -1,5 +1,36 @@
 import { spawn } from 'node:child_process';
-import { closeSync, openSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
+
+export const DEFAULT_LOG_MAX_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_LOG_BACKUPS = 2;
+
+export function rotateLogFileSync(
+  logPath,
+  { maxBytes = DEFAULT_LOG_MAX_BYTES, backups = DEFAULT_LOG_BACKUPS } = {},
+) {
+  if (!logPath || !Number.isSafeInteger(maxBytes) || maxBytes < 1) return false;
+  if (!Number.isSafeInteger(backups) || backups < 1) return false;
+
+  try {
+    if (!existsSync(logPath) || statSync(logPath).size < maxBytes) return false;
+    rmSync(`${logPath}.${backups}`, { force: true });
+    for (let index = backups - 1; index >= 1; index -= 1) {
+      const source = `${logPath}.${index}`;
+      if (existsSync(source)) renameSync(source, `${logPath}.${index + 1}`);
+    }
+    renameSync(logPath, `${logPath}.1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Supervisiona um processo filho: inicia, vigia e reinicia (com backoff) se
@@ -18,6 +49,9 @@ export class Supervisor {
     backoffMs = 1000,
     stopTimeoutMs = 5000,
     forceKillTimeoutMs = 5000,
+    logMaxBytes = DEFAULT_LOG_MAX_BYTES,
+    logBackups = DEFAULT_LOG_BACKUPS,
+    logRotateImpl = rotateLogFileSync,
     spawnImpl = spawn,
   }) {
     Object.assign(this, {
@@ -31,6 +65,9 @@ export class Supervisor {
       backoffMs,
       stopTimeoutMs,
       forceKillTimeoutMs,
+      logMaxBytes,
+      logBackups,
+      logRotateImpl,
     });
     this.spawnImpl = spawnImpl;
     this.restarts = 0;
@@ -50,6 +87,16 @@ export class Supervisor {
   _spawn() {
     // Para stdio o child_process exige um fd (não um WriteStream ainda não
     // aberto). Abrimos o arquivo de log em modo append e passamos o fd.
+    if (this.logPath) {
+      try {
+        this.logRotateImpl(this.logPath, {
+          maxBytes: this.logMaxBytes,
+          backups: this.logBackups,
+        });
+      } catch {
+        // Retencao e best-effort; nunca impede o processo supervisionado.
+      }
+    }
     const out = this.logPath ? openSync(this.logPath, 'a') : 'inherit';
     let child;
     try {

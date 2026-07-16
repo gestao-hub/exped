@@ -17,6 +17,7 @@ import http from 'node:http';
 
 const PORT = Number(process.env.GATEWAY_PORT || 54320);
 const STORAGE_PORT = Number(process.env.STORAGE_PORT || 5402);
+const ACCESS_LOG_ENABLED = process.env.GATEWAY_ACCESS_LOG === '1';
 
 const TARGETS = [
   { prefix: '/auth/v1', host: '127.0.0.1', port: 9999, name: 'gotrue' },
@@ -62,12 +63,17 @@ const server = http.createServer((req, res) => {
   // Repassa todos os headers, ajustando Host pro alvo.
   const headers = { ...req.headers, host: `${target.host}:${target.port}` };
 
-  console.log(`${req.method} ${url} -> ${target.name} ${target.host}:${target.port}${downstreamPath}`);
-
   const proxyReq = http.request(
     { host: target.host, port: target.port, method: req.method, path: downstreamPath, headers },
     (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      const status = proxyRes.statusCode || 502;
+      if (ACCESS_LOG_ENABLED || status >= 400) {
+        const line = `${req.method} ${url} -> ${target.name} ` +
+          `${target.host}:${target.port}${downstreamPath} <- ${status}`;
+        if (status >= 500) console.error(line);
+        else console.log(line);
+      }
+      res.writeHead(status, proxyRes.headers);
       proxyRes.pipe(res);
     },
   );

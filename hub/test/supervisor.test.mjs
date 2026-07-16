@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Supervisor } from '../supervisor.mjs';
@@ -23,6 +29,56 @@ async function forceCleanup(child) {
 }
 
 describe('Supervisor', () => {
+  it('rotaciona o log acima do limite antes de iniciar o processo', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'exped-supervisor-log-'));
+    const logPath = path.join(dir, 'gateway.log');
+    writeFileSync(logPath, 'x'.repeat(128));
+    writeFileSync(`${logPath}.1`, 'backup-anterior');
+
+    const sup = new Supervisor({
+      name: 'log-rotation',
+      cmd: process.execPath,
+      args: ['-e', "process.stdout.write('log-novo')"],
+      logPath,
+      logMaxBytes: 64,
+      logBackups: 2,
+      maxRestarts: 0,
+    }).start();
+
+    try {
+      await waitUntil(() => sup.child === null);
+      expect(readFileSync(logPath, 'utf8')).toBe('log-novo');
+      expect(readFileSync(`${logPath}.1`, 'utf8')).toBe('x'.repeat(128));
+      expect(readFileSync(`${logPath}.2`, 'utf8')).toBe('backup-anterior');
+    } finally {
+      await sup.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('inicia o processo mesmo quando a rotacao de log lanca excecao', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'exped-supervisor-log-failure-'));
+    const logPath = path.join(dir, 'app.log');
+    const logRotateImpl = vi.fn(() => { throw new Error('falha injetada'); });
+    const sup = new Supervisor({
+      name: 'log-rotation-failure',
+      cmd: process.execPath,
+      args: ['-e', "process.stdout.write('processo-iniciado')"],
+      logPath,
+      logRotateImpl,
+      maxRestarts: 0,
+    }).start();
+
+    try {
+      await waitUntil(() => sup.child === null);
+      expect(logRotateImpl).toHaveBeenCalledOnce();
+      expect(readFileSync(logPath, 'utf8')).toBe('processo-iniciado');
+    } finally {
+      await sup.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reinicia um processo que sai, respeitando maxRestarts', async () => {
     const sup = new Supervisor({ name: 'eco', cmd: process.execPath,
       args: ['-e', 'process.exit(1)'], maxRestarts: 2, backoffMs: 50 });

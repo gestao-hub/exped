@@ -23,8 +23,11 @@ UninstallDisplayName=Exped Agent
 
 [Files]
 ; Conteúdo do publish (self-contained — máquina final não precisa de runtime).
-Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "publish\*"; Excludes: "appsettings.json"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "publish\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "start.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "rotate-log.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "ensure-log-settings.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Code]
 // Cria o .vbs na pasta Startup do usuário, apontando pro start.cmd instalado.

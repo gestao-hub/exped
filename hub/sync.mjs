@@ -22,6 +22,7 @@
  *   countChanged(table, pk, { at, pk }) -> exact remaining row count
  *   upsert(table, pk, row)
  *   applyCanonicalPage(table, pk, rows, cursor) -> upserts + cursor atômicos
+ *   applyPulledPage(table, pk, rows, cursor)    -> pull + cursor atômicos
  * Nos testes usamos um fake in-memory; no hub real, `makePsqlDb(cfg)` fala com o
  * Postgres local via `psql` (MESMO padrão do bootstrap.mjs).
  */
@@ -819,26 +820,48 @@ async function runSyncOnce({
           if (failedPullTables.has(t.name)) continue;
           const rows = pulled.tables[t.name];
           if (!rows || rows.length === 0) continue;
+          const cursorPkKey = pullCursorPkKey(t.name);
+          const next = nextPullCursor(
+            pulled.nextCursors,
+            t.name,
+            rows,
+            cursorsReq[t.name],
+          );
+
+          let batchApplied = false;
+          if (TWO_WAY_NAMES.has(t.name) && typeof db.applyPulledPage === 'function') {
+            try {
+              await db.applyPulledPage(t.name, t.pk, rows, {
+                pull_at: next.at,
+                pull_pk: next.pk,
+              });
+              batchApplied = true;
+            } catch {
+              logger.info(`sync pull batch ${t.name}: fallback linha a linha`);
+            }
+          }
+
           // Resiliência: aplica LINHA-A-LINHA. Uma linha que falha (ex.: FK de uma
           // linha-pai ainda não aplicada, ou dado inesperado) é LOGADA com a PK e
-          // PULADA — não derruba o resto da tabela nem as tabelas dependentes. Antes,
-          // um único erro abortava o lote inteiro (clientes 1/6 → pedidos 0 por FK).
+          // PULADA quando a página atômica não está disponível ou falha inteira.
           let skipped = 0;
           let tableError = null;
-          for (const row of rows) {
-            try {
-              // Upsert por PK (sobrescrita pra tabelas down — read-only no hub; merge
-              // já foi resolvido na nuvem pras two-way). Linhas com deleted_at aplicam
-              // soft-delete (é só um upsert da linha já marcada — estado vem da nuvem).
-              await db.upsert(t.name, t.pk, row);
-              if (t.name === 'profiles') {
-                await db.markCanonicalProfileApplied(row.id);
+          if (!batchApplied) {
+            for (const row of rows) {
+              try {
+                // Upsert por PK (sobrescrita pra tabelas down — read-only no hub; merge
+                // já foi resolvido na nuvem pras two-way). Linhas com deleted_at aplicam
+                // soft-delete (é só um upsert da linha já marcada — estado vem da nuvem).
+                await db.upsert(t.name, t.pk, row);
+                if (t.name === 'profiles') {
+                  await db.markCanonicalProfileApplied(row.id);
+                }
+              } catch (e) {
+                skipped++;
+                tableError ??= e;
+                const pk = Array.isArray(t.pk) ? t.pk.map((k) => row[k]).join('/') : row[t.pk];
+                logger.error(`sync pull apply ${t.name} pk=${pk}: ${e?.message} — linha pulada`);
               }
-            } catch (e) {
-              skipped++;
-              tableError ??= e;
-              const pk = Array.isArray(t.pk) ? t.pk.map((k) => row[k]).join('/') : row[t.pk];
-              logger.error(`sync pull apply ${t.name} pk=${pk}: ${e?.message} — linha pulada`);
             }
           }
           if (skipped > 0) {
@@ -850,17 +873,12 @@ async function runSyncOnce({
           }
           try {
             // A página só é confirmada quando todas as linhas da tabela aplicaram.
-            // Linhas já gravadas antes de uma falha são idempotentemente repetidas.
-            const cursorPkKey = pullCursorPkKey(t.name);
-            const next = nextPullCursor(
-              pulled.nextCursors,
-              t.name,
-              rows,
-              cursorsReq[t.name],
-            );
+            // No caminho em lote, dados e cursor já foram gravados na mesma transação.
             cursorsReq[t.name] = next.at;
             cursorsReq[cursorPkKey] = next.pk;
-            await db.setCursor(t.name, { pull_at: next.at, pull_pk: next.pk });
+            if (!batchApplied) {
+              await db.setCursor(t.name, { pull_at: next.at, pull_pk: next.pk });
+            }
             // Lote cheio → provavelmente tem mais desta tabela; pagina de novo.
             if (rows.length >= SYNC_LIMIT) hasMore = true;
           } catch (e) {
@@ -1344,6 +1362,24 @@ export function makePsqlDb(cfg) {
         ...aliasTombstones,
         ...rows.map((row) => rowUpsertStatement(table, pk, row)),
         ...aliasRepoints,
+        cursorStatement,
+      ];
+      await psqlSyncWrite(cfg, statements.join(';\n'));
+    },
+
+    async applyPulledPage(table, pk, rows, cursor) {
+      assertTwoWaySource(table, pk);
+      if (
+        !Array.isArray(rows) ||
+        rows.length === 0 ||
+        timestampMicros(cursor?.pull_at) == null ||
+        typeof cursor?.pull_pk !== 'string'
+      ) {
+        throw new Error(`pagina de pull invalida: ${table}`);
+      }
+      const cursorStatement = cursorUpsertStatement(table, cursor);
+      const statements = [
+        ...rows.map((row) => rowUpsertStatement(table, pk, row)),
         cursorStatement,
       ];
       await psqlSyncWrite(cfg, statements.join(';\n'));
