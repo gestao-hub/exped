@@ -79,15 +79,6 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
-      - name: Install pinned Info-ZIP
-        shell: powershell
-        run: |
-          choco install zip --version=3.0.0.20251001 --yes --no-progress --force
-          if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar Info-ZIP: $LASTEXITCODE" }
-          $zipCommand = Join-Path $env:ChocolateyInstall 'bin\zip.exe'
-          if (!(Test-Path -LiteralPath $zipCommand)) { throw "Info-ZIP ausente: $zipCommand" }
-          "EXPED_ZIP_COMMAND=$zipCommand" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Test release contracts on Windows
         run: npx vitest run scripts/__tests__/release-hub.test.mjs scripts/__tests__/ci-workflow.test.mjs hub/test/windows-installer-transaction.test.mjs hub/test/updater.test.mjs hub/test/force-update.test.mjs
 

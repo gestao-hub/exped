@@ -79,14 +79,6 @@ jobs:
       - name: Typecheck source
         working-directory: source
         run: npm run typecheck
-      - name: Install pinned Info-ZIP
-        shell: powershell
-        run: |
-          choco install zip --version=3.0.0.20251001 --yes --no-progress --force
-          if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar Info-ZIP: $LASTEXITCODE" }
-          $zipCommand = Join-Path $env:ChocolateyInstall 'bin\zip.exe'
-          if (!(Test-Path -LiteralPath $zipCommand)) { throw "Info-ZIP ausente: $zipCommand" }
-          "EXPED_ZIP_COMMAND=$zipCommand" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test source
         working-directory: source
         run: npm run test
@@ -133,14 +125,6 @@ jobs:
         with:
           name: hub-stage-${{ needs.build.outputs.source_sha }}
           path: source
-      - name: Install pinned Info-ZIP
-        shell: powershell
-        run: |
-          choco install zip --version=3.0.0.20251001 --yes --no-progress --force
-          if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar Info-ZIP: $LASTEXITCODE" }
-          $zipCommand = Join-Path $env:ChocolateyInstall 'bin\zip.exe'
-          if (!(Test-Path -LiteralPath $zipCommand)) { throw "Info-ZIP ausente: $zipCommand" }
-          "EXPED_ZIP_COMMAND=$zipCommand" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Stage release ZIP
         shell: powershell
         working-directory: tooling
@@ -151,9 +135,6 @@ jobs:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           SUPABASE_RELEASE_KEY: ${{ secrets.HUB_STAGE_SUPABASE_RELEASE_KEY }}
         run: |
-          if (!(Test-Path -LiteralPath $env:EXPED_ZIP_COMMAND)) {
-            throw "Info-ZIP configurado esta ausente: $env:EXPED_ZIP_COMMAND"
-          }
           node scripts/release-hub.mjs stage $env:RELEASE_VERSION
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve approved release artifact
