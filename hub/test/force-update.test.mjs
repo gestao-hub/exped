@@ -77,15 +77,18 @@ describe('force-update service restart no Windows', () => {
     expect(calls).toHaveLength(1);
     const [file, args, options] = calls[0];
     expect(file).toBe('powershell.exe');
-    expect(args.slice(-2)).toEqual(['--', 'ExpedHub']);
+    expect(args).not.toContain('--');
     const command = args[args.indexOf('-Command') + 1];
-    expect(command).toMatch(/&\s*\{\s*param\(\[string\]\$name\)/);
+    expect(command).toContain('$env:EXPED_WINDOWS_SERVICE_NAME');
     expect(command).toContain('Stop-Service');
     expect(command).toContain("WaitForStatus('Stopped'");
     expect(command).toContain('Start-Service');
     expect(command).toContain("WaitForStatus('Running'");
     expect(command).not.toContain('ExpedHub');
-    expect(options).toEqual({ stdio: 'inherit' });
+    expect(options).toMatchObject({
+      stdio: 'inherit',
+      env: { EXPED_WINDOWS_SERVICE_NAME: 'ExpedHub' },
+    });
 
     const encoded = Buffer.from(command, 'utf16le').toString('base64');
     const parsed = spawnSync('pwsh', [
@@ -102,14 +105,16 @@ describe('force-update service restart no Windows', () => {
     });
     expect(parsed.status, parsed.stderr || parsed.stdout).toBe(0);
 
-    const argumentProbe = spawnSync('pwsh', [
+    const powershell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
+    const argumentProbe = spawnSync(powershell, [
       '-NoLogo',
       '-NoProfile',
       '-Command',
-      '& { param([string]$name) $name }',
-      '--',
-      'ExpedHub',
-    ], { encoding: 'utf8' });
+      '$env:EXPED_WINDOWS_SERVICE_NAME',
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, EXPED_WINDOWS_SERVICE_NAME: 'ExpedHub' },
+    });
     expect(argumentProbe.status, argumentProbe.stderr).toBe(0);
     expect(argumentProbe.stdout.trim()).toBe('ExpedHub');
   }, 30_000);
