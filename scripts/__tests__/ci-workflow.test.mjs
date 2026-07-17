@@ -35,6 +35,11 @@ describe('CI do banco e supply chain', () => {
       'dotnet test agent/ExpedAgent.Tests/ExpedAgent.Tests.csproj --configuration Release',
     );
     expect(workflow).toContain('Test release contracts on Windows');
+    expect(workflow).toMatch(
+      /name: Install pinned Info-ZIP[\s\S]*choco install zip --version=3\.0\.0\.20251001 --yes --no-progress/,
+    );
+    expect(workflow).toContain('EXPED_ZIP_COMMAND=');
+    expect(workflow).toContain('$env:GITHUB_ENV');
     expect(workflow).toContain(
       'npx vitest run scripts/__tests__/release-hub.test.mjs scripts/__tests__/ci-workflow.test.mjs hub/test/windows-installer-transaction.test.mjs hub/test/updater.test.mjs',
     );

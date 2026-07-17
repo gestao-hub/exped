@@ -421,6 +421,41 @@ function assertReleaseBoundary(out) {
   }
 }
 
+export function assertStandaloneRoutesComplete(releaseDir) {
+  const serverDir = path.join(releaseDir, '.next', 'server');
+  const manifestPath = path.join(serverDir, 'app-paths-manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error('app-paths-manifest.json ausente no standalone');
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    throw new Error('app-paths-manifest.json invalido no standalone');
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    throw new Error('app-paths-manifest.json invalido no standalone');
+  }
+  if (Object.keys(manifest).length === 0) {
+    throw new Error('app-paths-manifest.json sem rotas no standalone');
+  }
+
+  for (const [route, compiledPath] of Object.entries(manifest)) {
+    if (typeof compiledPath !== 'string' || compiledPath.length === 0) {
+      throw new Error(`caminho compilado invalido no manifesto: ${route}`);
+    }
+    const absolute = path.resolve(serverDir, ...compiledPath.split('/'));
+    const relative = path.relative(serverDir, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`caminho compilado fora do standalone: ${route}`);
+    }
+    if (!existsSync(absolute) || !statSync(absolute).isFile()) {
+      throw new Error(`rota compilada ausente: ${route} -> ${compiledPath}`);
+    }
+  }
+}
+
 function materializeInternalSymlinks(root, prefix = '') {
   const entries = readdirSync(path.join(root, prefix), { withFileTypes: true });
   for (const entry of entries) {
@@ -482,10 +517,47 @@ export function montarRelease(versao, { root = ROOT } = {}) {
 
   materializeInternalSymlinks(out);
   assertReleaseBoundary(out);
+  assertStandaloneRoutesComplete(out);
   return out;
 }
 
-function createDeterministicZip(releaseDir, zipPath) {
+export function deterministicZipArgs(portableZipPath) {
+  return ['-X', '-q', '-nw', portableZipPath, '-@'];
+}
+
+export function zipCommand(env = process.env) {
+  const configured = typeof env.EXPED_ZIP_COMMAND === 'string'
+    ? env.EXPED_ZIP_COMMAND.trim()
+    : '';
+  return configured || 'zip';
+}
+
+export function assertZipContainsReleaseFiles(releaseDir, zipPath) {
+  const expected = relativeFiles(releaseDir);
+  const listing = execFileSync(zipCommand(), ['-sf', zipPath], { encoding: 'utf8' });
+  const archivedEntries = listing
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('  '))
+    .map((line) => line.slice(2).trimEnd().replaceAll('\\', '/'));
+  const archived = new Set(archivedEntries);
+
+  if (archived.size !== archivedEntries.length) {
+    throw new Error('ZIP contem caminhos duplicados');
+  }
+  for (const relative of expected) {
+    if (!archived.has(relative)) {
+      throw new Error(`ZIP omitiu arquivo do release: ${relative}`);
+    }
+  }
+  const expectedSet = new Set(expected);
+  for (const relative of archived) {
+    if (!expectedSet.has(relative)) {
+      throw new Error(`ZIP contem arquivo inesperado: ${relative}`);
+    }
+  }
+}
+
+export function createDeterministicZip(releaseDir, zipPath) {
   const files = relativeFiles(releaseDir);
   if (files.length === 0) throw new Error('pacote do app esta vazio');
 
@@ -495,11 +567,12 @@ function createDeterministicZip(releaseDir, zipPath) {
 
   rmSync(zipPath, { force: true });
   const portableZipPath = path.relative(releaseDir, zipPath).split(path.sep).join('/');
-  execFileSync('zip', ['-X', '-q', portableZipPath, '-@'], {
+  execFileSync(zipCommand(), deterministicZipArgs(portableZipPath), {
     cwd: releaseDir,
     input: `${files.join('\n')}\n`,
     stdio: ['pipe', 'inherit', 'inherit'],
   });
+  assertZipContainsReleaseFiles(releaseDir, zipPath);
 }
 
 function redactDetail(value, secrets = []) {
