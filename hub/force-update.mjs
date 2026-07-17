@@ -10,8 +10,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const RESTART_WINDOWS_SERVICE = String.raw`& {
-param([string]$name)
 $ErrorActionPreference = 'Stop'
+$name = $env:EXPED_WINDOWS_SERVICE_NAME
+if ([string]::IsNullOrWhiteSpace($name)) {
+  throw 'Nome do servico Windows ausente'
+}
 $service = Get-Service -Name $name -ErrorAction Stop
 if ($service.Status -ne 'Stopped') {
   Stop-Service -Name $name -Force -ErrorAction Stop
@@ -35,10 +38,14 @@ export function restartWindowsService(service, run = execFileSync) {
       'Bypass',
       '-Command',
       RESTART_WINDOWS_SERVICE,
-      '--',
-      service,
     ],
-    { stdio: 'inherit' },
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        EXPED_WINDOWS_SERVICE_NAME: service.trim(),
+      },
+    },
   );
 }
 
