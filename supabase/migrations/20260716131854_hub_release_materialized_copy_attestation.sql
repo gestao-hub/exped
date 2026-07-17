@@ -6,10 +6,28 @@
 
 -- App-only releases carry migrations but not the Hub's local-stack prelude.
 -- Keep these managed Storage compatibility columns in the migration too.
-alter table storage.objects
-  add column if not exists owner_id text;
-alter table storage.objects
-  add column if not exists version text;
+-- Managed Storage already owns these columns under storage_admin; avoid even
+-- issuing ALTER there because PostgreSQL checks ownership before IF NOT EXISTS.
+do $storage_compat$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage'
+      and table_name = 'objects'
+      and column_name = 'owner_id'
+  ) then
+    execute 'alter table storage.objects add column owner_id text';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage'
+      and table_name = 'objects'
+      and column_name = 'version'
+  ) then
+    execute 'alter table storage.objects add column version text';
+  end if;
+end
+$storage_compat$;
 
 create table if not exists private.hub_release_copy_proofs (
   promotion_id uuid primary key,

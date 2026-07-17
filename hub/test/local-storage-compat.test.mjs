@@ -43,10 +43,10 @@ describe('compatibilidade do Supabase Storage local', () => {
 
   it('retoma com segurança uma tentativa parcial da migration de atestação', () => {
     expect(materializedCopy).toMatch(
-      /alter table storage\.objects[\s\S]*add column if not exists owner_id text/i,
+      /column_name = 'owner_id'[\s\S]*execute 'alter table storage\.objects add column owner_id text'/i,
     );
     expect(materializedCopy).toMatch(
-      /alter table storage\.objects[\s\S]*add column if not exists version text/i,
+      /column_name = 'version'[\s\S]*execute 'alter table storage\.objects add column version text'/i,
     );
     expect(materializedCopy).toMatch(/create table if not exists private\.hub_release_copy_proofs/i);
   });
