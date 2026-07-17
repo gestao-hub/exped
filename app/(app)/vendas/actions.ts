@@ -550,7 +550,9 @@ export async function puxarDoHiperAction(): Promise<{ ok: boolean; synced?: numb
     return {
       ok: true,
       synced,
-      message: synced > 0 ? `${synced} pedido(s) puxado(s) do Hiper.` : 'Nenhum pedido novo do Hiper agora.',
+      message: synced > 0
+        ? `${synced} pedido(s) processado(s) na sincronização com o Hiper.`
+        : 'Nenhum pedido foi processado nesta sincronização com o Hiper.',
     };
   } catch {
     return { ok: false, message: 'Não consegui falar com o agente local. Ele está rodando?' };

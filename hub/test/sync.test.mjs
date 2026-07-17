@@ -199,6 +199,21 @@ function makeMemDb() {
     async listPendingIdentityAliases() {
       return [...identityAliases.values()].filter((alias) => !alias.resolved_at);
     },
+    async listIncompleteProfileIds() {
+      const ids = new Set();
+      for (const mapping of tbl('hiper_vendedor_map').values()) {
+        const profile = tbl('profiles').get(mapping.vendedor_id);
+        if (
+          mapping.empresa_id != null &&
+          profile &&
+          profile.is_platform_admin !== true &&
+          profile.empresa_id !== mapping.empresa_id
+        ) {
+          ids.add(String(profile.id));
+        }
+      }
+      return [...ids].sort();
+    },
     async profileExists(userId) {
       return tbl('profiles').has(userId);
     },
@@ -2113,6 +2128,94 @@ describe('syncOnce — reconciliação de identidade local', () => {
     expect(pushFn).toHaveBeenCalled();
     expect(db.get('pedidos', 'pedido-cursor-legado').vendedor_id).toBe(canonicalId);
     expect(db.identityAlias(oldId)?.resolved_at).toBeTruthy();
+    expect(await db.getCursor('profiles')).toMatchObject({
+      pull_at: legacyProfileCursor,
+      pull_pk: 'profile-posterior',
+    });
+  });
+
+  it('recupera profile canônico incompleto anterior ao cursor mesmo sem alias pendente', async () => {
+    const legacyProfileCursor = '2026-07-14T11:00:00Z';
+    db.seed('auth.users', {
+      id: canonicalId,
+      email: 'eduardo@franzoni.local',
+      updated_at: '2026-07-14T10:00:00Z',
+    });
+    db.seed('profiles', {
+      id: canonicalId,
+      empresa_id: null,
+      role: 'vendedor',
+      is_platform_admin: false,
+      updated_at: '2026-07-14T10:00:00Z',
+    });
+    db.seed('hiper_vendedor_map', {
+      id: 'map-eduardo',
+      empresa_id: 'E1',
+      hiper_usuario_id: 16,
+      vendedor_id: canonicalId,
+      updated_at: '2026-07-14T10:00:00Z',
+    });
+    db.seed('pedidos', {
+      id: 'pedido-perfil-incompleto',
+      vendedor_id: canonicalId,
+      updated_at: '2026-07-14T12:00:00Z',
+    });
+    await db.setCursor('profiles', {
+      pull_at: legacyProfileCursor,
+      pull_pk: 'profile-posterior',
+    });
+    const identityProfileCursors = [];
+    const pushFn = vi.fn(async ({ rows }) => ({ tables: rows }));
+
+    const result = await syncOnce({
+      db,
+      apiBase,
+      deviceToken,
+      pullFn: async ({ cursors, identityOnly }) => {
+        if (!identityOnly) return { auth_users: [], tables: {}, nextCursors: {} };
+        identityProfileCursors.push({
+          at: cursors.profiles,
+          pk: cursors['profiles.__pk'],
+        });
+        if (cursors.profiles === legacyProfileCursor) {
+          return {
+            identityOnly: true,
+            auth_users: [],
+            tables: { profiles: [] },
+            nextCursors: {
+              profiles: legacyProfileCursor,
+              'profiles.__pk': 'profile-posterior',
+            },
+          };
+        }
+        return {
+          identityOnly: true,
+          auth_users: [],
+          tables: {
+            profiles: [{
+              id: canonicalId,
+              empresa_id: 'E1',
+              role: 'vendedor',
+              is_platform_admin: false,
+              updated_at: '2026-07-01T10:00:00Z',
+            }],
+          },
+          nextCursors: {
+            profiles: '2026-07-01T10:00:00Z',
+            'profiles.__pk': canonicalId,
+          },
+        };
+      },
+      pushFn,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(identityProfileCursors).toEqual([
+      { at: legacyProfileCursor, pk: 'profile-posterior' },
+      { at: '0001-01-01T00:00:00Z', pk: '' },
+    ]);
+    expect(db.get('profiles', canonicalId).empresa_id).toBe('E1');
+    expect(pushFn).toHaveBeenCalled();
     expect(await db.getCursor('profiles')).toMatchObject({
       pull_at: legacyProfileCursor,
       pull_pk: 'profile-posterior',

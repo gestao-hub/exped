@@ -74,4 +74,23 @@ describe('puxarDoHiperAction', () => {
     });
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
+
+  it('informa pedidos processados sem afirmar que todos são novos', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true, synced: 55 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(puxarDoHiperAction()).resolves.toEqual({
+      ok: true,
+      synced: 55,
+      message: '55 pedido(s) processado(s) na sincronização com o Hiper.',
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/vendas');
+  });
 });

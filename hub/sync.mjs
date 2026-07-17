@@ -23,6 +23,7 @@
  *   upsert(table, pk, row)
  *   applyCanonicalPage(table, pk, rows, cursor) -> upserts + cursor atômicos
  *   applyPulledPage(table, pk, rows, cursor)    -> pull + cursor atômicos
+ *   listIncompleteProfileIds()                 -> profiles divergentes do mapa Hiper
  * Nos testes usamos um fake in-memory; no hub real, `makePsqlDb(cfg)` fala com o
  * Postgres local via `psql` (MESMO padrão do bootstrap.mjs).
  */
@@ -277,23 +278,42 @@ async function runIdentityPreflight({ db, doPull }) {
     if (!page.hasMore) break;
   }
 
+  const readIncompleteProfileIds = async () => (
+    typeof db.listIncompleteProfileIds === 'function'
+      ? await db.listIncompleteProfileIds()
+      : []
+  );
   let identity = await reconcilePendingIdentityAliases(db);
-  if (identity.pending > 0) {
-    await recoverPendingCanonicalProfiles({ db, doPull });
+  let incompleteProfileIds = await readIncompleteProfileIds();
+  if (identity.pending > 0 || incompleteProfileIds.length > 0) {
+    await recoverCanonicalProfiles({
+      db,
+      doPull,
+      additionalProfileIds: incompleteProfileIds,
+    });
     identity = await reconcilePendingIdentityAliases(db);
+    incompleteProfileIds = await readIncompleteProfileIds();
   }
   if (identity.pending > 0) {
     throw new Error(`sync identity preflight: ${identity.pending} pendência(s)`);
   }
+  if (incompleteProfileIds.length > 0) {
+    throw new Error(
+      `sync identity preflight: ${incompleteProfileIds.length} profile(s) incompleto(s)`,
+    );
+  }
   return { deferredLegacyPull };
 }
 
-async function recoverPendingCanonicalProfiles({ db, doPull }) {
+async function recoverCanonicalProfiles({ db, doPull, additionalProfileIds = [] }) {
   const aliases = await db.listPendingIdentityAliases();
   const pendingIds = new Set(
-    aliases
-      .filter((alias) => !alias.resolved_at && alias.canonical_user_id != null)
-      .map((alias) => String(alias.canonical_user_id)),
+    [
+      ...aliases
+        .filter((alias) => !alias.resolved_at && alias.canonical_user_id != null)
+        .map((alias) => String(alias.canonical_user_id)),
+      ...additionalProfileIds.map(String),
+    ],
   );
   if (pendingIds.size === 0) return;
 
@@ -1449,6 +1469,19 @@ export function makePsqlDb(cfg) {
         cfg,
         `select coalesce(jsonb_agg(to_jsonb(a) order by a.created_at), '[]'::jsonb)::text ` +
           `from exped_internal.identity_aliases a where resolved_at is null`,
+      )) || [];
+    },
+
+    async listIncompleteProfileIds() {
+      return (await psqlJson(
+        cfg,
+        `select coalesce(jsonb_agg(incomplete.id order by incomplete.id), '[]'::jsonb)::text ` +
+          `from (` +
+          `select distinct p.id::text as id from public.profiles p ` +
+          `join public.hiper_vendedor_map h on h.vendedor_id = p.id ` +
+          `where not coalesce(p.is_platform_admin, false) ` +
+          `and p.empresa_id is distinct from h.empresa_id` +
+          `) incomplete`,
       )) || [];
     },
 
