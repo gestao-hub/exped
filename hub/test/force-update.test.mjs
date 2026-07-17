@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import {
+import { spawnSync } from 'node:child_process';
+import * as forceUpdate from '../force-update.mjs';
+
+const {
   currentVersionForForceUpdate,
   resolveForceUpdatePaths,
-} from '../force-update.mjs';
+} = forceUpdate;
 
 describe('force-update current version policy', () => {
   it('usa a versao real do ponteiro antes da versao baked no config', () => {
@@ -63,4 +66,51 @@ describe('force-update path policy no Windows', () => {
       pointerPath: 'D:\\ExpedLoja\\payloads\\active',
     });
   });
+});
+
+describe('force-update service restart no Windows', () => {
+  it('usa o Service Manager e aguarda stop/start em vez do restart fragil do NSSM', () => {
+    const calls = [];
+
+    forceUpdate.restartWindowsService('ExpedHub', (...args) => calls.push(args));
+
+    expect(calls).toHaveLength(1);
+    const [file, args, options] = calls[0];
+    expect(file).toBe('powershell.exe');
+    expect(args.slice(-2)).toEqual(['--', 'ExpedHub']);
+    const command = args[args.indexOf('-Command') + 1];
+    expect(command).toMatch(/&\s*\{\s*param\(\[string\]\$name\)/);
+    expect(command).toContain('Stop-Service');
+    expect(command).toContain("WaitForStatus('Stopped'");
+    expect(command).toContain('Start-Service');
+    expect(command).toContain("WaitForStatus('Running'");
+    expect(command).not.toContain('ExpedHub');
+    expect(options).toEqual({ stdio: 'inherit' });
+
+    const encoded = Buffer.from(command, 'utf16le').toString('base64');
+    const parsed = spawnSync('pwsh', [
+      '-NoLogo',
+      '-NoProfile',
+      '-Command',
+      "$source=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($env:EXPED_TEST_PS));" +
+        '$tokens=$null;$errors=$null;' +
+        '[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)|Out-Null;' +
+        'if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};exit 1}',
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, EXPED_TEST_PS: encoded },
+    });
+    expect(parsed.status, parsed.stderr || parsed.stdout).toBe(0);
+
+    const argumentProbe = spawnSync('pwsh', [
+      '-NoLogo',
+      '-NoProfile',
+      '-Command',
+      '& { param([string]$name) $name }',
+      '--',
+      'ExpedHub',
+    ], { encoding: 'utf8' });
+    expect(argumentProbe.status, argumentProbe.stderr).toBe(0);
+    expect(argumentProbe.stdout.trim()).toBe('ExpedHub');
+  }, 30_000);
 });

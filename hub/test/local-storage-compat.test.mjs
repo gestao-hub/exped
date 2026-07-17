@@ -16,6 +16,9 @@ function routine(text, name) {
 describe('compatibilidade do Supabase Storage local', () => {
   const bootstrap = source('../bootstrap.mjs');
   const prelude = source('../../scripts/local-stack/00-prelude-helpers.sql');
+  const materializedCopy = source(
+    '../../supabase/migrations/20260716131854_hub_release_materialized_copy_attestation.sql',
+  );
 
   it('reaplica o prelude local antes de toda migration pendente', () => {
     const applyPending = routine(bootstrap, 'applyPendingMigrations');
@@ -29,10 +32,22 @@ describe('compatibilidade do Supabase Storage local', () => {
 
   it('mantém o shim local compatível com as policies do Storage gerenciado', () => {
     expect(prelude).toMatch(/alter table storage\.objects[\s\S]*add column if not exists user_metadata jsonb/i);
+    expect(prelude).toMatch(/alter table storage\.objects[\s\S]*add column if not exists owner_id text/i);
+    expect(prelude).toMatch(/alter table storage\.objects[\s\S]*add column if not exists version text/i);
     expect(prelude).toMatch(/create or replace function storage\.operation\(\)/i);
     expect(prelude).toMatch(/current_setting\('storage\.operation', true\)/i);
     expect(prelude).toMatch(/create or replace function storage\.allow_only_operation\(expected_operation text\)/i);
     expect(prelude).toMatch(/raw_operation like 'storage\.%'/i);
     expect(prelude).toMatch(/coalesce\(current_operation = requested_operation, false\)/i);
+  });
+
+  it('retoma com segurança uma tentativa parcial da migration de atestação', () => {
+    expect(materializedCopy).toMatch(
+      /alter table storage\.objects[\s\S]*add column if not exists owner_id text/i,
+    );
+    expect(materializedCopy).toMatch(
+      /alter table storage\.objects[\s\S]*add column if not exists version text/i,
+    );
+    expect(materializedCopy).toMatch(/create table if not exists private\.hub_release_copy_proofs/i);
   });
 });

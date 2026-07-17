@@ -83,6 +83,10 @@ create table if not exists storage.objects (
 );
 alter table storage.objects
   add column if not exists user_metadata jsonb;
+alter table storage.objects
+  add column if not exists owner_id text;
+alter table storage.objects
+  add column if not exists version text;
 alter table storage.objects enable row level security;
 
 create or replace function storage.foldername(name text) returns text[]
