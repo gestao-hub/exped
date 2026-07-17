@@ -10,7 +10,14 @@ let localDbConfig = null;
 if (dbUrl) {
   const parsed = new URL(dbUrl);
   process.env.PGPASSWORD = decodeURIComponent(parsed.password);
-  ({ makePsqlDb, syncOnce } = await import('../../hub/sync.mjs'));
+  const previousPgtz = process.env.PGTZ;
+  process.env.PGTZ = 'America/Sao_Paulo';
+  try {
+    ({ makePsqlDb, syncOnce } = await import('../../hub/sync.mjs'));
+  } finally {
+    if (previousPgtz === undefined) delete process.env.PGTZ;
+    else process.env.PGTZ = previousPgtz;
+  }
   localDbConfig = {
     ports: { pg: Number(parsed.port || 5432) },
     paths: {
@@ -68,6 +75,49 @@ async function waitForOutput(process, marker, timeoutMs = 5_000) {
 }
 
 describeWithDb('sync_merge_upsert com conexoes PostgreSQL concorrentes', () => {
+  it('serializa timestamptz em UTC mesmo quando o processo usa America/Sao_Paulo', async () => {
+    const empresaId = '92000000-0000-0000-0000-000000000081';
+    const clienteId = '92000000-0000-0000-0000-000000000082';
+    const db = makePsqlDb(localDbConfig);
+
+    await runPsql(`
+      begin;
+      set local exped.sync = 'on';
+      insert into public.empresas (id, nome, slug)
+      values ('${empresaId}', 'UTC canonical', 'sync-utc-canonical');
+      insert into public.clientes (
+        id, empresa_id, nome, created_at, updated_at, deleted_at, field_updated_at
+      ) values (
+        '${clienteId}', '${empresaId}', 'Cliente UTC',
+        '2090-01-02T12:34:56-03:00',
+        '2090-01-05T00:00:00Z',
+        '2090-01-04T01:02:03-03:00',
+        '{"created_at":"2090-01-05T00:00:00Z","deleted_at":"2090-01-05T00:00:00Z"}'::jsonb
+      );
+      commit;
+    `);
+
+    try {
+      const rows = await db.selectChanged(
+        'clientes',
+        'id',
+        { at: '2089-01-01T00:00:00Z', pk: '' },
+        500,
+      );
+      const row = rows.find((candidate) => candidate.id === clienteId);
+
+      expect(row).toBeTruthy();
+      expect(row.created_at).toMatch(/^2090-01-02T15:34:56(?:\.0+)?\+00:00$/);
+      expect(row.deleted_at).toMatch(/^2090-01-04T04:02:03(?:\.0+)?\+00:00$/);
+      expect(row.updated_at).toMatch(/^2090-01-05T00:00:00(?:\.0+)?\+00:00$/);
+    } finally {
+      await runPsql(`
+        delete from public.clientes where id = '${clienteId}';
+        delete from public.empresas where id = '${empresaId}';
+      `);
+    }
+  });
+
   it('reverte pagina de pull invalida e usa fallback sem avancar o cursor', async () => {
     const empresaId = '92000000-0000-0000-0000-000000000091';
     const firstId = '92000000-0000-0000-0000-000000000092';

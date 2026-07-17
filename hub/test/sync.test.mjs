@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const psqlCapture = vi.hoisted(() => ({ commands: [], outputs: [], scripts: [] }));
+const psqlCapture = vi.hoisted(() => ({ commands: [], options: [], outputs: [], scripts: [] }));
 
 vi.mock('node:child_process', async () => {
   const { readFile } = await import('node:fs/promises');
   return {
     execFile(_command, args, _options, callback) {
+      psqlCapture.options.push(_options);
       const fileFlag = args.indexOf('-f');
       if (fileFlag < 0) {
         psqlCapture.commands.push(args);
@@ -366,6 +367,7 @@ describe('makePsqlDb — cursores keyset', () => {
 
   beforeEach(() => {
     psqlCapture.commands.length = 0;
+    psqlCapture.options.length = 0;
     psqlCapture.outputs.length = 0;
     psqlCapture.scripts.length = 0;
   });
@@ -394,6 +396,23 @@ describe('makePsqlDb — cursores keyset', () => {
     expect(sql).toContain("'2026-07-14T12:00:00.000Z'::timestamptz, 'p0499'::text");
     expect(sql).toContain('order by updated_at asc, "id"::text asc limit 500');
     expect(sql).toContain('select count(*) from public."pedidos"');
+  });
+
+  it('forca UTC na sessao psql para timestamps canonicos no push', async () => {
+    psqlCapture.outputs.push('[]');
+
+    await makePsqlDb(cfg).selectChanged(
+      'clientes',
+      'id',
+      { at: '2026-07-14T12:00:00.000Z', pk: '' },
+      500,
+    );
+
+    expect(psqlCapture.options).toHaveLength(1);
+    expect(psqlCapture.options[0].env).toMatchObject({
+      PGCLIENTENCODING: 'UTF8',
+      PGTZ: 'UTC',
+    });
   });
 
   it('preserva microssegundos de pull_at e push_at no round-trip keyset', async () => {

@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const POWERSHELL_TEST_TIMEOUT_MS = 30_000;
+
 function source(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 }
@@ -211,7 +213,7 @@ describe('hardening do instalador Windows', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, POWERSHELL_TEST_TIMEOUT_MS);
 
   it('preserva appsettings no instalador standalone e aplica logging atomicamente', () => {
     const ensureUrl = new URL('../../agent/installer/ensure-log-settings.ps1', import.meta.url);
@@ -247,7 +249,7 @@ describe('hardening do instalador Windows', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, POWERSHELL_TEST_TIMEOUT_MS);
 
   it.runIf(process.platform === 'win32')(
     'start.cmd continua iniciando o Agent quando a rotacao falha',
