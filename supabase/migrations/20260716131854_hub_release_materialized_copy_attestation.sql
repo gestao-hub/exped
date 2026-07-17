@@ -4,7 +4,32 @@
 -- Guard the real storage.objects write instead and bind it to a one-time
 -- promotion id plus the immutable candidate's backend ETag and size.
 
-create table private.hub_release_copy_proofs (
+-- App-only releases carry migrations but not the Hub's local-stack prelude.
+-- Keep these managed Storage compatibility columns in the migration too.
+-- Managed Storage already owns these columns under storage_admin; avoid even
+-- issuing ALTER there because PostgreSQL checks ownership before IF NOT EXISTS.
+do $storage_compat$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage'
+      and table_name = 'objects'
+      and column_name = 'owner_id'
+  ) then
+    execute 'alter table storage.objects add column owner_id text';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'storage'
+      and table_name = 'objects'
+      and column_name = 'version'
+  ) then
+    execute 'alter table storage.objects add column version text';
+  end if;
+end
+$storage_compat$;
+
+create table if not exists private.hub_release_copy_proofs (
   promotion_id uuid primary key,
   subject uuid not null,
   version text not null check (version ~ '^[0-9]+(\.[0-9]+){0,2}$'),

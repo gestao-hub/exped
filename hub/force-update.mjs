@@ -9,6 +9,39 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+const RESTART_WINDOWS_SERVICE = String.raw`& {
+param([string]$name)
+$ErrorActionPreference = 'Stop'
+$service = Get-Service -Name $name -ErrorAction Stop
+if ($service.Status -ne 'Stopped') {
+  Stop-Service -Name $name -Force -ErrorAction Stop
+  (Get-Service -Name $name).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(90))
+}
+Start-Service -Name $name -ErrorAction Stop
+(Get-Service -Name $name).WaitForStatus('Running', [TimeSpan]::FromSeconds(90))
+}
+`;
+
+export function restartWindowsService(service, run = execFileSync) {
+  if (typeof service !== 'string' || !service.trim()) {
+    throw new Error('nome do servico Windows invalido');
+  }
+  run(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      RESTART_WINDOWS_SERVICE,
+      '--',
+      service,
+    ],
+    { stdio: 'inherit' },
+  );
+}
+
 export function currentVersionForForceUpdate(
   pointerPath,
   configVersion,
@@ -63,7 +96,6 @@ async function main() {
   });
   const { configPath, root } = initialPaths;
   const service = process.env.EXPED_SERVICE_NAME || 'ExpedHub';
-  const nssm = initialPaths.nssm;
 
   const raw = JSON.parse(readFileSync(configPath, 'utf8'));
   const setIf = (key, value) => {
@@ -136,7 +168,7 @@ async function main() {
       getCurrentVersion: () => currentVersionForForceUpdate(pointerPath, cfg.version),
       forceSameVersion: true,
       restart: async () => {
-        execFileSync(nssm, ['restart', service], { stdio: 'inherit' });
+        restartWindowsService(service);
       },
       health: async (expectedVersion) => {
         const actualVersion = currentVersionForForceUpdate(pointerPath, cfg.version);
