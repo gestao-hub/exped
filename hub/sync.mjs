@@ -1034,7 +1034,13 @@ export function start({
 // --------------------------------------------------------------------------
 // PGCLIENTENCODING=UTF8: o SQL vem do Node em UTF-8; sem isso, no Windows o psql interpreta
 // os bytes pelo codepage do console (ex.: WIN1252) e corrompe acentos (vira byte UTF-8 invalido).
-const PSQL_ENV = { ...process.env, PGPASSWORD: process.env.PGPASSWORD || '', PGCLIENTENCODING: 'UTF8' };
+// PGTZ=UTC: mantem timestamptz canonico entre Postgres local e nuvem, evitando eco de sync.
+const PSQL_ENV = {
+  ...process.env,
+  PGPASSWORD: process.env.PGPASSWORD || '',
+  PGCLIENTENCODING: 'UTF8',
+  PGTZ: 'UTC',
+};
 
 // Tempo-limite de CADA chamada ao psql. Sem isso, um psql que pendura (lock, conexão
 // presa, Postgres lento) faz o execFile nunca retornar → syncOnce nunca termina →

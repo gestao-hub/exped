@@ -347,7 +347,8 @@ begin
     ExecChecked(PowerShellExe,
       PowerShellFileParams(ExpandConstant('{app}\hub\win\install-service.ps1'),
         '-Root ' + QuoteArg(ExpandConstant('{app}')) +
-        ' -ConfigPath ' + QuoteArg(ConfigFile) + ' -ManageAgent false'),
+        ' -ConfigPath ' + QuoteArg(ConfigFile) + ' -ManageAgent false' +
+        ' -TransactionDir ' + QuoteArg(HubTransactionDir)),
       ExpandConstant('{app}'), 'Registro do servico ExpedHub falhou');
     RunOrchestratorChecked('RestoreLegacyWatchdog',
       '-TransactionDir ' + QuoteArg(HubTransactionDir),

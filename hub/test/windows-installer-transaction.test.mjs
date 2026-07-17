@@ -1222,6 +1222,14 @@ describe('contratos PowerShell do instalador', () => {
     expect(innoRollback).toMatch(/AgentUrlAclRollbackDone\s*:=\s*False/i);
   });
 
+  it('encaminha a transação ao install-service no instalador exclusivo do Hub', () => {
+    const hubInstallFlow = routine(hubOnly, 'RunTransactionalInstall');
+    const hubServiceArgs = hubInstallFlow.match(
+      /PowerShellFileParams\(ExpandConstant\('\{app\}\\hub\\win\\install-service\.ps1'\),([\s\S]*?)\),\s*\r?\n\s*ExpandConstant\('\{app\}'\)/,
+    )?.[1] || '';
+    expect(hubServiceArgs).toContain('-TransactionDir');
+  });
+
   it('não inicia serviço parcialmente mutado antes do rollback externo do instalador', () => {
     const failure = install.slice(install.lastIndexOf('} catch {\n    $failure'));
     expect(failure).toMatch(/if\s*\(\$TransactionDir\)[\s\S]*rollback externo/i);
