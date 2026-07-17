@@ -21,17 +21,17 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { crc32 } from 'node:zlib';
 import { createClient } from '@supabase/supabase-js';
+import { unzipSync, zipSync } from 'fflate';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ZIP_EPOCH = new Date('1980-01-01T00:00:00.000Z');
+const ZIP_EPOCH = new Date(1980, 0, 1, 0, 0, 0);
 const STORAGE_BUCKET = 'hub-releases';
 const WINDOWS_ARTIFACT_PREFIX = 'windows';
 const WINDOWS_PLATFORM = 'win32';
@@ -421,6 +421,41 @@ function assertReleaseBoundary(out) {
   }
 }
 
+export function assertStandaloneRoutesComplete(releaseDir) {
+  const serverDir = path.join(releaseDir, '.next', 'server');
+  const manifestPath = path.join(serverDir, 'app-paths-manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error('app-paths-manifest.json ausente no standalone');
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    throw new Error('app-paths-manifest.json invalido no standalone');
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    throw new Error('app-paths-manifest.json invalido no standalone');
+  }
+  if (Object.keys(manifest).length === 0) {
+    throw new Error('app-paths-manifest.json sem rotas no standalone');
+  }
+
+  for (const [route, compiledPath] of Object.entries(manifest)) {
+    if (typeof compiledPath !== 'string' || compiledPath.length === 0) {
+      throw new Error(`caminho compilado invalido no manifesto: ${route}`);
+    }
+    const absolute = path.resolve(serverDir, ...compiledPath.split('/'));
+    const relative = path.relative(serverDir, absolute);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`caminho compilado fora do standalone: ${route}`);
+    }
+    if (!existsSync(absolute) || !statSync(absolute).isFile()) {
+      throw new Error(`rota compilada ausente: ${route} -> ${compiledPath}`);
+    }
+  }
+}
+
 function materializeInternalSymlinks(root, prefix = '') {
   const entries = readdirSync(path.join(root, prefix), { withFileTypes: true });
   for (const entry of entries) {
@@ -482,24 +517,196 @@ export function montarRelease(versao, { root = ROOT } = {}) {
 
   materializeInternalSymlinks(out);
   assertReleaseBoundary(out);
+  assertStandaloneRoutesComplete(out);
   return out;
 }
 
-function createDeterministicZip(releaseDir, zipPath) {
+export function assertZipContainsReleaseFiles(releaseDir, zipPath) {
+  const expected = relativeFiles(releaseDir);
+  const zip = readFileSync(zipPath);
+  let centralEntries;
+  let extracted;
+  try {
+    centralEntries = readZipCentralDirectory(zip);
+    extracted = unzipSync(zip);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'ZIP contem caminhos duplicados') {
+      throw error;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`ZIP final invalido: ${detail}`);
+  }
+
+  const archivedEntries = centralEntries.map(({ name }) => name);
+  const archived = new Set(archivedEntries);
+  const extractedEntries = Object.entries(extracted).map(([name, data]) => [
+    normalizeZipPath(name),
+    data,
+  ]);
+  const extractedByName = new Map(extractedEntries);
+  if (
+    archived.size !== archivedEntries.length
+    || extractedByName.size !== extractedEntries.length
+  ) {
+    throw new Error('ZIP contem caminhos duplicados');
+  }
+  if (archived.size !== extractedByName.size) {
+    throw new Error('ZIP final invalido: diretorio central diverge do conteudo extraido');
+  }
+  for (const entry of centralEntries) {
+    const data = extractedByName.get(entry.name);
+    if (!data) {
+      throw new Error(`ZIP final invalido: entrada nao extraida: ${entry.name}`);
+    }
+    if (data.length !== entry.uncompressedSize) {
+      throw new Error(`ZIP final invalido: tamanho divergente: ${entry.name}`);
+    }
+    if ((crc32(data) >>> 0) !== entry.crc32) {
+      throw new Error(`ZIP final invalido: CRC divergente: ${entry.name}`);
+    }
+  }
+  for (const relative of expected) {
+    if (!archived.has(relative)) {
+      throw new Error(`ZIP omitiu arquivo do release: ${relative}`);
+    }
+  }
+  const expectedSet = new Set(expected);
+  for (const relative of archived) {
+    if (!expectedSet.has(relative)) {
+      throw new Error(`ZIP contem arquivo inesperado: ${relative}`);
+    }
+  }
+}
+
+function normalizeZipPath(name) {
+  return name.replaceAll('\\', '/');
+}
+
+function readZipCentralDirectory(zip) {
+  const eocdOffset = findZipEndOfCentralDirectory(zip);
+  const disk = zip.readUInt16LE(eocdOffset + 4);
+  const centralDisk = zip.readUInt16LE(eocdOffset + 6);
+  const diskEntries = zip.readUInt16LE(eocdOffset + 8);
+  const totalEntries = zip.readUInt16LE(eocdOffset + 10);
+  const centralSize = zip.readUInt32LE(eocdOffset + 12);
+  const centralOffset = zip.readUInt32LE(eocdOffset + 16);
+
+  if (disk !== 0 || centralDisk !== 0 || diskEntries !== totalEntries) {
+    throw new Error('ZIP multidisco nao suportado');
+  }
+  if (
+    totalEntries === 0xffff
+    || centralSize === 0xffffffff
+    || centralOffset === 0xffffffff
+  ) {
+    throw new Error('ZIP64 nao suportado');
+  }
+  if (centralOffset + centralSize !== eocdOffset) {
+    throw new Error('diretorio central incompleto');
+  }
+
+  const entries = [];
+  const names = new Set();
+  const localOffsets = new Set();
+  let cursor = centralOffset;
+  const centralEnd = centralOffset + centralSize;
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (cursor + 46 > centralEnd || zip.readUInt32LE(cursor) !== 0x02014b50) {
+      throw new Error('entrada invalida no diretorio central');
+    }
+    const flags = zip.readUInt16LE(cursor + 8);
+    const compressedSize = zip.readUInt32LE(cursor + 20);
+    const uncompressedSize = zip.readUInt32LE(cursor + 24);
+    const nameLength = zip.readUInt16LE(cursor + 28);
+    const extraLength = zip.readUInt16LE(cursor + 30);
+    const commentLength = zip.readUInt16LE(cursor + 32);
+    const entryDisk = zip.readUInt16LE(cursor + 34);
+    const localOffset = zip.readUInt32LE(cursor + 42);
+    const entryEnd = cursor + 46 + nameLength + extraLength + commentLength;
+    if (entryEnd > centralEnd) throw new Error('entrada central truncada');
+    if (entryDisk !== 0) throw new Error('entrada multidisco nao suportada');
+    if ((flags & 0x1) !== 0) throw new Error('entrada criptografada nao suportada');
+    if (
+      compressedSize === 0xffffffff
+      || uncompressedSize === 0xffffffff
+      || localOffset === 0xffffffff
+    ) {
+      throw new Error('entrada ZIP64 nao suportada');
+    }
+
+    const name = normalizeZipPath(
+      zip.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8'),
+    );
+    if (!name || names.has(name) || localOffsets.has(localOffset)) {
+      if (names.has(name)) throw new Error('ZIP contem caminhos duplicados');
+      throw new Error('entrada central invalida');
+    }
+    assertMatchingLocalZipEntry(zip, {
+      name,
+      localOffset,
+      compressedSize,
+      centralOffset,
+    });
+
+    names.add(name);
+    localOffsets.add(localOffset);
+    entries.push({
+      name,
+      crc32: zip.readUInt32LE(cursor + 16),
+      uncompressedSize,
+    });
+    cursor = entryEnd;
+  }
+  if (cursor !== centralEnd) throw new Error('diretorio central possui bytes residuais');
+  return entries;
+}
+
+function findZipEndOfCentralDirectory(zip) {
+  if (zip.length < 22) throw new Error('registro final ausente');
+  const firstCandidate = Math.max(0, zip.length - 22 - 0xffff);
+  for (let cursor = zip.length - 22; cursor >= firstCandidate; cursor -= 1) {
+    if (zip.readUInt32LE(cursor) !== 0x06054b50) continue;
+    const commentLength = zip.readUInt16LE(cursor + 20);
+    if (cursor + 22 + commentLength === zip.length) return cursor;
+  }
+  throw new Error('registro final ausente');
+}
+
+function assertMatchingLocalZipEntry(zip, {
+  name,
+  localOffset,
+  compressedSize,
+  centralOffset,
+}) {
+  if (
+    localOffset + 30 > centralOffset
+    || zip.readUInt32LE(localOffset) !== 0x04034b50
+  ) {
+    throw new Error('cabecalho local invalido');
+  }
+  const nameLength = zip.readUInt16LE(localOffset + 26);
+  const extraLength = zip.readUInt16LE(localOffset + 28);
+  const dataOffset = localOffset + 30 + nameLength + extraLength;
+  if (dataOffset + compressedSize > centralOffset) {
+    throw new Error('conteudo local truncado');
+  }
+  const localName = normalizeZipPath(
+    zip.subarray(localOffset + 30, localOffset + 30 + nameLength).toString('utf8'),
+  );
+  if (localName !== name) throw new Error('nome local diverge do diretorio central');
+}
+
+export function createDeterministicZip(releaseDir, zipPath) {
   const files = relativeFiles(releaseDir);
   if (files.length === 0) throw new Error('pacote do app esta vazio');
-
+  const archive = Object.create(null);
   for (const relative of files) {
-    utimesSync(path.join(releaseDir, relative), ZIP_EPOCH, ZIP_EPOCH);
+    archive[relative] = readFileSync(path.join(releaseDir, relative));
   }
 
   rmSync(zipPath, { force: true });
-  const portableZipPath = path.relative(releaseDir, zipPath).split(path.sep).join('/');
-  execFileSync('zip', ['-X', '-q', portableZipPath, '-@'], {
-    cwd: releaseDir,
-    input: `${files.join('\n')}\n`,
-    stdio: ['pipe', 'inherit', 'inherit'],
-  });
+  writeFileSync(zipPath, zipSync(archive, { level: 9, mtime: ZIP_EPOCH }));
+  assertZipContainsReleaseFiles(releaseDir, zipPath);
 }
 
 function redactDetail(value, secrets = []) {

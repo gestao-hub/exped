@@ -125,11 +125,8 @@ jobs:
         with:
           name: hub-stage-${{ needs.build.outputs.source_sha }}
           path: source
-      - name: Install pinned Info-ZIP
-        shell: powershell
-        run: choco install zip --version=3.0.0.20251001 --yes --no-progress --force
       - name: Stage release ZIP
-        shell: bash
+        shell: powershell
         working-directory: tooling
         env:
           PROJECT_REF: ${{ vars.HUB_STAGE_SUPABASE_PROJECT_REF }}
@@ -138,9 +135,8 @@ jobs:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
           SUPABASE_RELEASE_KEY: ${{ secrets.HUB_STAGE_SUPABASE_RELEASE_KEY }}
         run: |
-          export PATH="/usr/bin:$PATH"
-          command -v zip
-          node scripts/release-hub.mjs stage "$RELEASE_VERSION"
+          node scripts/release-hub.mjs stage $env:RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve approved release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

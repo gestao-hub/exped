@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync('.github/workflows/ci.yml', 'utf8').replace(/\r\n?/g, '\n');
+const installerWorkflow = readFileSync('.github/workflows/build-installer.yml', 'utf8')
+  .replace(/\r\n?/g, '\n');
 const dbScriptPath = 'scripts/test-supabase-local.sh';
 
 describe('CI do banco e supply chain', () => {
@@ -40,5 +42,14 @@ describe('CI do banco e supply chain', () => {
     );
     expect(workflow).toContain('shell: powershell');
     expect(workflow).toContain('$PSVersionTable.PSVersion.Major -ne 5');
+  });
+
+  it('testa o empacotador puro sem instalar compactador nativo', () => {
+    expect(workflow).not.toContain('Install pinned Info-ZIP');
+    expect(workflow).not.toContain('EXPED_ZIP_COMMAND');
+    expect(installerWorkflow).not.toContain('Install pinned Info-ZIP');
+    expect(installerWorkflow).not.toContain('EXPED_ZIP_COMMAND');
+    const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+    expect(packageJson.devDependencies?.fflate).toBe('0.8.3');
   });
 });

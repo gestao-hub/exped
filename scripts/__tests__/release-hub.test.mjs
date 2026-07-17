@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { unzipSync } from 'fflate';
 import {
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -792,6 +794,11 @@ describe('release-hub ZIP imutavel', () => {
 
       try {
         put('.next/standalone/server.js');
+        put(
+          '.next/standalone/.next/server/app-paths-manifest.json',
+          JSON.stringify({ '/page': 'app/page.js' }),
+        );
+        put('.next/standalone/.next/server/app/page.js');
         symlinkSync('server.js', path.join(root, '.next/standalone/linked.js'));
         put('.next/static/chunk.js');
         put('supabase/migrations/001.sql');
@@ -1393,6 +1400,240 @@ describe('release-hub promote via RPC canonica', () => {
 });
 
 describe('release-hub limite do pacote', () => {
+  it('recusa standalone sem manifesto das rotas compiladas', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-no-routes-manifest-'));
+    const put = (relative, content = relative) => {
+      const file = path.join(root, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    };
+
+    try {
+      put('.next/standalone/server.js');
+      put('.next/static/chunk.js');
+      put('supabase/migrations/001.sql');
+
+      expect(() => montarRelease('0.3.21', { root }))
+        .toThrow('app-paths-manifest.json ausente');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recusa manifesto de standalone sem nenhuma rota compilada', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-empty-routes-manifest-'));
+    const put = (relative, content = relative) => {
+      const file = path.join(root, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    };
+
+    try {
+      put('.next/standalone/server.js');
+      put('.next/standalone/.next/server/app-paths-manifest.json', '{}');
+      put('.next/static/chunk.js');
+      put('supabase/migrations/001.sql');
+
+      expect(() => montarRelease('0.3.21', { root }))
+        .toThrow('app-paths-manifest.json sem rotas');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recusa standalone com rota declarada e arquivo compilado ausente', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-missing-route-'));
+    const put = (relative, content = relative) => {
+      const file = path.join(root, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    };
+
+    try {
+      put('.next/standalone/server.js');
+      put(
+        '.next/standalone/.next/server/app-paths-manifest.json',
+        JSON.stringify({
+          '/(app)/vendas/[id]/page': 'app/(app)/vendas/[id]/page.js',
+        }),
+      );
+      put('.next/static/chunk.js');
+      put('supabase/migrations/001.sql');
+
+      expect(() => montarRelease('0.3.21', { root }))
+        .toThrow('rota compilada ausente: /(app)/vendas/[id]/page');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recusa ZIP final que omitiu arquivo auxiliar de uma rota dinamica', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-truncated-zip-'));
+    const releaseDir = path.join(root, 'release');
+    const archiveDir = path.join(root, 'archive');
+    const zipPath = path.join(root, 'broken.zip');
+    const put = (dir, relative, content = relative) => {
+      const file = path.join(dir, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    };
+
+    try {
+      put(
+        releaseDir,
+        '.next/server/app-paths-manifest.json',
+        JSON.stringify({
+          '/(app)/vendas/[id]/page': 'app/(app)/vendas/[id]/page.js',
+        }),
+      );
+      put(releaseDir, '.next/server/app/(app)/vendas/[id]/page.js');
+      put(releaseDir, '.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js');
+      cpSync(releaseDir, archiveDir, { recursive: true });
+      rmSync(
+        path.join(
+          archiveDir,
+          '.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js',
+        ),
+      );
+      releaseHub.createDeterministicZip(archiveDir, zipPath);
+
+      expect(() => releaseHub.assertZipContainsReleaseFiles(releaseDir, zipPath))
+        .toThrow(
+          'ZIP omitiu arquivo do release: '
+          + '.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js',
+        );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('empacota rota dinamica e seus auxiliares como paths literais', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-complete-zip-'));
+    const releaseDir = path.join(root, 'release');
+    const zipPath = path.join(root, 'complete.zip');
+    const put = (relative, content = relative) => {
+      const file = path.join(releaseDir, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    };
+
+    try {
+      put(
+        '.next/server/app-paths-manifest.json',
+        JSON.stringify({
+          '/(app)/vendas/[id]/page': 'app/(app)/vendas/[id]/page.js',
+        }),
+      );
+      put('.next/server/app/(app)/vendas/[id]/page.js');
+      put('.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js');
+
+      releaseHub.createDeterministicZip(releaseDir, zipPath);
+
+      const entries = Object.keys(unzipSync(readFileSync(zipPath)));
+      expect(entries).toContain('.next/server/app/(app)/vendas/[id]/page.js');
+      expect(entries).toContain('.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('gera ZIP identico para arvores criadas em ordens diferentes', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-order-'));
+    const firstDir = path.join(root, 'first');
+    const secondDir = path.join(root, 'second');
+    const firstZip = path.join(root, 'first.zip');
+    const secondZip = path.join(root, 'second.zip');
+    const files = [
+      '.next/server/app/(app)/vendas/[id]/page.js',
+      '.next/server/app/(app)/vendas/[id]/page_client-reference-manifest.js',
+      '.next/server/app-paths-manifest.json',
+      'public/franzoni.png',
+    ];
+    const put = (dir, relative) => {
+      const file = path.join(dir, relative);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, relative);
+    };
+
+    try {
+      files.forEach((relative) => put(firstDir, relative));
+      [...files].reverse().forEach((relative) => put(secondDir, relative));
+
+      releaseHub.createDeterministicZip(firstDir, firstZip);
+      releaseHub.createDeterministicZip(secondDir, secondZip);
+
+      expect(readFileSync(secondZip)).toEqual(readFileSync(firstZip));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('nao depende de compactador nativo para gerar o ZIP', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-pure-zip-'));
+    const releaseDir = path.join(root, 'release');
+    const zipPath = path.join(root, 'release.zip');
+    const previousCommand = process.env.EXPED_ZIP_COMMAND;
+
+    try {
+      mkdirSync(releaseDir, { recursive: true });
+      writeFileSync(path.join(releaseDir, 'server.js'), 'server');
+      process.env.EXPED_ZIP_COMMAND = path.join(root, 'compactador-inexistente.exe');
+
+      expect(() => releaseHub.createDeterministicZip(releaseDir, zipPath)).not.toThrow();
+      expect(Object.keys(unzipSync(readFileSync(zipPath)))).toEqual(['server.js']);
+    } finally {
+      if (previousCommand === undefined) delete process.env.EXPED_ZIP_COMMAND;
+      else process.env.EXPED_ZIP_COMMAND = previousCommand;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recusa ZIP truncado sem diretorio central completo', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-truncated-eocd-'));
+    const releaseDir = path.join(root, 'release');
+    const zipPath = path.join(root, 'release.zip');
+
+    try {
+      mkdirSync(releaseDir, { recursive: true });
+      writeFileSync(path.join(releaseDir, 'server.js'), 'server');
+      releaseHub.createDeterministicZip(releaseDir, zipPath);
+      const valid = readFileSync(zipPath);
+      writeFileSync(zipPath, valid.subarray(0, valid.length - 22));
+
+      expect(() => releaseHub.assertZipContainsReleaseFiles(releaseDir, zipPath))
+        .toThrow('ZIP final invalido');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('recusa entrada duplicada no diretorio central', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'exped-release-duplicate-central-'));
+    const releaseDir = path.join(root, 'release');
+    const zipPath = path.join(root, 'release.zip');
+
+    try {
+      mkdirSync(releaseDir, { recursive: true });
+      writeFileSync(path.join(releaseDir, 'server.js'), 'server');
+      releaseHub.createDeterministicZip(releaseDir, zipPath);
+      const valid = readFileSync(zipPath);
+      const eocdOffset = valid.length - 22;
+      const centralSize = valid.readUInt32LE(eocdOffset + 12);
+      const centralOffset = valid.readUInt32LE(eocdOffset + 16);
+      const duplicate = valid.subarray(centralOffset, centralOffset + centralSize);
+      const eocd = Buffer.from(valid.subarray(eocdOffset));
+      eocd.writeUInt16LE(2, 8);
+      eocd.writeUInt16LE(2, 10);
+      eocd.writeUInt32LE(centralSize * 2, 12);
+      writeFileSync(zipPath, Buffer.concat([valid.subarray(0, eocdOffset), duplicate, eocd]));
+
+      expect(() => releaseHub.assertZipContainsReleaseFiles(releaseDir, zipPath))
+        .toThrow('ZIP contem caminhos duplicados');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === 'win32')(
     'copia somente standalone, static, public e migrations preservando symlinks relativos',
     () => {
@@ -1405,6 +1646,11 @@ describe('release-hub limite do pacote', () => {
 
       try {
         put('.next/standalone/server.js');
+        put(
+          '.next/standalone/.next/server/app-paths-manifest.json',
+          JSON.stringify({ '/page': 'app/page.js' }),
+        );
+        put('.next/standalone/.next/server/app/page.js');
         put('.next/static/chunk.js');
         put('public/logo.png');
         put('supabase/migrations/001.sql');
@@ -1451,6 +1697,11 @@ describe('release-hub limite do pacote', () => {
 
     try {
       put('.next/standalone/server.js');
+      put(
+        '.next/standalone/.next/server/app-paths-manifest.json',
+        JSON.stringify({ '/page': 'app/page.js' }),
+      );
+      put('.next/standalone/.next/server/app/page.js');
       put('.next/static/chunk.js');
       put('supabase/migrations/001.sql');
       put('private.txt', 'nao deve entrar');
@@ -1504,16 +1755,18 @@ describe('workflows de release', () => {
     expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
     expect(workflow).toContain('actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093');
     expect(workflow).toContain("node-version: '24.18.0'");
+    expect(buildSection).not.toContain('Install pinned Info-ZIP');
+    expect(buildSection).not.toContain('EXPED_ZIP_COMMAND');
     expect(workflow).not.toMatch(/uses:\s+actions\/[^@\s]+@v\d/);
-    expect(workflow).toContain('node scripts/release-hub.mjs stage "$RELEASE_VERSION"');
+    expect(workflow).toContain('node scripts/release-hub.mjs stage $env:RELEASE_VERSION');
     expect(workflow).not.toContain('node scripts/release-hub.mjs promote');
     expect(workflow).not.toMatch(/SERVICE_ROLE|\bSR:/);
+    expect(stageSection).not.toContain('Install pinned Info-ZIP');
+    expect(stageSection).not.toContain('EXPED_ZIP_COMMAND');
     expect(workflow).toMatch(
-      /name: Install pinned Info-ZIP[\s\S]*choco install zip --version=3\.0\.0\.20251001 --yes --no-progress/,
+      /name: Stage release ZIP[\s\S]*shell: powershell[\s\S]*node scripts\/release-hub\.mjs stage \$env:RELEASE_VERSION/,
     );
-    expect(workflow).toMatch(
-      /name: Stage release ZIP[\s\S]*shell: bash[\s\S]*export PATH="\/usr\/bin:\$PATH"[\s\S]*command -v zip/,
-    );
+    expect(workflow).not.toContain('export PATH="/usr/bin:$PATH"');
   });
 
   it('promocao usa tooling da branch default e flag explicita de rollback', () => {
